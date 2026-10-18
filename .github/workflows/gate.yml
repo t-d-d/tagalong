@@ -1,0 +1,24 @@
+# One command, the same here as on a laptop (repo-and-delivery.md).
+name: gate
+
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      # The flag repeats .npmrc, which an older commit, such as live-ok, may
+      # not have.
+      - run: npm ci --ignore-scripts
+      - run: npm run gate

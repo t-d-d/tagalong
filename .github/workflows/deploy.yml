@@ -1,0 +1,140 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    uses: ./.github/workflows/gate.yml
+
+  deploy:
+    needs: gate
+    # The task is arm64, so its images are built natively here.
+    runs-on: ubuntu-24.04-arm
+    # No GitHub environment: the role trusts only the subject for main, and a
+    # job that names an environment is given a different one.
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      stack: ${{ steps.stack.outputs.stack }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Check the tools the deploy uses
+        run: aws --version && docker --version
+      - name: Apply the deploy role's stack
+        run: scripts/deploy.sh role
+        env:
+          GITHUB_REPOSITORY_OWNER_ID: ${{ github.repository_owner_id }}
+          GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+      # From here a failure may have changed what is live, so it rolls back
+      # to live-ok. A failed job still passes on the outputs its steps set.
+      - name: Record that the stack deploy has started
+        id: stack
+        run: echo "stack=started" >> "$GITHUB_OUTPUT"
+      - name: Build the images and deploy the stack
+        run: scripts/deploy.sh app
+      - name: Wait for the new task's heartbeat
+        run: scripts/deploy.sh live
+
+  # live-ok names the last commit that passed its live check (repo-and-delivery.md).
+  mark-live-ok:
+    needs: deploy
+    # A re-run after a rollback checks the build the rollback put back, not
+    # this run's commit, so only the first attempt moves the tag.
+    if: ${{ success() && github.run_attempt == '1' }}
+    runs-on: ubuntu-24.04
+    # A tag left behind only means a rollback goes one build further back.
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - name: Move live-ok to the deployed commit
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/live-ok" --silent; then
+            gh api --method PATCH \
+              "repos/$GITHUB_REPOSITORY/git/refs/tags/live-ok" \
+              -f sha="$GITHUB_SHA" -F force=true --silent
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref=refs/tags/live-ok -f sha="$GITHUB_SHA" --silent
+          fi
+          echo "live-ok now names $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # The deploy failed once its stack deploy had started, or its live check
+  # failed, so put back the last build that passed. A failure before the
+  # stack deploy changed nothing live, and a cancelled run starts no
+  # rollback. The run still ends failed, and the owner reverts the pull
+  # request.
+  find-live-ok:
+    needs: deploy
+    if: ${{ !cancelled() && needs.deploy.result == 'failure' && needs.deploy.outputs.stack == 'started' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.tag.outputs.sha }}
+    steps:
+      - name: Find the last build that passed its live check
+        id: tag
+        run: |
+          # mark-live-ok makes a lightweight tag, so it names the commit itself.
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/live-ok" \
+            --jq '.[] | select(.ref == "refs/tags/live-ok" and .object.type == "commit") | .object.sha')
+          if [ -z "$sha" ]; then
+            echo "The deploy failed and there is no live-ok tag, so nothing is rolled back." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "The deploy failed. Redeploying live-ok, commit $sha." >> "$GITHUB_STEP_SUMMARY"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # The deploy's steps at live-ok, without the role's stack: an older
+  # template must not undo a change to the role.
+  rollback:
+    needs: find-live-ok
+    if: ${{ !cancelled() && needs.find-live-ok.outputs.sha != '' }}
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.find-live-ok.outputs.sha }}
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      # CloudFormation takes no update while the stack is changing. A stack
+      # stuck in a failed undo needs the owner.
+      - name: Let the stack settle
+        run: |
+          status() {
+            aws cloudformation describe-stacks --stack-name tagalong-app \
+              --query "Stacks[0].StackStatus" --output text
+          }
+          while [[ "$(status)" == *_IN_PROGRESS ]]; do sleep 30; done
+          if [ "$(status)" = UPDATE_ROLLBACK_FAILED ]; then
+            echo "tagalong-app is UPDATE_ROLLBACK_FAILED and needs the owner." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+      - name: Deploy live-ok
+        run: scripts/deploy.sh app
+      - name: Wait for its heartbeat
+        run: scripts/deploy.sh live

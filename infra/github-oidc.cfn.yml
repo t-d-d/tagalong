@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  tagalong bootstrap: the GitHub Actions OIDC provider and the role a push to
+  main assumes to deploy. Stack tagalong, in us-east-1.
+
+# Applied once by hand, since nothing can assume a role that does not exist
+# yet. The deploy job applies it on every green merge to main.
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    Default: t-d-d
+    Description: The repo's owner, by name.
+
+  GitHubOwnerId:
+    Type: String
+    AllowedPattern: "[0-9]+"
+    Description: The repo owner's numeric id, github.repository_owner_id on any run.
+
+  GitHubRepo:
+    Type: String
+    Default: tagalong
+    Description: The repo's name, without the owner.
+
+  GitHubRepoId:
+    Type: String
+    AllowedPattern: "[0-9]+"
+    Description: The repo's numeric id, github.repository_id on any run.
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # IAM checks GitHub's certificate against its own trusted roots and
+      # ignores this value, but the API still accepts one.
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: tagalong-github-deploy
+      Description: Assumed by GitHub Actions on a push to main, to deploy tagalong
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !GetAtt GitHubOidcProvider.Arn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                # GitHub names the owner and repo by id as well as by name for
+                # a repo created after 15 July 2026, so a new repo that takes
+                # either name cannot assume this role. A job that names a
+                # GitHub environment gets another subject, so the deploy job
+                # sets none.
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepo}@${GitHubRepoId}:ref:refs/heads/main"
+      # The account holds tagalong alone. A policy scoped to tagalong would not
+      # hold: the role must create roles for its task, and a role that
+      # can do that can make itself an administrator. A Deny list fails the
+      # same way. The trust above, the owner's merges and the gate guard it.
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess"
+
+Outputs:
+  DeployRoleArn:
+    Description: The value of the repo variable AWS_DEPLOY_ROLE_ARN
+    Value: !GetAtt DeployRole.Arn

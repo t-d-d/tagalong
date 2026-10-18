@@ -1,0 +1,8 @@
+# Only what the images copy. Tests stay out.
+*
+!package.json
+!package-lock.json
+!service/
+service/**/*.test.ts
+service/**/*.int.ts
+!images/bridge-start.sh

@@ -1,0 +1,35 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  tagalong images: the two ECR repositories the task's images live in
+  (repo-and-delivery.md). Stack tagalong-images, in us-east-1, applied by
+  scripts/deploy.sh before the images are pushed.
+
+Resources:
+  BridgeRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: tagalong/bridge
+      # A tag is a hash of the image's files, so it never moves.
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep the last 10","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}
+
+  AppRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: tagalong/app
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep the last 10","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}
+
+Outputs:
+  BridgeRepositoryUri:
+    Value: !GetAtt BridgeRepository.RepositoryUri
+  AppRepositoryUri:
+    Value: !GetAtt AppRepository.RepositoryUri

@@ -1,0 +1,84 @@
+// The whatsapp-mcp bridge's REST API, on loopback. It records what it is
+// asked to send and react, and downloads media into the store the way the
+// bridge does, answering with the file's absolute path.
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { z } from "zod";
+import { type Served, serve } from "./serve.ts";
+
+export const BRIDGE_TOKEN = "bridge-token-for-tests";
+
+const sendSchema = z.object({
+  recipient: z.string(),
+  message: z.string(),
+  quoted_message_id: z.string().optional(),
+});
+const reactSchema = z.object({
+  recipient: z.string(),
+  message_id: z.string(),
+  emoji: z.string(),
+});
+const downloadSchema = z.object({
+  message_id: z.string(),
+  chat_jid: z.string(),
+});
+
+export interface FakeBridge {
+  url: string;
+  served: Served;
+  sent: z.infer<typeof sendSchema>[];
+  reactions: z.infer<typeof reactSchema>[];
+  connected: boolean;
+  /** Media the bridge can download, by message id. */
+  media: Map<string, { filename: string; bytes: Buffer }>;
+  close(): Promise<void>;
+}
+
+export async function fakeBridge(store: string): Promise<FakeBridge> {
+  const sent: FakeBridge["sent"] = [];
+  const reactions: FakeBridge["reactions"] = [];
+  const media: FakeBridge["media"] = new Map();
+  const state = { connected: true };
+  const served = await serve((request) => {
+    if (request.headers.authorization !== `Bearer ${BRIDGE_TOKEN}`)
+      return { status: 401, body: { success: false } };
+    switch (request.path) {
+      case "/api/health":
+        return state.connected
+          ? { body: { status: "ok", connected: true } }
+          : { status: 503, body: { status: "disconnected", connected: false } };
+      case "/api/send":
+        sent.push(sendSchema.parse(request.body));
+        return { body: { success: true } };
+      case "/api/react":
+        reactions.push(reactSchema.parse(request.body));
+        return { body: { success: true } };
+      case "/api/download": {
+        const { message_id: id } = downloadSchema.parse(request.body);
+        const file = media.get(id);
+        if (file === undefined) return { body: { success: false } };
+        const dir = join(store, "media");
+        mkdirSync(dir, { recursive: true });
+        const path = join(dir, file.filename);
+        writeFileSync(path, file.bytes);
+        return { body: { success: true, filename: file.filename, path } };
+      }
+      default:
+        return { status: 404 };
+    }
+  });
+  return {
+    url: `${served.url}/api`,
+    served,
+    sent,
+    reactions,
+    get connected() {
+      return state.connected;
+    },
+    set connected(value: boolean) {
+      state.connected = value;
+    },
+    media,
+    close: () => served.close(),
+  };
+}

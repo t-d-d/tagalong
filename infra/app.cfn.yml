@@ -1,0 +1,454 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  tagalong: one always-on Fargate Spot task holding the WhatsApp bridge and
+  tagalong, its volume, its bucket and its alarms (hosting.md). Stack
+  tagalong-app, in us-east-1, applied by scripts/deploy.sh.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The account's default VPC.
+  SubnetA:
+    Type: AWS::EC2::Subnet::Id
+    Description: A default subnet. The volume has a mount target in each.
+  SubnetB:
+    Type: AWS::EC2::Subnet::Id
+    Description: A default subnet in another zone.
+  BridgeImage:
+    Type: String
+    AllowedPattern: "[0-9]+\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/tagalong/bridge:[0-9a-f]{64}"
+    Description: The bridge's image, tagged with the hash of its files.
+  AppImage:
+    Type: String
+    AllowedPattern: "[0-9]+\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/tagalong/app:[0-9a-f]{64}"
+    Description: tagalong's image, tagged with the hash of its files.
+  AlertEmail:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /tagalong/alerts/email
+  MonthlySpend:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /tagalong/alerts/monthly-spend
+
+Resources:
+  # ------------------------------------------------------------ alerts
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: tagalong-alerts
+
+  AlertSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      TopicArn: !Ref AlertTopic
+      Endpoint: !Ref AlertEmail
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /tagalong
+      RetentionInDays: 30
+
+  # Every error-level line (alerting.md). Only tagalong writes JSON lines.
+  ErrorLines:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroup
+      FilterName: error-lines
+      FilterPattern: '{ $.level = "error" }'
+      MetricTransformations:
+        - MetricNamespace: tagalong
+          MetricName: ErrorLines
+          MetricValue: "1"
+          DefaultValue: 0
+
+  ErrorLinesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tagalong-error-lines
+      AlarmDescription: >-
+        tagalong wrote an error line. Open Logs Insights on /tagalong and
+        filter on level = "error".
+      Namespace: tagalong
+      MetricName: ErrorLines
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+
+  # A heartbeat whose bridge is connected, every five minutes (alerting.md).
+  ConnectedHeartbeats:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroup
+      FilterName: connected-heartbeats
+      FilterPattern: '{ $.event = "heartbeat" && $.bridge = "connected" }'
+      MetricTransformations:
+        - MetricNamespace: tagalong
+          MetricName: ConnectedHeartbeats
+          MetricValue: "1"
+
+  NoHeartbeatAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tagalong-no-heartbeat
+      AlarmDescription: >-
+        No heartbeat with the bridge connected for 15 minutes: the task is
+        down, the bridge cannot reach WhatsApp, or the device was logged
+        out. Read the heartbeat's bridge field in /tagalong.
+      Namespace: tagalong
+      MetricName: ConnectedHeartbeats
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+
+  # The account holds tagalong alone, so its bill is tagalong's. AWS
+  # publishes it about every six hours, and only in us-east-1.
+  SpendAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tagalong-spend
+      AlarmDescription: >-
+        This month's AWS bill has passed the set amount. Open Cost Explorer.
+      Namespace: AWS/Billing
+      MetricName: EstimatedCharges
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      Statistic: Maximum
+      Period: 21600
+      EvaluationPeriods: 1
+      Threshold: !Ref MonthlySpend
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: ignore
+      AlarmActions:
+        - !Ref AlertTopic
+
+  # ------------------------------------------------------------ files
+
+  # Attachments and the device seed. Nothing in it lives past a day
+  # (attachments.md, one-device.md).
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "tagalong-files-${AWS::AccountId}"
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-after-a-day
+            Status: Enabled
+            ExpirationInDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TlsOnly
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt Bucket.Arn
+              - !Sub "${Bucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  # ------------------------------------------------------------ the volume
+
+  # The device, groups.json, state.json, the login's working copy and the
+  # workspaces. Kept when the stack goes (hosting.md).
+  FileSystem:
+    Type: AWS::EFS::FileSystem
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Encrypted: true
+      PerformanceMode: generalPurpose
+      ThroughputMode: elastic
+      BackupPolicy:
+        Status: ENABLED
+      FileSystemTags:
+        - Key: Name
+          Value: tagalong
+      FileSystemPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TlsOnly
+            Effect: Deny
+            Principal:
+              AWS: "*"
+            Action: "*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: TaskOnly
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt TaskRole.Arn
+            Action:
+              - elasticfilesystem:ClientMount
+              - elasticfilesystem:ClientWrite
+            Condition:
+              Bool:
+                elasticfilesystem:AccessedViaMountTarget: "true"
+
+  AccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref FileSystem
+      PosixUser:
+        Uid: "1000"
+        Gid: "1000"
+      RootDirectory:
+        Path: /tagalong
+        CreationInfo:
+          OwnerUid: "1000"
+          OwnerGid: "1000"
+          Permissions: "0750"
+
+  VolumeSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: tagalong volume, NFS from the task only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref TaskSecurityGroup
+
+  MountTargetA:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Ref SubnetA
+      SecurityGroups:
+        - !Ref VolumeSecurityGroup
+
+  MountTargetB:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Ref SubnetB
+      SecurityGroups:
+        - !Ref VolumeSecurityGroup
+
+  # ------------------------------------------------------------ the task
+
+  # Outbound only: the bridge's API and the webhook stay on 127.0.0.1.
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: tagalong task, no inbound traffic
+      VpcId: !Ref VpcId
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      Policies:
+        - PolicyName: owners
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameters
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/tagalong/owners"
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: tagalong
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # The Claude login, read at start and written after each
+              # refresh (claude-login.md).
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:PutParameter
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/tagalong/claude-login"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub "${Bucket.Arn}/attachments/*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:DeleteObject
+                Resource: !Sub "${Bucket.Arn}/seed/*"
+              # ECS Exec, for the operator's commands (docs/setup.md).
+              - Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: tagalong
+      CapacityProviders:
+        - FARGATE_SPOT
+        - FARGATE
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: tagalong
+      Cpu: "256"
+      Memory: "1024"
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      Volumes:
+        - Name: data
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref FileSystem
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !Ref AccessPoint
+              IAM: ENABLED
+      ContainerDefinitions:
+        - Name: bridge
+          Image: !Ref BridgeImage
+          Essential: true
+          StopTimeout: 20
+          Environment:
+            - Name: WEBHOOK_URL
+              Value: http://127.0.0.1:8769/whatsapp/webhook
+          MountPoints:
+            - SourceVolume: data
+              ContainerPath: /data
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: bridge
+        - Name: app
+          Image: !Ref AppImage
+          Essential: true
+          StopTimeout: 20
+          Environment:
+            - Name: HOME
+              Value: /data/home
+            - Name: LOGIN_PARAMETER
+              Value: /tagalong/claude-login
+            - Name: ATTACHMENTS_BUCKET
+              Value: !Ref Bucket
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+          Secrets:
+            # Phone numbers: read at start, never in the task definition.
+            - Name: OWNERS
+              ValueFrom: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/tagalong/owners"
+          MountPoints:
+            - SourceVolume: data
+              ContainerPath: /data
+          LinuxParameters:
+            InitProcessEnabled: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: app
+
+  # Exactly one task, and never two at once (one-device.md).
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - MountTargetA
+      - MountTargetB
+    Properties:
+      ServiceName: tagalong
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      CapacityProviderStrategy:
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 1
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      EnableExecuteCommand: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref SubnetA
+            - !Ref SubnetB
+          SecurityGroups:
+            - !Ref TaskSecurityGroup
+
+Outputs:
+  ClusterName:
+    Value: !Ref Cluster
+  ServiceName:
+    Value: !GetAtt Service.Name
+  TaskDefinitionArn:
+    Value: !Ref TaskDefinition
+  BucketName:
+    Value: !Ref Bucket
+  LogGroupName:
+    Value: !Ref LogGroup
+  FileSystemId:
+    Value: !Ref FileSystem

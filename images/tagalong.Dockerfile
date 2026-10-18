@@ -1,0 +1,32 @@
+# tagalong: the service, the launcher and the Claude Code CLI it starts
+# sessions with (cloud-sessions.md). Built natively on the arm64 runner by
+# scripts/deploy.sh, for the tagalong container in infra/app.cfn.yml. Node
+# runs the TypeScript source; there is no build step (types-and-lint.md).
+#
+# What it carries, and why each:
+#   - python3: service/launch.py gives `claude --cloud` the terminal it needs.
+#   - git: a session's workspace is a bare repo whose origin names the repo.
+#   - tar: the device arrives as a tarball (one-device.md).
+#   - the CLI, pinned, with its updater off: the launcher reads its output.
+
+FROM public.ecr.aws/docker/library/node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 git ca-certificates tar \
+  && rm -rf /var/lib/apt/lists/*
+
+# The CLI's own install fetches its platform binary, so this one runs scripts.
+RUN npm install -g @anthropic-ai/claude-code@2.1.302
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+COPY service/ ./service/
+
+# The node user is uid 1000, as the volume's access point makes every file.
+USER node
+ENV HOME=/data/home \
+  NODE_ENV=production \
+  DISABLE_AUTOUPDATER=1
+
+CMD ["node", "--no-warnings=ExperimentalWarning", "service/src/main.ts"]
