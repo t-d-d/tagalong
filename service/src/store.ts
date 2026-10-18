@@ -36,6 +36,7 @@ const messageSchema = z
   }));
 
 const deviceSchema = z.object({ jid: z.string(), lid: z.string().nullable() });
+const idSchema = z.object({ id: z.string() });
 const contactSchema = z.object({
   their_jid: z.string(),
   first_name: z.string().nullable(),
@@ -144,6 +145,16 @@ export class WhatsAppStore {
       .prepare(`SELECT ${COLUMNS} FROM messages WHERE chat_jid = ? AND id = ?`)
       .get(chat, id);
     return row === undefined ? undefined : messageSchema.parse(row);
+  }
+
+  /** The id of the latest message the device sent in `chat` with exactly `text`. */
+  sentId(chat: string, text: string): string | undefined {
+    const row = this.#db("messages")
+      .prepare(
+        "SELECT id FROM messages WHERE chat_jid = ? AND is_from_me = 1 AND content = ? ORDER BY datetime(timestamp) DESC LIMIT 1",
+      )
+      .get(chat, text);
+    return row === undefined ? undefined : idSchema.parse(row).id;
   }
 
   /** The chat's latest messages, oldest first, reactions and deleted ones left out. */

@@ -5,11 +5,12 @@ import type { Bridge } from "./bridge.ts";
 import type { ClaudeApi } from "./claude-api.ts";
 import type { Cloud } from "./cloud.ts";
 import type { Env } from "./env.ts";
-import { lastSession, oneLine } from "./format.ts";
+import { oneLine } from "./format.ts";
 import type { Group, GroupsStore } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
 import type { People } from "./people.ts";
 import { firstPrompt, followUp, transcript } from "./prompts.ts";
+import { sessionFor } from "./replies.ts";
 import type { Serial } from "./run.ts";
 import type { StateStore } from "./state.ts";
 import type { WhatsAppStore } from "./store.ts";
@@ -40,7 +41,7 @@ export function sessionOf(
   const quoted =
     payload.quotedContent ??
     deps.store.message(payload.chatJID, payload.quotedMessageId)?.content;
-  const id = lastSession(quoted);
+  const id = sessionFor(deps.state.state, payload.quotedMessageId, quoted);
   return id !== null && deps.state.state.sessions[id]?.chat === payload.chatJID
     ? id
     : null;

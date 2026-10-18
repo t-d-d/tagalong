@@ -26,6 +26,8 @@ export function toWhatsApp(markdown: string): string {
   let text = markdown
     .replace(/<!--[\s\S]*?-->/gu, "")
     .replace(/^\s*Signing off\.\s*$/gmu, "")
+    // A line ending in the session's link: the session's own sign-off.
+    .replace(/^.*\bclaude\.ai\/code\/session_\w+\)?\s*$/gmu, "")
     .replace(/^(\s*)[*+] /gmu, "$1- ")
     .replace(/^#{1,6}\s+(.+)$/gmu, "*$1*")
     .replace(/\*\*(.+?)\*\*/gu, "*$1*")

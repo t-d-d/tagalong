@@ -50,6 +50,17 @@ describe("toWhatsApp", () => {
     );
   });
 
+  it("drops a line that ends in a session's link", () => {
+    expect(
+      toWhatsApp(
+        "Fixed.\n\n↗ claude.ai/code/session_01AbCdEfGh\n[session](https://claude.ai/code/session_01AbCdEfGh)",
+      ),
+    ).toBe("Fixed.");
+    expect(toWhatsApp("See claude.ai/code/session_01AbCdEfGh for more")).toBe(
+      "See claude.ai/code/session_01AbCdEfGh for more",
+    );
+  });
+
   it("cuts a long answer and says where the rest is", () => {
     const text = toWhatsApp("x".repeat(5000));
     expect(text.length).toBeLessThan(3600);

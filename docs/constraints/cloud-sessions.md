@@ -19,14 +19,18 @@ result, so nothing has to be scraped or posted back by the session.
 - service/launch.py runs claude --cloud in a pseudo-terminal with the
   group's permission mode, ref, model and a session name, and returns
   once the CLI prints "Resume with:".
-- A reply to Claude's message carries on the session linked in it, with
-  claude -p --cloud session_<id>. A session that is archived or gone is
-  replaced by a new one.
+- A reply to Claude's answer carries on the session it came from, with
+  claude -p --cloud session_<id>. Each answer is remembered by the id
+  the bridge stored it under and by a hash of its text; an older answer
+  with a session link in it still works. A session that is archived or
+  gone is replaced by a new one.
 - Answers are read from /v1/code/sessions/cse_<id>/events, after the
   last sequence number read. A result event ends a turn; its text is
-  posted as a reply to the request, with the session's link.
-- A session waiting for an approval is mentioned once. A turn with no
-  answer after GIVE_UP_MS is given up on, with the link.
+  posted as a reply to the request, without the session's link, and a
+  line the session ended with its own link is dropped.
+- A session waiting for an approval is mentioned once, with its link,
+  the one place to approve it. A turn with no answer after GIVE_UP_MS
+  is given up on.
 - Those endpoints are not documented, so every answer goes through a
   schema, and the CLI's version is pinned in the image.
 - Environments are named by their names from /v1/environment_providers,
@@ -37,6 +41,8 @@ result, so nothing has to be scraped or posted back by the session.
 - Run Claude Code locally in the task: the work belongs in the cloud
   environment, with its own repo access and limits.
 - Ask the session to post to WhatsApp itself: it has no device.
+- Put the session's link on answers: the group does not want it, and a
+  reply finds its session without it.
 - Let the CLI update itself: an update can change what the launcher
   reads.
 - Trust the workspaces folder and expect its workspaces to inherit it.

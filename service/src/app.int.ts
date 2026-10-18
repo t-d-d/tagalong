@@ -143,7 +143,7 @@ describe("a request in a group that is set up", () => {
     expect(t.bridge.sent).toEqual([
       {
         recipient: GROUP,
-        message: `The *build* fails on lint.\n\n↗ claude.ai/code/session_${SESSION}`,
+        message: "The *build* fails on lint.",
         quoted_message_id: "r1",
       },
     ]);
@@ -184,8 +184,8 @@ describe("a request in a group that is set up", () => {
 
     await says(t, "r2", MEMBER, "can you fix it?", {
       quotedIsFromMe: true,
-      quotedMessageId: "a1",
-      quotedContent: `It fails on lint.\n\n↗ claude.ai/code/session_${SESSION}`,
+      quotedMessageId: "sent-1",
+      quotedContent: "It fails on lint.",
     });
     const followUp = t.fake.calls.find(
       (call) => call.command === t.env.CLAUDE_BIN,
@@ -208,6 +208,46 @@ describe("a request in a group that is set up", () => {
     expect(t.bridge.sent.at(-1)?.quoted_message_id).toBe("r2");
   });
 
+  it("finds the session from the quoted text when the id is not stored", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("It fails on lint.")]);
+    await says(t, "r1", MEMBER, "@claude why is the build red?");
+    await t.app.pollOnce();
+    await says(t, "r2", MEMBER, "and now?", {
+      quotedIsFromMe: true,
+      quotedMessageId: "unknown",
+      quotedContent: "It fails on lint.",
+    });
+    expect(eventsOf(t.lines)).toContain("session-followup");
+  });
+
+  it("still follows a link in an older answer", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("Old.")]);
+    await says(t, "r1", MEMBER, "@claude hi");
+    await t.app.pollOnce();
+    await says(t, "r2", MEMBER, "and now?", {
+      quotedIsFromMe: true,
+      quotedContent: `Old answer.\n\n↗ claude.ai/code/session_${SESSION}`,
+    });
+    expect(eventsOf(t.lines)).toContain("session-followup");
+  });
+
+  it("posts an answer without the session's link, even one the session wrote", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [
+      result(`Fixed in #12.\n\n↗ claude.ai/code/session_${SESSION}`),
+    ]);
+    await says(t, "r1", MEMBER, "@claude fix it");
+    await t.app.pollOnce();
+    expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
+      "Fixed in #12.",
+    ]);
+  });
+
   it("starts a fresh session when the one replied to is archived", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION, SECOND);
@@ -218,7 +258,8 @@ describe("a request in a group that is set up", () => {
     t.fake.followUps.set(SESSION, "archived");
     await says(t, "r2", MEMBER, "and the docs?", {
       quotedIsFromMe: true,
-      quotedContent: `Done.\n\n↗ claude.ai/code/session_${SESSION}`,
+      quotedMessageId: "sent-1",
+      quotedContent: "Done.",
     });
     expect(eventsOf(t.lines)).toEqual(
       expect.arrayContaining(["session-gone", "session-started"]),
@@ -498,6 +539,7 @@ describe("waiting on a session", () => {
     expect(t.bridge.sent.at(-1)?.message).toMatch(
       /^No reply from Claude after 120 minutes/u,
     );
+    expect(t.bridge.sent.at(-1)?.message).not.toContain("claude.ai");
     await t.app.pollOnce();
     expect(t.bridge.sent).toHaveLength(2);
   });

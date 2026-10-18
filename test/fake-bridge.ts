@@ -34,7 +34,13 @@ export interface FakeBridge {
   close(): Promise<void>;
 }
 
-export async function fakeBridge(store: string): Promise<FakeBridge> {
+/** Each message sent, stored the way the bridge stores its own; returns the id it got. */
+export type OnSend = (sent: { recipient: string; message: string }) => string;
+
+export async function fakeBridge(
+  store: string,
+  onSend: OnSend = () => "",
+): Promise<FakeBridge> {
   const sent: FakeBridge["sent"] = [];
   const reactions: FakeBridge["reactions"] = [];
   const media: FakeBridge["media"] = new Map();
@@ -47,9 +53,12 @@ export async function fakeBridge(store: string): Promise<FakeBridge> {
         return state.connected
           ? { body: { status: "ok", connected: true } }
           : { status: 503, body: { status: "disconnected", connected: false } };
-      case "/api/send":
-        sent.push(sendSchema.parse(request.body));
-        return { body: { success: true } };
+      case "/api/send": {
+        const message = sendSchema.parse(request.body);
+        sent.push(message);
+        onSend(message);
+        return { body: { success: true, message: "Message sent" } };
+      }
       case "/api/react":
         reactions.push(reactSchema.parse(request.body));
         return { body: { success: true } };

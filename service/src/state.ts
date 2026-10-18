@@ -26,6 +26,8 @@ const stateSchema = z.object({
   sessions: z.record(z.string(), sessionSchema).default({}),
   // Media already given to a session, so the same photo is not sent twice.
   sentMedia: z.array(z.string()).default([]),
+  // Which session each answer came from, by message id and by text (replies.ts).
+  replies: z.record(z.string(), z.string()).default({}),
 });
 
 export type SessionState = z.infer<typeof sessionSchema>;
@@ -53,6 +55,9 @@ export class StateStore {
 
   save(): void {
     this.state.sentMedia = this.state.sentMedia.slice(-500);
+    const replies = Object.entries(this.state.replies);
+    if (replies.length > 1000)
+      this.state.replies = Object.fromEntries(replies.slice(-1000));
     const tmp = `${this.#path}.tmp`;
     writeFileSync(tmp, JSON.stringify(this.state, null, 1), { mode: 0o600 });
     renameSync(tmp, this.#path);

@@ -4,13 +4,16 @@ import { type ClaudeApi, textOf } from "./claude-api.ts";
 import { sessionLink, toWhatsApp } from "./format.ts";
 import type { GroupsStore } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
+import { remember } from "./replies.ts";
 import type { SessionState, StateStore } from "./state.ts";
+import type { WhatsAppStore } from "./store.ts";
 
 export interface RelayDeps {
   api: ClaudeApi;
   bridge: Bridge;
   groups: GroupsStore;
   state: StateStore;
+  store: WhatsAppStore;
   giveUpMs: number;
   now: () => number;
 }
@@ -63,7 +66,7 @@ export async function check(
         log.info("session-gave-up", { session: id });
         await deps.bridge.send(
           session.chat,
-          `No reply from Claude after ${String(Math.round(deps.giveUpMs / 60_000))} minutes; it may still be working.\n\n↗ ${sessionLink(id)}`,
+          `No reply from Claude after ${String(Math.round(deps.giveUpMs / 60_000))} minutes; it may still be working.`,
           session.request,
         );
       }
@@ -73,12 +76,10 @@ export async function check(
   session.waiting = false;
   session.lastText = "";
   const text = toWhatsApp(answer);
-  if (text !== "")
-    await deps.bridge.send(
-      session.chat,
-      `${text}\n\n↗ ${sessionLink(id)}`,
-      session.request,
-    );
+  if (text !== "") {
+    await deps.bridge.send(session.chat, text, session.request);
+    remember(deps.state.state, deps.store, session.chat, text, id);
+  }
   log.info("session-relayed", { session: id, chars: text.length });
 }
 

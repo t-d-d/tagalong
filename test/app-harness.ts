@@ -9,6 +9,7 @@ import { type GroupsFile, fileSchema } from "../service/src/groups.ts";
 import { type Payload, payloadSchema } from "../service/src/webhook.ts";
 import {
   type BridgeDb,
+  CLAUDE,
   GROUP,
   MEMBER,
   OWNER,
@@ -64,7 +65,21 @@ export async function harness(
   const clock = { now: NOW };
   const db = standardDb(NOW);
   options.db?.(db);
-  const bridge = await fakeBridge(db.store);
+  // The bridge stores what it sends, with the id WhatsApp gave it.
+  let sentCount = 0;
+  const bridge = await fakeBridge(db.store, ({ recipient, message }) => {
+    sentCount += 1;
+    const id = `sent-${String(sentCount)}`;
+    db.message({
+      id,
+      chat: recipient,
+      sender: CLAUDE,
+      content: message,
+      at: clock.now,
+      fromMe: true,
+    });
+    return id;
+  });
   const api = await fakeClaudeApi();
   api.environments.push(
     {
