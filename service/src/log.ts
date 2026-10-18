@@ -37,7 +37,6 @@ export const events = [
   "device-waiting",
   "device-seeded",
   "device-seed-failed",
-  "workspace-untrusted",
   "loop-failed",
 ] as const;
 

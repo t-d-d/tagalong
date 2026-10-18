@@ -48,13 +48,13 @@ function setup(runner: Runner = () => Promise.resolve({ code: 0, out: "" })) {
 }
 
 describe("restoring the login", () => {
-  it("puts the stored login where the CLI reads it, and trusts the workspaces", async () => {
+  it("puts the stored login where the CLI reads it, and finishes onboarding", async () => {
     const { aws, login, file, home } = setup();
     aws.secrets.set(
       PARAMETER,
       writeRecord(credentials("stored", NOW + 3_600_000), account),
     );
-    await login.restore("/data/workspaces");
+    await login.restore();
     expect(readFileSync(file, "utf8")).toBe(
       credentials("stored", NOW + 3_600_000),
     );
@@ -63,7 +63,6 @@ describe("restoring the login", () => {
     ).toMatchObject({
       hasCompletedOnboarding: true,
       oauthAccount: account,
-      projects: { "/data/workspaces": { hasTrustDialogAccepted: true } },
     });
     expect(login.orgUuid()).toBe("org-1");
     expect(login.accessToken()).toBe("stored");
@@ -80,7 +79,7 @@ describe("restoring the login", () => {
     );
     mkdirSync(join(file, ".."), { recursive: true });
     writeFileSync(file, credentials("newer", NOW + 7_200_000));
-    await login.restore("/data/workspaces");
+    await login.restore();
     expect(readFileSync(file, "utf8")).toBe(
       credentials("newer", NOW + 7_200_000),
     );
@@ -93,11 +92,37 @@ describe("restoring the login", () => {
   it("says loudly when there is no stored login", async () => {
     const { lines } = logLines();
     const { login, file } = setup();
-    await login.restore("/data/workspaces");
+    await login.restore();
     expect(existsSync(file)).toBe(false);
     expect(lines).toContainEqual(
       expect.objectContaining({ level: "error", event: "login-missing" }),
     );
+  });
+});
+
+describe("trusting a workspace", () => {
+  it("adds the one folder, keeping everything the CLI wrote", () => {
+    const { login, home } = setup();
+    const config = join(home, ".claude.json");
+    writeFileSync(
+      config,
+      JSON.stringify({
+        numStartups: 3,
+        projects: { "/data/workspaces/o__r": { allowedTools: ["Bash"] } },
+      }),
+    );
+    login.trust("/data/workspaces/o__r");
+    login.trust("/data/workspaces/o__other/");
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({
+      numStartups: 3,
+      projects: {
+        "/data/workspaces/o__r": {
+          allowedTools: ["Bash"],
+          hasTrustDialogAccepted: true,
+        },
+        "/data/workspaces/o__other": { hasTrustDialogAccepted: true },
+      },
+    });
   });
 });
 
@@ -112,7 +137,7 @@ describe("keeping the login fresh", () => {
       PARAMETER,
       writeRecord(credentials("stored", NOW + 3_600_000), account),
     );
-    await login.restore("/w");
+    await login.restore();
     await login.keepFresh();
     expect(calls).toEqual([]);
   });
@@ -136,7 +161,7 @@ describe("keeping the login fresh", () => {
       PARAMETER,
       writeRecord(credentials("stored", NOW + 60_000), account),
     );
-    await login.restore("/w");
+    await login.restore();
     await login.keepFresh();
     expect(calls.map((args) => args[0])).toEqual(["auth", "-p"]);
     expect(readRecord(aws.secrets.get(PARAMETER) ?? "").credentials).toBe(
@@ -154,7 +179,7 @@ describe("keeping the login fresh", () => {
       PARAMETER,
       writeRecord(credentials("stored", NOW + 60_000), account),
     );
-    await login.restore("/w");
+    await login.restore();
     await login.keepFresh();
     expect(lines.at(-1)).toMatchObject({ level: "error", event: "login-dead" });
   });
@@ -166,7 +191,7 @@ describe("keeping the login fresh", () => {
       PARAMETER,
       writeRecord(credentials("stored", NOW + 3_600_000), account),
     );
-    await login.restore("/w");
+    await login.restore();
     writeFileSync(
       file,
       JSON.stringify({

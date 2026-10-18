@@ -1,5 +1,3 @@
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { serviceEnv } from "../../test/service-env.ts";
 import { Cloud } from "./cloud.ts";
@@ -19,20 +17,6 @@ function setup() {
 }
 
 describe("workspaces", () => {
-  it("are trusted when the CLI trusts their folder or one above it", () => {
-    const { env, cloud } = setup();
-    expect(cloud.trusted()).toBe(false);
-    writeFileSync(
-      join(env.HOME, ".claude.json"),
-      JSON.stringify({
-        projects: {
-          [join(env.WORKSPACES_DIR, "..")]: { hasTrustDialogAccepted: true },
-        },
-      }),
-    );
-    expect(cloud.trusted()).toBe(true);
-  });
-
   it("drops the environment setting when a group no longer names one", () => {
     const { cloud } = setup();
     const group = {

@@ -7,12 +7,11 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 import { z } from "zod";
 import type { Env } from "./env.ts";
 import { lastSession, oneLine, stripAnsi } from "./format.ts";
@@ -87,6 +86,7 @@ export class Cloud {
       join(dir, ".claude", "settings.local.json"),
       `${JSON.stringify(settings, null, 2)}\n`,
     );
+    this.#login.trust(dir);
     return dir;
   }
 
@@ -148,27 +148,6 @@ export class Cloud {
       );
     } finally {
       await this.#login.storeIfRefreshed();
-    }
-  }
-
-  /** Whether the CLI trusts the workspaces folder, or a folder above it. */
-  trusted(): boolean {
-    const path = join(this.#env.HOME, ".claude.json");
-    if (!existsSync(path)) return false;
-    const projects =
-      z
-        .looseObject({
-          projects: z
-            .record(
-              z.string(),
-              z.looseObject({ hasTrustDialogAccepted: z.boolean().optional() }),
-            )
-            .optional(),
-        })
-        .parse(JSON.parse(readFileSync(path, "utf8"))).projects ?? {};
-    for (let dir = resolve(this.#env.WORKSPACES_DIR); ; dir = dirname(dir)) {
-      if (projects[dir]?.hasTrustDialogAccepted === true) return true;
-      if (dirname(dir) === dir) return false;
     }
   }
 }

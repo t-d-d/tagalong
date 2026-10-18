@@ -60,4 +60,4 @@ BRIDGE_STORE=<the bridge's store> GROUPS_FILE=./groups.json \
   STATE_FILE=./state.json WORKSPACES_DIR=./workspaces DRY_RUN=1 npm start
 ```
 
-With no `LOGIN_PARAMETER`, tagalong reads the laptop's own Claude login and stores nothing. `DRY_RUN=1` logs requests without starting sessions. Accept the folder-trust prompt once by running `claude` in the workspaces folder.
+With no `LOGIN_PARAMETER`, tagalong reads the laptop's own Claude login and stores nothing. `DRY_RUN=1` logs requests without starting sessions. Each workspace is a git repo of its own, so the CLI asks to trust each one: run `claude` once in each folder under `workspaces` and accept. A launch that stops there logs `folder-untrusted`.

@@ -183,10 +183,8 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
   const keepFresh = () => cli.run(() => login.keepFresh());
 
   async function start(): Promise<Server> {
-    await cli.run(() => login.restore(env.WORKSPACES_DIR));
+    await cli.run(() => login.restore());
     await checkDevice();
-    if (!cloud.trusted())
-      log.warn("workspace-untrusted", { workspaces: env.WORKSPACES_DIR });
     if (env.ATTACHMENTS_BUCKET === undefined) log.info("attachments-off");
     const server = webhookServer(token, onPayload);
     await new Promise<void>((resolve) =>

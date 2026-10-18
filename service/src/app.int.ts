@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type Harness, NOW, harness } from "../../test/app-harness.ts";
@@ -149,6 +149,30 @@ describe("a request in a group that is set up", () => {
     ]);
     await t.app.pollOnce();
     expect(t.bridge.sent).toHaveLength(1);
+  });
+
+  it("trusts each workspace it makes, in the task (cloud-sessions.md)", async () => {
+    const t = (h = await harness({
+      env: { LOGIN_PARAMETER: "/tagalong/claude-login" },
+    }));
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@claude hello");
+    const cwd = t.fake.calls[0]?.options.cwd ?? "";
+    const config: unknown = JSON.parse(
+      readFileSync(join(t.env.HOME, ".claude.json"), "utf8"),
+    );
+    expect(config).toMatchObject({
+      projects: { [cwd]: { hasTrustDialogAccepted: true } },
+    });
+  });
+
+  it("leaves a laptop's own Claude config alone", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@claude hello");
+    expect(existsSync(join(t.env.HOME, ".claude.json"))).toBe(false);
   });
 
   it("carries a reply to Claude on in the session it came from", async () => {
@@ -532,7 +556,7 @@ describe("the heartbeat", () => {
 });
 
 describe("starting", () => {
-  it("listens on loopback, and says the workspaces are not trusted yet", async () => {
+  it("listens on loopback", async () => {
     const free = await new Promise<number>((resolve) => {
       const probe = createServer();
       probe.listen(0, "127.0.0.1", () => {
@@ -553,12 +577,6 @@ describe("starting", () => {
           device: "present",
           groups: 1,
           owners: 1,
-        }),
-      );
-      expect(t.lines).toContainEqual(
-        expect.objectContaining({
-          level: "warn",
-          event: "workspace-untrusted",
         }),
       );
       expect(

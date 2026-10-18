@@ -9,11 +9,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import type { Aws } from "./aws.ts";
 import { type Env, cliEnv } from "./env.ts";
@@ -42,6 +43,10 @@ const configSchema = z.looseObject({
     .looseObject({ organizationUuid: z.string().optional() })
     .optional(),
 });
+const cliConfigSchema = z.looseObject({
+  projects: z.record(z.string(), z.looseObject({})).optional(),
+});
+type Config = z.infer<typeof cliConfigSchema>;
 
 export type Account = z.infer<typeof accountSchema>;
 
@@ -146,9 +151,9 @@ export class Login {
   /**
    * In the task: put the stored login where the CLI reads it, unless the
    * file already holds a newer one (a refresh not yet written back), and
-   * mark the workspaces trusted and onboarding done (cloud-sessions.md).
+   * mark onboarding done (cloud-sessions.md).
    */
-  async restore(workspaces: string): Promise<void> {
+  async restore(): Promise<void> {
     const name = this.#parameter;
     const aws = this.#deps.aws;
     if (name === undefined || aws === undefined) return;
@@ -168,7 +173,7 @@ export class Login {
       (onDisk.expiresAt ?? 0) > (stored.expiresAt ?? 0);
     if (!keepDisk) this.#write(record.credentials);
     this.#stored = keepDisk ? undefined : record.credentials;
-    this.#configure(workspaces);
+    this.#configure();
     log.info("login-restored", {
       from: keepDisk ? "volume" : "parameter",
       usable: stored.ok,
@@ -176,25 +181,49 @@ export class Login {
     if (keepDisk) await this.storeIfRefreshed();
   }
 
-  /** ~/.claude.json: onboarding done, the account, and the workspaces trusted. */
-  #configure(workspaces: string): void {
-    const path = join(this.#deps.env.HOME, ".claude.json");
+  get #configPath(): string {
+    return join(this.#deps.env.HOME, ".claude.json");
+  }
+
+  /** Change ~/.claude.json, keeping what the CLI wrote, in one rename. */
+  #editConfig(edit: (config: Config) => Config): void {
+    const path = this.#configPath;
     const current: unknown = existsSync(path)
       ? JSON.parse(readFileSync(path, "utf8"))
       : {};
-    const config = z
-      .looseObject({ projects: z.record(z.string(), z.unknown()).optional() })
-      .parse(current);
-    const next = {
+    const tmp = `${path}.tagalong`;
+    writeFileSync(tmp, JSON.stringify(edit(cliConfigSchema.parse(current))), {
+      mode: 0o600,
+    });
+    renameSync(tmp, path);
+  }
+
+  /** ~/.claude.json: onboarding done, and the account. */
+  #configure(): void {
+    this.#editConfig((config) => ({
       ...config,
       hasCompletedOnboarding: true,
       ...(this.#account === undefined ? {} : { oauthAccount: this.#account }),
+    }));
+  }
+
+  /**
+   * Trust one workspace, in the task only, where tagalong owns HOME. The
+   * CLI carries a folder's trust down only as far as a git repo's root, and
+   * each workspace is a repo of its own, so each needs its own entry
+   * (cloud-sessions.md). Called from the CLI queue, so no CLI writes the
+   * file at the same time.
+   */
+  trust(dir: string): void {
+    if (this.#parameter === undefined) return;
+    const key = resolve(dir);
+    this.#editConfig((config) => ({
+      ...config,
       projects: {
         ...config.projects,
-        [workspaces]: { hasTrustDialogAccepted: true },
+        [key]: { ...config.projects?.[key], hasTrustDialogAccepted: true },
       },
-    };
-    writeFileSync(path, JSON.stringify(next), { mode: 0o600 });
+    }));
   }
 
   /** The org the login belongs to, for the environments list and the CLI. */

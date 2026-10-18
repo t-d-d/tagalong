@@ -10,8 +10,12 @@ result, so nothing has to be scraped or posted back by the session.
 
 - A session starts from a bare workspace per repo and environment: an
   empty git repo whose origin is the GitHub repo, with the environment
-  in .claude/settings.local.json. The workspaces folder is trusted in
-  HOME/.claude.json.
+  in .claude/settings.local.json.
+- In the task, each workspace is trusted in HOME/.claude.json as it is
+  made, from the CLI queue. The CLI carries a folder's trust down only
+  as far as a git repo's root, and each workspace is a repo of its own,
+  so trusting the folder above them does nothing. On a laptop tagalong
+  leaves the CLI's config alone.
 - service/launch.py runs claude --cloud in a pseudo-terminal with the
   group's permission mode, ref, model and a session name, and returns
   once the CLI prints "Resume with:".
@@ -35,6 +39,7 @@ result, so nothing has to be scraped or posted back by the session.
 - Ask the session to post to WhatsApp itself: it has no device.
 - Let the CLI update itself: an update can change what the launcher
   reads.
+- Trust the workspaces folder and expect its workspaces to inherit it.
 
 History: Set when the repo was made, October 2026, following podstow's
 dispatcher.
