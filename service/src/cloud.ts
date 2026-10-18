@@ -26,6 +26,28 @@ const sendSchema = z.looseObject({
   error: z.string().optional(),
 });
 
+// What a failed launch printed, as a word safe to log: the output itself can
+// hold the prompt (logging.md).
+const FAILURES: [RegExp, string][] = [
+  [/trust this folder|folder-trust prompt/iu, "folder-untrusted"],
+  [
+    /not logged in|please run \/login|invalid api key|oauth|authenticat|\b401\b/iu,
+    "not-logged-in",
+  ],
+  [/rate.?limit|usage limit|\b429\b/iu, "limit"],
+  [/github/iu, "github"],
+  [/unknown option|error: option|unexpected argument/iu, "cli-flags"],
+];
+
+/** Why the launcher gave no session, in one word. */
+export function launchFailure(code: number, out: string): string {
+  const text = stripAnsi(out);
+  const found = FAILURES.find(([pattern]) => pattern.test(text));
+  if (found !== undefined) return found[1];
+  // 3: the CLI printed no confirmation in time (service/launch.py).
+  return code === 3 ? "no-confirmation" : "unknown";
+}
+
 export class Cloud {
   readonly #env: Env;
   readonly #login: Login;
@@ -93,7 +115,7 @@ export class Cloud {
       // 0 confirmed; 3 unconfirmed, a session may exist; anything else, nothing started.
       if (id === null)
         throw new CommandError(
-          `the launcher exited ${String(code)} without a session`,
+          `the launcher exited ${String(code)} without a session (${launchFailure(code, out)})`,
         );
       return id;
     } finally {

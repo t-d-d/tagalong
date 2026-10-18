@@ -323,7 +323,7 @@ describe("a request in a group that is set up", () => {
       expect.objectContaining({
         level: "error",
         event: "request-failed",
-        why: "the launcher exited 1 without a session",
+        why: "the launcher exited 1 without a session (unknown)",
       }),
     );
   });
