@@ -2,6 +2,7 @@
 // request, any files, and how its answer reaches WhatsApp.
 import { allowed } from "./access.ts";
 import type { Attachment } from "./attachments.ts";
+import { OUTGOING, type Upload } from "./outgoing.ts";
 import { COMMAND } from "./commands.ts";
 import type { Claude, Config, Group } from "./groups.ts";
 import type { People } from "./people.ts";
@@ -108,6 +109,17 @@ export interface Ask {
   /** The message the request replies to, if any: who wrote it and what it said. */
   quoted: { who: string; text: string } | undefined;
   files: Attachment[];
+  /** Where the Claude may upload files to send with its answer. */
+  upload?: Upload;
+}
+
+/** How to send files back: one curl per file, to the turn's own folder. */
+export function uploadSection(upload: Upload | undefined): string {
+  if (upload === undefined) return "";
+  const fields = Object.entries(upload.fields)
+    .map(([key, value]) => `-F '${key}=${value}'`)
+    .join(" ");
+  return `\nTo send pictures, audio or files to the chat with your answer, upload each before you answer, at most ${String(OUTGOING.files)}, each at most ${String(OUTGOING.bytes / 1024 / 1024)} MB:\ncurl -fsS ${fields} -F 'file=@<path>' '${upload.url}'\nEach goes to the chat after your answer, under its own name: .jpg, .png and .webp as a picture, .ogg (Opus) as a voice note, .mp4 as a video, anything else as a file. Only this turn's uploads are sent.\n`;
 }
 
 const asks = (ask: Ask, claude: string): string => {
@@ -115,7 +127,7 @@ const asks = (ask: Ask, claude: string): string => {
     ask.quoted === undefined
       ? ""
       : `, replying to ${ask.quoted.who}: "${ask.quoted.text.slice(0, 300)}"`;
-  return `${ask.from} asks you, @${claude}${replying}:\n${ask.text}\n${filesSection(ask.files)}`;
+  return `${ask.from} asks you, @${claude}${replying}:\n${ask.text}\n${filesSection(ask.files)}${uploadSection(ask.upload)}`;
 };
 
 export interface First {

@@ -22,6 +22,8 @@ const sessionSchema = z.object({
   nudged: z.boolean().default(false),
   // The turn's latest words, kept across polls.
   lastText: z.string().default(""),
+  // The folder in the bucket the turn may upload files to (outgoing.ts).
+  outbox: z.string().nullable().default(null),
 });
 
 const stateSchema = z.object({

@@ -28,6 +28,8 @@ export const events = [
   "attachment-transcribed",
   "attachment-untranscribed",
   "attachments-off",
+  "files-sent",
+  "file-skipped",
   "environments-failed",
   "bridge-unreachable",
   "login-restored",

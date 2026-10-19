@@ -1,9 +1,11 @@
 // Reading a session's answer and posting it to its group.
+import type { Aws } from "./aws.ts";
 import type { Bridge } from "./bridge.ts";
 import { type ClaudeApi, textOf } from "./claude-api.ts";
 import { sessionLink, toWhatsApp } from "./format.ts";
 import type { GroupsStore } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
+import { sendUploads } from "./outgoing.ts";
 import { answerText } from "./prompts.ts";
 import { remember } from "./replies.ts";
 import type { SessionState, StateStore } from "./state.ts";
@@ -17,6 +19,8 @@ export interface RelayDeps {
   store: WhatsAppStore;
   giveUpMs: number;
   now: () => number;
+  /** Where a turn's uploads are, and where the bridge sends files from; none without a bucket. */
+  files?: { aws: Aws; bucket: string; outboxDir: string };
 }
 
 /** Look at one waiting session; post its answer when a turn has ended. */
@@ -89,6 +93,13 @@ export async function check(
     remember(deps.state.state, deps.store, session.chat, text, id);
   }
   log.info("session-relayed", { session: id, chars: text.length });
+  const folder = session.outbox;
+  session.outbox = null;
+  if (folder !== null && deps.files !== undefined)
+    await sendUploads(session.chat, folder, {
+      ...deps.files,
+      bridge: deps.bridge,
+    });
 }
 
 let polling = false;

@@ -19,6 +19,8 @@ export const envSchema = z.object({
   BRIDGE_URL: z.url().default("http://127.0.0.1:8080/api"),
   BRIDGE_STORE: z.string().default("/data/bridge/store"),
   WHATSAPP_BRIDGE_TOKEN: optional,
+  // Where files go for the bridge to send: its WHATSAPP_MEDIA_ROOTS.
+  OUTBOX_DIR: z.string().default("/data/bridge/outbox"),
   GROUPS_FILE: z.string().default("/data/groups.json"),
   STATE_FILE: z.string().default("/data/state.json"),
   WORKSPACES_DIR: z.string().default("/data/workspaces"),

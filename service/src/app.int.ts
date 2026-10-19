@@ -437,6 +437,88 @@ describe("asking a Claude", () => {
     expect(t.aws.transcribed).toEqual([]);
   });
 
+  it("sends the files a Claude uploads in its turn after its answer, and only that turn's", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow draw me the chart");
+    const prompt = launches(t)[0]?.prompt ?? "";
+    expect(prompt).toContain(
+      "To send pictures, audio or files to the chat with your answer, upload each before you answer, at most 5, each at most 16 MB:",
+    );
+    expect(prompt).toContain("'https://files.s3.example.test/'");
+    expect(prompt).toContain("-F 'Policy=max-16777216-for-7200'");
+    const [, folder] =
+      /-F 'key=(outgoing\/[\w-]+\/)\$\{filename\}'/u.exec(prompt) ?? [];
+    expect(folder).toBeDefined();
+    // The session uploads a picture and a voice note.
+    t.aws.objects.set(`files/${folder ?? ""}chart.png`, {
+      body: Buffer.from("png bytes"),
+      contentType: "image/png",
+    });
+    t.aws.objects.set(`files/${folder ?? ""}note.ogg`, {
+      body: Buffer.from("ogg bytes"),
+      contentType: "audio/ogg",
+    });
+    t.api.sessions.get(SESSION)?.events.push(result("Here it is."));
+    await poll(t);
+    const sent = t.bridge.sent.slice(-3);
+    expect(sent.map((message) => message.message)).toEqual([
+      "*podstow:* Here it is.",
+      "",
+      "",
+    ]);
+    const paths = sent.slice(1).map((message) => message.media_path ?? "");
+    expect(paths.map((path) => path.split("/").at(-1))).toEqual([
+      "chart.png",
+      "note.ogg",
+    ]);
+    expect(paths.every((path) => path.startsWith(t.env.OUTBOX_DIR))).toBe(true);
+    expect(t.bridge.files.get(paths[0] ?? "")?.toString()).toBe("png bytes");
+    expect(paths.some((path) => existsSync(path))).toBe(false);
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({ event: "files-sent", count: 2, bytes: 18 }),
+    );
+    expect(t.raw.filter((line) => line.includes("chart"))).toEqual([]);
+
+    await says(t, "r2", MEMBER, "@podstow thanks");
+    const next = followUps(t)[0]?.options.input ?? "";
+    expect(next).not.toContain(folder ?? "");
+    expect(next).toMatch(/-F 'key=outgoing\/[\w-]+\/\$\{filename\}'/u);
+    t.api.sessions.get(SESSION)?.events.push(result("You're welcome."));
+    await poll(t);
+    expect(t.bridge.sent.at(-1)?.message).toBe("*podstow:* You're welcome.");
+  });
+
+  it("sends at most five files with an answer, and none too large", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow lots of pictures");
+    const [, folder = ""] =
+      /-F 'key=(outgoing\/[\w-]+\/)\$\{filename\}'/u.exec(
+        launches(t)[0]?.prompt ?? "",
+      ) ?? [];
+    t.aws.objects.set(`files/${folder}huge.png`, {
+      body: Buffer.alloc(16 * 1024 * 1024 + 1),
+      contentType: "image/png",
+    });
+    for (const n of [1, 2, 3, 4, 5, 6])
+      t.aws.objects.set(`files/${folder}p${String(n)}.png`, {
+        body: Buffer.from("png"),
+        contentType: "image/png",
+      });
+    t.api.sessions.get(SESSION)?.events.push(result("Pictures."));
+    await poll(t);
+    const files = t.bridge.sent.filter(
+      (message) => message.media_path !== undefined,
+    );
+    expect(files).toHaveLength(5);
+    expect(
+      files.some((message) => message.media_path?.endsWith("huge.png")),
+    ).toBe(false);
+  });
+
   it("trusts each workspace it makes, in the task (cloud-sessions.md)", async () => {
     const t = (h = await harness({
       env: { LOGIN_PARAMETER: "/tagalong/claude-login" },

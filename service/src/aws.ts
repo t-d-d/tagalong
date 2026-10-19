@@ -3,10 +3,12 @@ import { randomUUID } from "node:crypto";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  ListObjectsV2Command,
   NoSuchKey,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import {
   DeleteTranscriptionJobCommand,
@@ -54,6 +56,21 @@ export interface Aws {
   /** An object's bytes, or undefined when there is none. */
   getObject(bucket: string, key: string): Promise<Buffer | undefined>;
   deleteObject(bucket: string, key: string): Promise<void>;
+  /**
+   * A form anyone holding it can POST files to for `seconds`, each under
+   * `prefix` with its own name and at most `maxBytes` (attachments.md).
+   */
+  presignPost(
+    bucket: string,
+    prefix: string,
+    maxBytes: number,
+    seconds: number,
+  ): Promise<{ url: string; fields: Record<string, string> }>;
+  /** The objects under `prefix`, in key order, as S3 lists them. */
+  listObjects(
+    bucket: string,
+    prefix: string,
+  ): Promise<{ key: string; bytes: number }[]>;
   /**
    * What the voice note at `key` says, by Amazon Transcribe. Its output goes
    * beside it in the bucket, and the job is deleted once read (attachments.md).
@@ -116,6 +133,28 @@ export function realAws(region: string | undefined): Aws {
     getObject,
     async deleteObject(bucket, key) {
       await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    },
+    async presignPost(bucket, prefix, maxBytes, seconds) {
+      const { url, fields } = await createPresignedPost(s3, {
+        Bucket: bucket,
+        Key: `${prefix}\${filename}`,
+        Conditions: [
+          ["starts-with", "$key", prefix],
+          ["content-length-range", 1, maxBytes],
+        ],
+        Expires: seconds,
+      });
+      return { url, fields };
+    },
+    async listObjects(bucket, prefix) {
+      const result = await s3.send(
+        new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix }),
+      );
+      return (result.Contents ?? []).flatMap((object) =>
+        object.Key === undefined
+          ? []
+          : [{ key: object.Key, bytes: object.Size ?? 0 }],
+      );
     },
     async transcribe(bucket, key) {
       const job = `tagalong-${randomUUID()}`;
