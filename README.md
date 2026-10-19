@@ -17,7 +17,8 @@ The owner types `@claude help` in a chat. tagalong answers with messages to copy
 - `@claude define ops owner/podstow read-only role="You are Podstow's ops operator. Use the ops-tooling skill."` defines a Claude, once, for every chat.
 - `@claude add podstow brainstorm` and `@claude remove brainstorm` say which Claudes are in this chat.
 - `@claude allow @Name podstow` and `@claude revoke @Name podstow` say who else may ask each Claude in this chat. `@claude allow everyone brainstorm` opens a read-only Claude to everyone here.
-- `@claude fresh brainstorm` starts one over, `@claude who` lists who is here, and `@claude stop` makes tagalong ignore the chat again.
+- A chat keeps talking to the version of a Claude it started with. `@claude update brainstorm` moves it to the current definition and repo, carrying its conversation over. `@claude fresh brainstorm` starts it over with only the last messages.
+- `@claude who` lists who is here, and `@claude stop` makes tagalong ignore the chat again.
 
 Then anyone allowed asks a Claude by name. Photos and files they sent in the last ten minutes go with the request. A one-to-one chat with the number works the same as a group.
 

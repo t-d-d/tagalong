@@ -19,13 +19,19 @@ result, so nothing has to be scraped or posted back by the session.
 - service/launch.py runs claude --cloud in a pseudo-terminal with the
   group's permission mode, ref, model and a session name, and returns
   once the CLI prints "Resume with:".
-- Redefining a Claude starts its conversations afresh everywhere: a
-  running session would carry on with the old repo and role.
 - A Claude has one running session in each chat. Each time it is
   asked, a turn goes into that session with claude -p --cloud
   session_<id>: what was said in the chat since its last turn, then the
-  request. A new session, after fresh or when the running one is
-  archived or gone, starts with the chat's last HISTORY messages.
+  request.
+- A conversation never loses its context by itself. A running session
+  keeps the definition and repo it started on: redefining a Claude, or
+  a skill changing in its repo, reaches a chat only when an owner runs
+  @claude update there. Update, and a session that is archived or gone,
+  start a new session carrying the old one's dialogue (what it was sent
+  and what it answered, not the code it read or the tools it ran, at
+  most CARRY_LIMIT characters, the latest kept) and everything said in
+  the chat since. Only @claude fresh starts a Claude over, with the
+  chat's last HISTORY messages.
 - Each answer is remembered by the id the bridge stored it under and by
   a hash of its text, so a reply to it reaches the Claude that wrote
   it. An older answer with a session link in it still works.
@@ -49,6 +55,8 @@ result, so nothing has to be scraped or posted back by the session.
 - Ask the session to post to WhatsApp itself: it has no device.
 - Put the session's link on answers: the group does not want it, and a
   reply finds its session without it.
+- Restart a running conversation because its Claude was redefined: the
+  group would lose what the session knew in the middle of a thread.
 - Let the CLI update itself: an update can change what the launcher
   reads.
 - Trust the workspaces folder and expect its workspaces to inherit it.

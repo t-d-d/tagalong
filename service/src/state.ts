@@ -35,7 +35,14 @@ const stateSchema = z.object({
   threads: z
     .record(
       z.string(),
-      z.object({ session: z.string().nullable(), heard: z.number() }),
+      z.object({
+        session: z.string().nullable(),
+        heard: z.number(),
+        // The Claude's definition the session started on (versionOf).
+        version: z.string().default(""),
+        // A session to carry the dialogue over from, into the next one.
+        carry: z.string().nullable().default(null),
+      }),
     )
     .default({}),
 });

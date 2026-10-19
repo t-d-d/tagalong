@@ -9,7 +9,12 @@ import type { ClaudeApi } from "./claude-api.ts";
 import type { Cloud } from "./cloud.ts";
 import type { Env } from "./env.ts";
 import { oneLine } from "./format.ts";
-import type { Claude, Group, GroupsStore } from "./groups.ts";
+import {
+  type Claude,
+  type Group,
+  type GroupsStore,
+  versionOf,
+} from "./groups.ts";
 import { errorFields, log } from "./log.ts";
 import type { People } from "./people.ts";
 import {
@@ -24,6 +29,9 @@ import type { Serial } from "./run.ts";
 import { type StateStore, threadKey } from "./state.ts";
 import { type WhatsAppStore, timeOf } from "./store.ts";
 import type { Payload } from "./webhook.ts";
+
+/** The most of an old session's dialogue a new one is given, in characters. */
+export const CARRY_LIMIT = 60_000;
 
 export interface RequestDeps {
   env: Env;
@@ -158,7 +166,12 @@ async function turn(
   const chat = payload.chatJID;
   const now = deps.now();
   const key = threadKey(chat, claude.name);
-  const thread = deps.state.state.threads[key] ?? { session: null, heard: 0 };
+  const thread = deps.state.state.threads[key] ?? {
+    session: null,
+    heard: 0,
+    version: "",
+    carry: null,
+  };
   const row = deps.store.message(chat, payload.messageId);
   const at = row === undefined ? now : timeOf(row.timestamp);
   const request = {
@@ -180,7 +193,7 @@ async function turn(
     quoted: quotedOf(payload, deps),
     files: await files(payload, group, claude.name, deps),
   };
-  const waitFor = (session: string) => {
+  const waitFor = (session: string, version: string) => {
     const state = deps.state.state.sessions[session];
     if (state !== undefined)
       Object.assign(state, {
@@ -189,7 +202,12 @@ async function turn(
         since: now,
         nudged: false,
       });
-    deps.state.state.threads[key] = { session, heard: at };
+    deps.state.state.threads[key] = {
+      session,
+      heard: at,
+      version,
+      carry: null,
+    };
     deps.state.save();
   };
 
@@ -205,7 +223,7 @@ async function turn(
       deps.cloud.send(id, followUp(claude.name, said, ask)),
     );
     if (sent === "sent") {
-      waitFor(id);
+      waitFor(id, thread.version);
       log.info("session-followup", {
         session: id,
         group: group.label,
@@ -214,16 +232,26 @@ async function turn(
       });
       return;
     }
-    // podstow archives a session that signs off; carry on in a fresh one.
+    // podstow archives a session that signs off; carry on in a fresh one,
+    // with the conversation carried over.
     log.info("session-gone", { session: id, claude: claude.name });
     existing.waiting = false;
+    thread.carry = id;
   }
 
+  // A new session: after an update or a gone one, with the old session's
+  // dialogue and everything said since; otherwise the last messages here.
+  const carried =
+    thread.carry === null ? "" : await dialogueOf(thread.carry, deps.api);
   const prompt = firstPrompt({
     claude,
     chatName: deps.store.chatName(chat) ?? group.label,
     others: group.claudes.filter((other) => other !== claude.name),
-    conversation: conversation(lines, 0, deps.env.HISTORY),
+    carried,
+    conversation:
+      carried === ""
+        ? conversation(lines, 0, deps.env.HISTORY)
+        : conversation(lines, thread.heard, deps.env.HISTORY * 3),
     ask,
   });
   const name = `WhatsApp ${claude.name}: ${oneLine(ask.text.replace(/@[a-z][a-z0-9-]*\b/giu, "")).slice(0, 50)}`;
@@ -238,15 +266,26 @@ async function turn(
     nudged: false,
     lastText: "",
   };
-  waitFor(id);
+  waitFor(id, versionOf(claude));
   log.info("session-started", {
     session: id,
     group: group.label,
     claude: claude.name,
     access: claude.access,
+    carried: carried !== "",
     files: ask.files.length,
   });
   await verify(id, claude, deps.api);
+}
+
+/** The dialogue of a session being replaced; empty, and logged, if it cannot be read. */
+async function dialogueOf(id: string, api: ClaudeApi): Promise<string> {
+  try {
+    return await api.dialogue(id, CARRY_LIMIT);
+  } catch (error) {
+    log.warn("session-poll-failed", { session: id, ...errorFields(error) });
+    return "";
+  }
 }
 
 /** Say loudly when a session landed in another environment than its Claude's. */

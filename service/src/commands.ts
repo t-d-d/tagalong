@@ -14,6 +14,7 @@ import {
   type GroupsFile,
   membersOf,
   openTo,
+  versionOf,
   type GroupsStore,
   claudeSchema,
   isAccess,
@@ -22,7 +23,7 @@ import {
 } from "./groups.ts";
 import { CommandError, errorFields, log } from "./log.ts";
 import { type People, userPart } from "./people.ts";
-import { type StateStore, threadKey } from "./state.ts";
+import { type State, type StateStore, threadKey } from "./state.ts";
 import { type WhatsAppStore, timeOf } from "./store.ts";
 
 export const VERBS = [
@@ -34,13 +35,14 @@ export const VERBS = [
   "allow",
   "revoke",
   "fresh",
+  "update",
   "stop",
 ] as const;
 export type Verb = (typeof VERBS)[number];
 
 /** A message that is a command, whoever sent it: "@claude <verb> …" or a mention of the number. */
 export const COMMAND =
-  /^\s*@(claude|\d{6,})\b[\s,:]*(help|who|add|remove|define|allow|revoke|fresh|stop)\b(.*)$/isu;
+  /^\s*@(claude|\d{6,})\b[\s,:]*(help|who|add|remove|define|allow|revoke|fresh|update|stop)\b(.*)$/isu;
 export const FRESH_MS = 10 * 60_000;
 
 export interface Command {
@@ -154,6 +156,8 @@ export function describe(
   config: Config,
   people: People,
   api: ClaudeApi,
+  /** The running conversations, to mark one on an older version. */
+  state?: State,
 ): string {
   const owners = config.owners.map((user) => people.nameOf(user));
   const here = group.claudes.flatMap((name) => {
@@ -168,7 +172,18 @@ export function describe(
             ),
           ),
         ];
-    return [line(claude, api), `  Asked by: ${askers.join(", ")}`];
+    const thread = state?.threads[threadKey(group.jid, name)];
+    const older =
+      thread?.session != null &&
+      thread.version !== "" &&
+      thread.version !== versionOf(claude);
+    return [
+      line(claude, api),
+      `  Asked by: ${askers.join(", ")}`,
+      ...(older
+        ? [`  Talking here on an older version: \`@claude update ${name}\``]
+        : []),
+    ];
   });
   const others = [...config.claudes.keys()].filter(
     (name) => !group.claudes.includes(name),
@@ -243,7 +258,7 @@ const help = async (
     [
       group === undefined
         ? `No Claudes here yet, so I'm ignoring this chat.\n\n${catalogue(config, deps.api)}`
-        : describe(group, config, deps.people, deps.api),
+        : describe(group, config, deps.people, deps.api, deps.state.state),
       "",
       `Ask a Claude by name, like @${group?.claudes[0] ?? names[0] ?? "podstow"} what should we build next?`,
       "",
@@ -262,6 +277,7 @@ const help = async (
     "@claude define critic owner/repo read-only",
     "@claude allow @",
     "@claude revoke @",
+    `@claude update ${group?.claudes[0] ?? "podstow"}`,
     `@claude fresh ${group?.claudes[0] ?? "podstow"}`,
     "@claude who",
     "@claude stop",
@@ -302,7 +318,13 @@ export async function runCommand(
         await reply(
           group === undefined
             ? catalogue(deps.groups.config, deps.api)
-            : describe(group, deps.groups.config, deps.people, deps.api),
+            : describe(
+                group,
+                deps.groups.config,
+                deps.people,
+                deps.api,
+                deps.state.state,
+              ),
         );
         return;
       case "define": {
@@ -326,20 +348,12 @@ export async function runCommand(
         const defined = config.claudes.get(name);
         if (defined === undefined)
           throw new CommandError("the definition did not stick");
-        // A running session carries on with the old repo and role,
-        // so a changed Claude starts afresh everywhere.
-        const changed =
-          current !== undefined &&
-          JSON.stringify(current) !== JSON.stringify(defined);
-        if (changed) {
-          for (const [key, thread] of Object.entries(deps.state.state.threads))
-            if (key.endsWith(` ${name}`)) thread.session = null;
-          deps.state.save();
-        }
+        // Running conversations keep the version they started on, until
+        // an owner updates them in their chat (cloud-sessions.md).
         await reply(
           current === undefined
             ? `Defined.\n${line(defined, deps.api)}\n\nAdd it to a group with \`@claude add ${name}\` there.`
-            : `Updated.\n${line(defined, deps.api)}${changed ? `\n\nIts conversations start afresh next time it is asked.` : ""}`,
+            : `Updated.\n${line(defined, deps.api)}\n\nChats already talking to @${name} keep the old version until \`@claude update ${name}\` there.`,
         );
         return;
       }
@@ -370,7 +384,7 @@ export async function runCommand(
         if (updated === undefined)
           throw new CommandError("the change did not stick");
         await reply(
-          `${describe(updated, config, deps.people, deps.api)}\n\nOnly owners can ask ${names.map((name) => `@${name}`).join(" and ")} until you allow someone: \`@claude allow @Name ${names[0] ?? ""}\``,
+          `${describe(updated, config, deps.people, deps.api, deps.state.state)}\n\nOnly owners can ask ${names.map((name) => `@${name}`).join(" and ")} until you allow someone: \`@claude allow @Name ${names[0] ?? ""}\``,
         );
         return;
       }
@@ -408,25 +422,42 @@ export async function runCommand(
         await reply(
           updated === undefined
             ? "No Claudes left here, so I'll ignore this chat."
-            : describe(updated, config, deps.people, deps.api),
+            : describe(
+                updated,
+                config,
+                deps.people,
+                deps.api,
+                deps.state.state,
+              ),
         );
         return;
       }
-      case "fresh": {
+      case "fresh":
+      case "update": {
         const names = namesIn(command.args).filter(
           (name) => group?.claudes.includes(name) ?? false,
         );
         if (names.length === 0) {
-          await reply("Which Claude here? `@claude fresh brainstorm`");
+          await reply(
+            `Which Claude here? \`@claude ${command.verb} brainstorm\``,
+          );
           return;
         }
+        // fresh forgets the conversation; update carries it into a session
+        // on the current definition and repo.
         for (const name of names) {
           const thread = deps.state.state.threads[threadKey(chat, name)];
-          if (thread !== undefined) thread.session = null;
+          if (thread === undefined) continue;
+          thread.carry =
+            command.verb === "update" ? (thread.session ?? thread.carry) : null;
+          thread.session = null;
         }
         deps.state.save();
+        const who = names.map((name) => `@${name}`).join(" and ");
         await reply(
-          `Next time, ${names.map((name) => `@${name}`).join(" and ")} starts afresh, with only the last messages here.`,
+          command.verb === "fresh"
+            ? `Next time, ${who} starts afresh, with only the last messages here.`
+            : `Next time, ${who} starts on its current version and repo, with its whole conversation here carried over.`,
         );
         return;
       }
@@ -509,7 +540,13 @@ export async function runCommand(
         await reply(
           updated === undefined
             ? "Done."
-            : describe(updated, config, deps.people, deps.api),
+            : describe(
+                updated,
+                config,
+                deps.people,
+                deps.api,
+                deps.state.state,
+              ),
         );
         return;
       }

@@ -286,6 +286,7 @@ describe("asking a Claude", () => {
       expect.arrayContaining(["session-gone", "session-started"]),
     );
     expect(launches(t)).toHaveLength(2);
+    expect(launches(t)[1]?.prompt).toContain("You answered:\nDone.");
     expect(launches(t)[1]?.prompt).toContain("podstow (you): Done.");
     await says(t, "r3", MEMBER, "@podstow thanks");
     expect(followUps(t).at(-1)?.args[2]).toBe(`session_${SECOND}`);
@@ -582,10 +583,22 @@ describe("commands", () => {
     expect(t.groupsFile().groups?.[OTHER_GROUP]).toBeUndefined();
   });
 
-  it("gives a Claude a role, and starts it afresh when it is redefined", async () => {
+  it("keeps a chat on a Claude's old version until an owner updates it, then carries the conversation over", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION, SECOND);
-    started(t, SESSION, [result("Fine.")]);
+    started(t, SESSION, [
+      {
+        type: "user",
+        message: { content: "Ollie asks you, @brainstorm:\n@brainstorm hello" },
+      },
+      {
+        type: "user",
+        message: {
+          content: [{ type: "tool_result", content: "secret file contents" }],
+        },
+      },
+      result("Fine."),
+    ]);
     started(t, SECOND);
     await says(t, "r1", MEMBER, "@brainstorm hello");
     await poll(t);
@@ -596,13 +609,39 @@ describe("commands", () => {
       '@claude define brainstorm role="You coach a brainstorm: go wide before narrowing."',
     );
     expect(t.bridge.sent.at(-1)?.message).toBe(
-      'Updated.\n*@brainstorm*: o/kickoff, read-only, default environment, role "You coach a brainstorm: go wide before narrowing."\n\nIts conversations start afresh next time it is asked.',
+      'Updated.\n*@brainstorm*: o/kickoff, read-only, default environment, role "You coach a brainstorm: go wide before narrowing."\n\nChats already talking to @brainstorm keep the old version until `@claude update brainstorm` there.',
     );
-    await says(t, "r2", MEMBER, "@brainstorm again");
-    expect(followUps(t)).toHaveLength(0);
-    expect(launches(t)[1]?.prompt).toContain(
+    await says(t, "r2", MEMBER, "@brainstorm still there?");
+    expect(launches(t)).toHaveLength(1);
+    expect(followUps(t)).toHaveLength(1);
+
+    await says(t, "c2", OWNER, "@claude who");
+    expect(t.bridge.sent.at(-1)?.message).toContain(
+      "  Talking here on an older version: `@claude update brainstorm`",
+    );
+    await says(t, "c3", OWNER, "@claude update brainstorm");
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Next time, @brainstorm starts on its current version and repo, with its whole conversation here carried over.",
+    );
+    await says(t, "m1", OWNER, "we ship on Friday");
+    await says(t, "r3", MEMBER, "@brainstorm and now?");
+    expect(launches(t)).toHaveLength(2);
+    const prompt = launches(t)[1]?.prompt ?? "";
+    expect(prompt).toContain(
       "Your role:\nYou coach a brainstorm: go wide before narrowing.",
     );
+    expect(prompt).toContain(
+      "This carries on your conversation in this chat from a previous session. Your dialogue there, oldest first:\nSent to you:\nOllie asks you, @brainstorm:\n@brainstorm hello\n\nYou answered:\nFine.",
+    );
+    expect(prompt).not.toContain("secret file contents");
+    expect(prompt).toContain("Said in the chat since your last turn:");
+    expect(prompt).toContain("Thomas: we ship on Friday");
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({ event: "session-started", carried: true }),
+    );
+
+    await says(t, "c4", OWNER, "@claude who");
+    expect(t.bridge.sent.at(-1)?.message).not.toContain("older version");
   });
 
   it("opens a read-only Claude to everyone in the chat, and never a read-write one", async () => {
@@ -693,6 +732,7 @@ describe("commands", () => {
       "@claude define critic owner/repo read-only",
       "@claude allow @",
       "@claude revoke @",
+      "@claude update podstow",
       "@claude fresh podstow",
       "@claude who",
       "@claude stop",

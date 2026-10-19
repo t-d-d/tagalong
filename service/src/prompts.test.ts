@@ -35,6 +35,7 @@ describe("prompts", () => {
     const prompt = firstPrompt({
       claude: claude("read-write"),
       chatName: "Side projects",
+      carried: "",
       others: ["brainstorm"],
       conversation: "[10-18 17:55] Ollie: it broke",
       ask,
@@ -60,6 +61,7 @@ describe("prompts", () => {
         role: "You are the ops operator. Use the ops-tooling skill.",
       },
       chatName: "Side projects",
+      carried: "",
       others: [],
       conversation: "",
       ask,
@@ -71,6 +73,7 @@ describe("prompts", () => {
       firstPrompt({
         claude: claude("read-only"),
         chatName: "x",
+        carried: "",
         others: [],
         conversation: "",
         ask,
@@ -78,10 +81,26 @@ describe("prompts", () => {
     ).not.toContain("Your role");
   });
 
+  it("carries on a conversation from a previous session", () => {
+    const prompt = firstPrompt({
+      claude: claude("read-only"),
+      chatName: "Side projects",
+      carried: "Sent to you:\nwhy?\n\nYou answered:\nBecause.",
+      others: [],
+      conversation: "",
+      ask,
+    });
+    expect(prompt).toContain(
+      "This carries on your conversation in this chat from a previous session. Your dialogue there, oldest first:\nSent to you:\nwhy?\n\nYou answered:\nBecause.\n\nSaid in the chat since your last turn:\n(nothing)",
+    );
+    expect(prompt).not.toContain("The conversation so far");
+  });
+
   it("tells a read-only Claude not to change anything", () => {
     const prompt = firstPrompt({
       claude: claude("read-only"),
       chatName: "Side projects",
+      carried: "",
       others: [],
       conversation: "",
       ask,

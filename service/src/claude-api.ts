@@ -44,6 +44,7 @@ const payloadSchema = z.looseObject({
   subtype: z.string().optional(),
   is_error: z.boolean().optional(),
   result: z.unknown().optional(),
+  isMeta: z.boolean().optional(),
   message: z.looseObject({ content: z.unknown() }).optional(),
 });
 export type Payload = z.infer<typeof payloadSchema>;
@@ -70,11 +71,12 @@ export interface Environment {
 
 const textBlock = z.looseObject({ type: z.literal("text"), text: z.string() });
 
-/** A payload's words: a turn's result, or an assistant message's text. */
+/** A payload's words: a turn's result, or a message's text (tool calls and results left out). */
 export function textOf(payload: Payload): string {
   if (payload.type === "result")
     return typeof payload.result === "string" ? payload.result : "";
-  if (payload.type !== "assistant") return "";
+  if (payload.type !== "assistant" && payload.type !== "user") return "";
+  if (payload.isMeta === true) return "";
   const content = payload.message?.content;
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -133,10 +135,11 @@ export class ClaudeApi {
   async eventsAfter(
     id: string,
     cursor: string | null,
+    pages = 20,
   ): Promise<{ events: Payload[]; cursor: string | null }> {
     const events: Payload[] = [];
     let next = cursor;
-    for (let page = 0; page < 20; page++) {
+    for (let page = 0; page < pages; page++) {
       const query = new URLSearchParams({
         sort_order: "asc",
         ...(next === null ? {} : { cursor: next }),
@@ -155,6 +158,35 @@ export class ClaudeApi {
       if (result.next_cursor == null || result.data.length === 0) break;
     }
     return { events, cursor: next };
+  }
+
+  /**
+   * A session's dialogue, to carry into the next one (cloud-sessions.md):
+   * each message it was sent and each turn's answer, oldest first, the
+   * code it read and the tools it ran left out. At most `limit`
+   * characters, the latest kept.
+   */
+  async dialogue(id: string, limit: number): Promise<string> {
+    const { events } = await this.eventsAfter(id, null, 200);
+    const turns: string[] = [];
+    for (const event of events) {
+      const text = textOf(event).trim();
+      if (text === "") continue;
+      if (event.type === "user")
+        turns.push(
+          `Sent to you:\n${text.length > 3000 ? `${text.slice(0, 3000)}…` : text}`,
+        );
+      if (event.type === "result") turns.push(`You answered:\n${text}`);
+    }
+    const kept: string[] = [];
+    let size = 0;
+    for (const turn of turns.reverse()) {
+      if (size + turn.length > limit) break;
+      kept.unshift(turn);
+      size += turn.length + 2;
+    }
+    const left = turns.length - kept.length;
+    return `${left > 0 ? `(${String(left)} earlier messages left out)\n\n` : ""}${kept.join("\n\n")}`;
   }
 
   /** Your cloud environments, as `/remote-env` lists them. Cached for ten minutes. */

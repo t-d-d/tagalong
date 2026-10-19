@@ -3,6 +3,7 @@
 // repo. A Claude is a name for a context: a repo, an environment, an access
 // level and a model. The catalogue defines each once; a group lists the ones
 // an owner added to it.
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { z } from "zod";
 import { CommandError } from "./log.ts";
@@ -236,6 +237,22 @@ export function toConfig(file: GroupsFile, extraOwners: string[]): Config {
     groups,
   };
 }
+
+/** A short fingerprint of a Claude's definition, to tell an older one. */
+export const versionOf = (claude: Claude): string =>
+  createHash("sha256")
+    .update(
+      JSON.stringify([
+        claude.repo,
+        claude.environment,
+        claude.access,
+        claude.ref,
+        claude.model,
+        claude.role,
+      ]),
+    )
+    .digest("hex")
+    .slice(0, 12);
 
 /** The group's Claudes, as the catalogue defines them. */
 export const claudesOf = (config: Config, group: Group): Claude[] =>

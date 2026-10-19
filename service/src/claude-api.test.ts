@@ -21,8 +21,21 @@ describe("textOf", () => {
     );
   });
 
+  it("reads what a session was sent, but not tool results or meta messages", () => {
+    expect(textOf({ type: "user", message: { content: "hi" } })).toBe("hi");
+    expect(
+      textOf({
+        type: "user",
+        message: { content: [{ type: "tool_result", content: "x" }] },
+      }),
+    ).toBe("");
+    expect(
+      textOf({ type: "user", isMeta: true, message: { content: "reminder" } }),
+    ).toBe("");
+  });
+
   it("finds no words in other events", () => {
-    expect(textOf({ type: "user", message: { content: "hi" } })).toBe("");
+    expect(textOf({ type: "system", subtype: "init" })).toBe("");
     expect(textOf({ type: "result", result: { not: "text" } })).toBe("");
   });
 });
