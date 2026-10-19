@@ -89,6 +89,17 @@ describe("the device seed", () => {
     });
   });
 
+  it("waits, and says so, when the bucket cannot be read", async () => {
+    const { lines } = logLines();
+    const { aws, deps } = setup();
+    aws.getObject = () => Promise.reject(new Error("AccessDenied"));
+    expect(await ensureDevice(deps)).toBe("waiting");
+    expect(lines.at(-1)).toMatchObject({
+      level: "warn",
+      event: "device-seed-failed",
+    });
+  });
+
   it("is off without a bucket", async () => {
     const { deps } = setup();
     expect(await ensureDevice({ ...deps, aws: undefined })).toBe("off");

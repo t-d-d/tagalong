@@ -844,6 +844,24 @@ describe("the heartbeat", () => {
 });
 
 describe("starting", () => {
+  it("starts even when the login cannot be read, and says so at error level", async () => {
+    const t = (h = await harness({
+      env: { LOGIN_PARAMETER: "/tagalong/claude-login", PORT: "18771" },
+    }));
+    t.aws.getSecret = () => Promise.reject(new Error("AccessDeniedException"));
+    const server = await t.app.start();
+    try {
+      expect(t.lines).toContainEqual(
+        expect.objectContaining({ level: "error", event: "login-missing" }),
+      );
+      expect(t.lines).toContainEqual(
+        expect.objectContaining({ event: "started" }),
+      );
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   it("listens on loopback", async () => {
     const free = await new Promise<number>((resolve) => {
       const probe = createServer();

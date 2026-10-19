@@ -324,6 +324,11 @@ Resources:
                   - s3:GetObject
                   - s3:DeleteObject
                 Resource: !Sub "${Bucket.Arn}/seed/*"
+              # Without it, S3 answers a missing object with access denied
+              # rather than not found, and no upload yet is the usual case.
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt Bucket.Arn
               # ECS Exec, for the operator's commands (docs/setup.md).
               - Effect: Allow
                 Action:

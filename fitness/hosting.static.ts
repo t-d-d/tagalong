@@ -124,6 +124,14 @@ describe("fitness: the bucket is private and forgets (attachments.md)", () => {
   });
 });
 
+describe("fitness: the task can tell a missing upload from a refusal (one-device.md)", () => {
+  it("may list the bucket, so S3 answers not found rather than access denied", () => {
+    expect(JSON.stringify(resourcesOf("AWS::IAM::Role"))).toContain(
+      '{"Effect":"Allow","Action":"s3:ListBucket","Resource":{"Fn::GetAtt":["Bucket","Arn"]}}',
+    );
+  });
+});
+
 describe("fitness: phone numbers never sit in the task definition (public-repo.md)", () => {
   it("reads the owners from Parameter Store as a secret", () => {
     const task = readRepoFile("infra/app.cfn.yml");

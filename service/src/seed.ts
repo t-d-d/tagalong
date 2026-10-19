@@ -32,7 +32,17 @@ const present = (dir: string) =>
 export async function ensureDevice(deps: SeedDeps): Promise<DeviceState> {
   if (present(deps.storeDir)) return "present";
   if (deps.aws === undefined || deps.bucket === undefined) return "off";
-  const upload = await deps.aws.getObject(deps.bucket, deps.key);
+  let upload: Buffer | undefined;
+  try {
+    upload = await deps.aws.getObject(deps.bucket, deps.key);
+  } catch (error) {
+    // Checked again in thirty seconds; the heartbeat says no device meanwhile.
+    log.warn("device-seed-failed", {
+      why: "the bucket cannot be read",
+      ...errorFields(error),
+    });
+    return "waiting";
+  }
   if (upload === undefined) return "waiting";
   // Unpacked on the same volume as the store, so the move into place is one rename.
   const parent = dirname(deps.storeDir);
