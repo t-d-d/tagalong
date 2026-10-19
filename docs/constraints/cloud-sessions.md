@@ -39,7 +39,9 @@ result, so nothing has to be scraped or posted back by the session.
   last sequence number read. A result event ends a turn; its text is
   posted as a reply to the request, after the Claude's name in bold,
   without the session's link. A line the session ended with its own
-  link is dropped.
+  link is dropped. Before a follow-up is sent, the session is read up to
+  its latest event, so a turn someone gave it elsewhere, such as from
+  Claude Desktop, is never posted as this one's answer (#10).
 - A session waiting for an approval is mentioned once, with its link,
   the one place to approve it. A turn with no answer after GIVE_UP_MS
   is given up on.

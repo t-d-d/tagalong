@@ -210,6 +210,31 @@ describe("asking a Claude", () => {
     });
   });
 
+  it("posts the answer to its own turn, not one someone gave the session elsewhere", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("It fails on lint.")]);
+    await says(t, "r1", MEMBER, "@podstow why is the build red?");
+    await poll(t);
+    // Someone carries on in the session from Claude Desktop.
+    t.api.sessions
+      .get(SESSION)
+      ?.events.push(
+        assistant("Working on it."),
+        result("Answered on a laptop."),
+      );
+    await says(t, "r2", MEMBER, "@podstow can you fix it?");
+    await poll(t);
+    expect(t.bridge.sent.at(-1)?.message).toBe("*podstow:* It fails on lint.");
+
+    t.api.sessions.get(SESSION)?.events.push(result("Opened a PR."));
+    await poll(t);
+    expect(t.bridge.sent.at(-1)).toMatchObject({
+      message: "*podstow:* Opened a PR.",
+      quoted_message_id: "r2",
+    });
+  });
+
   it("lets Claudes hear each other through the chat", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION, SECOND);
