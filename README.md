@@ -21,7 +21,7 @@ The owner types `@claude help` in a chat. tagalong answers with messages to copy
 - A chat keeps talking to the version of a Claude it started with. `@claude update brainstorm` moves it to the current definition and repo, carrying its conversation over. `@claude fresh brainstorm` starts it over with only the last messages.
 - `@claude who` lists who is here, and `@claude stop` makes tagalong ignore the chat again.
 
-Then anyone allowed asks a Claude by name. Photos and files they sent in the last ten minutes go with the request. A one-to-one chat with the number works the same as a group.
+Then anyone allowed asks a Claude by name. Photos and files they sent in the last ten minutes go with the request. A voice note goes with its transcript, by Amazon Transcribe. A one-to-one chat with the number works the same as a group.
 
 Only owners can run commands. tagalong ignores anyone an owner has not allowed, and any chat with no Claudes ([who-can-use-it.md](docs/constraints/who-can-use-it.md)).
 

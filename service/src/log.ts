@@ -25,6 +25,8 @@ export const events = [
   "launcher-failed",
   "attachments-sent",
   "attachment-skipped",
+  "attachment-transcribed",
+  "attachment-untranscribed",
   "attachments-off",
   "environments-failed",
   "bridge-unreachable",

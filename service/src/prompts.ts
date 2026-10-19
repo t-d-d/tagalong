@@ -86,7 +86,11 @@ export function filesSection(files: Attachment[]): string {
   if (files.length === 0) return "";
   const lines = files.map(
     (file) =>
-      `- ${file.name} (${file.type}, ${String(Math.ceil(file.bytes / 1024))} KB): ${file.url}`,
+      `- ${file.name} (${file.type}, ${String(Math.ceil(file.bytes / 1024))} KB): ${file.url}${
+        file.transcript === undefined
+          ? ""
+          : `\n  Transcript, by speech recognition, so it may have errors: "${file.transcript}"`
+      }`,
   );
   return `\nFiles sent with this, each a link that works for an hour. Download one with curl -fsSL -o <name> '<link>', then read it:\n${lines.join("\n")}\n`;
 }

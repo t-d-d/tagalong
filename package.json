@@ -18,6 +18,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "3.1149.0",
     "@aws-sdk/client-ssm": "3.1149.0",
+    "@aws-sdk/client-transcribe": "3.1149.0",
     "@aws-sdk/s3-request-presigner": "3.1149.0",
     "zod": "4.6.5"
   },
