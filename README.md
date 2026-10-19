@@ -15,6 +15,7 @@ WhatsApp group ──> bridge ──webhook──> tagalong ──claude --cloud
 The owner types `@claude help` in a chat. tagalong answers with messages to copy, edit and send back:
 
 - `@claude define ops owner/podstow read-only role="You are Podstow's ops operator. Use the ops-tooling skill."` defines a Claude, once, for every chat.
+- `@claude undefine critic` deletes a Claude's definition and forgets its conversations. It refuses while the Claude is still in a chat, and names the chats to remove it from first.
 - `@claude add podstow brainstorm` and `@claude remove brainstorm` say which Claudes are in this chat.
 - `@claude allow @Name podstow` and `@claude revoke @Name podstow` say who else may ask each Claude in this chat. `@claude allow everyone brainstorm` opens a read-only Claude to everyone here.
 - A chat keeps talking to the version of a Claude it started with. `@claude update brainstorm` moves it to the current definition and repo, carrying its conversation over. `@claude fresh brainstorm` starts it over with only the last messages.

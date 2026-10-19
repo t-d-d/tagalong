@@ -32,6 +32,7 @@ export const VERBS = [
   "add",
   "remove",
   "define",
+  "undefine",
   "allow",
   "revoke",
   "fresh",
@@ -42,7 +43,7 @@ export type Verb = (typeof VERBS)[number];
 
 /** A message that is a command, whoever sent it: "@claude <verb> …" or a mention of the number. */
 export const COMMAND =
-  /^\s*@(claude|\d{6,})\b[\s,:]*(help|who|add|remove|define|allow|revoke|fresh|update|stop)\b(.*)$/isu;
+  /^\s*@(claude|\d{6,})\b[\s,:]*(help|who|add|remove|define|undefine|allow|revoke|fresh|update|stop)\b(.*)$/isu;
 export const FRESH_MS = 10 * 60_000;
 
 export interface Command {
@@ -354,6 +355,49 @@ export async function runCommand(
           current === undefined
             ? `Defined.\n${line(defined, deps.api)}\n\nAdd it to a group with \`@claude add ${name}\` there.`
             : `Updated.\n${line(defined, deps.api)}\n\nChats already talking to @${name} keep the old version until \`@claude update ${name}\` there.`,
+        );
+        return;
+      }
+      case "undefine": {
+        const names = namesIn(command.args);
+        const unknown = names.filter(
+          (name) => !deps.groups.config.claudes.has(name),
+        );
+        if (names.length === 0 || unknown.length > 0)
+          throw new CommandError(
+            `${names.length === 0 ? "Which Claude?" : `No Claude called ${unknown.join(", ")}.`} ${catalogue(deps.groups.config, deps.api)}`,
+          );
+        // A Claude still in a chat is removed there first, so nobody loses
+        // one in a chat they cannot see.
+        const file = deps.groups.read();
+        for (const name of names) {
+          const chats = Object.values(file.groups ?? {})
+            .filter((entry) => Object.hasOwn(entry.claudes, name))
+            .map((entry) => entry.label ?? "a chat");
+          if (chats.length > 0) {
+            await reply(
+              `@${name} is still in ${chats.join(", ")}. Remove it there first: \`@claude remove ${name}\``,
+            );
+            return;
+          }
+        }
+        const config = deps.groups.update((current) => ({
+          ...current,
+          claudes: Object.fromEntries(
+            Object.entries(current.claudes ?? {}).filter(
+              ([name]) => !names.includes(name),
+            ),
+          ),
+        }));
+        // A Claude defined again under the same name starts afresh.
+        deps.state.state.threads = Object.fromEntries(
+          Object.entries(deps.state.state.threads).filter(
+            ([key]) => !names.some((name) => key.endsWith(` ${name}`)),
+          ),
+        );
+        deps.state.save();
+        await reply(
+          `Undefined ${names.map((name) => `@${name}`).join(" and ")}, and forgot ${names.length === 1 ? "its" : "their"} conversations.\n\n${catalogue(config, deps.api)}`,
         );
         return;
       }

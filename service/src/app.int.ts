@@ -583,6 +583,39 @@ describe("commands", () => {
     expect(t.groupsFile().groups?.[OTHER_GROUP]).toBeUndefined();
   });
 
+  it("lets an owner undefine a Claude in no chat, and starts it afresh if defined again", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION, [result("First answer.")]);
+    started(t, SECOND);
+    await says(t, "r1", MEMBER, "@podstow hello");
+    await poll(t);
+
+    await says(t, "c1", OWNER, "@claude undefine podstow");
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "@podstow is still in Side projects. Remove it there first: `@claude remove podstow`",
+    );
+    expect(t.groupsFile()).toEqual(standardGroups);
+
+    await says(t, "c2", OWNER, "@claude undefine nobody");
+    expect(t.bridge.sent.at(-1)?.message).toMatch(
+      /^Couldn't do that: No Claude called nobody\. Defined Claudes:\n/u,
+    );
+
+    await says(t, "c3", OWNER, "@claude remove podstow");
+    await says(t, "c4", OWNER, "@claude undefine @podstow");
+    expect(t.groupsFile().claudes?.podstow).toBeUndefined();
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Undefined @podstow, and forgot its conversations.\n\nDefined Claudes:\n*@brainstorm*: o/kickoff, read-only, default environment\n*@critic*: o/critic, read-only, default environment",
+    );
+
+    await says(t, "c5", OWNER, "@claude define podstow o/r read-write");
+    await says(t, "c6", OWNER, "@claude add podstow");
+    await says(t, "r2", OWNER, "@podstow again");
+    expect(launches(t)).toHaveLength(2);
+    expect(followUps(t)).toHaveLength(0);
+  });
+
   it("keeps a chat on a Claude's old version until an owner updates it, then carries the conversation over", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION, SECOND);
