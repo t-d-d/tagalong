@@ -37,22 +37,47 @@ image() {
   echo "$uri:$tag"
 }
 
+# Say why a stack failed: CloudFormation's reason for each resource that
+# did, in the log and the run's summary.
+why() {
+  {
+    echo "$1 failed. CloudFormation's reason for each resource that did:"
+    aws cloudformation describe-stack-events --stack-name "$1" --max-items 50 \
+      --query "StackEvents[?ends_with(ResourceStatus, '_FAILED')].[LogicalResourceId, ResourceStatusReason]" \
+      --output text | sed 's/\t/: /; s/^/- /'
+  } | tee -a "$summary" >&2
+}
+
+# Apply a stack, saying why if it fails. A stack whose first create rolled
+# back cannot be updated, only deleted, and holds nothing yet, so it goes.
+apply() {
+  local stack=$1
+  shift
+  local status
+  status=$(aws cloudformation describe-stacks --stack-name "$stack" \
+    --query "Stacks[0].StackStatus" --output text 2> /dev/null || echo NONE)
+  if [ "$status" = ROLLBACK_COMPLETE ]; then
+    echo "$stack is ROLLBACK_COMPLETE from a first create that failed; deleting it before trying again." >&2
+    aws cloudformation delete-stack --stack-name "$stack"
+    aws cloudformation wait stack-delete-complete --stack-name "$stack"
+  fi
+  if ! aws cloudformation deploy --stack-name "$stack" --no-fail-on-empty-changeset "$@"; then
+    why "$stack"
+    exit 1
+  fi
+}
+
 role() {
-  aws cloudformation deploy \
-    --stack-name tagalong \
+  apply tagalong \
     --template-file infra/github-oidc.cfn.yml \
     --capabilities CAPABILITY_NAMED_IAM \
-    --no-fail-on-empty-changeset \
     --parameter-overrides \
     "GitHubOwnerId=${GITHUB_REPOSITORY_OWNER_ID:?}" \
     "GitHubRepoId=${GITHUB_REPOSITORY_ID:?}"
 }
 
 app() {
-  aws cloudformation deploy \
-    --stack-name tagalong-images \
-    --template-file infra/images.cfn.yml \
-    --no-fail-on-empty-changeset
+  apply tagalong-images --template-file infra/images.cfn.yml
 
   local bridge_uri app_uri
   bridge_uri=$(output tagalong-images BridgeRepositoryUri)
@@ -75,11 +100,17 @@ app() {
     exit 1
   fi
 
-  aws cloudformation deploy \
-    --stack-name tagalong-app \
+  # A new account has no ECS service-linked role until something makes one,
+  # and the cluster cannot be created without it.
+  if ! aws iam get-role --role-name AWSServiceRoleForECS > /dev/null 2>&1; then
+    aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com > /dev/null
+    aws iam wait role-exists --role-name AWSServiceRoleForECS
+    sleep 20 # IAM takes a moment to show a new role to ECS.
+  fi
+
+  apply tagalong-app \
     --template-file infra/app.cfn.yml \
     --capabilities CAPABILITY_IAM \
-    --no-fail-on-empty-changeset \
     --parameter-overrides \
     "VpcId=$vpc" "SubnetA=${subnets[0]}" "SubnetB=${subnets[1]}" \
     "BridgeImage=$bridge_image" "AppImage=$app_image"
