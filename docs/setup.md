@@ -4,7 +4,7 @@ How to run the checks, how to reach the running task, and what to do when an ale
 
 ## The checks
 
-Node 22.18 or later, and python3 for the launcher's tests.
+Node 24, as `.node-version` says, and python3 for the launcher's tests.
 
 ```
 npm ci
