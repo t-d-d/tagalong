@@ -14,4 +14,10 @@ describe("fitness: a failed deploy says why (repo-and-delivery.md)", () => {
       /ROLLBACK_COMPLETE[\s\S]*delete-stack[\s\S]*wait stack-delete-complete/u,
     );
   });
+
+  it("makes ECS's service-linked role in a new account, which the cluster needs", () => {
+    expect(script).toMatch(
+      /create-service-linked-role --aws-service-name ecs\.amazonaws\.com/u,
+    );
+  });
 });

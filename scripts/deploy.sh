@@ -100,6 +100,14 @@ app() {
     exit 1
   fi
 
+  # A new account has no ECS service-linked role until something makes one,
+  # and the cluster cannot be created without it.
+  if ! aws iam get-role --role-name AWSServiceRoleForECS > /dev/null 2>&1; then
+    aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com > /dev/null
+    aws iam wait role-exists --role-name AWSServiceRoleForECS
+    sleep 20 # IAM takes a moment to show a new role to ECS.
+  fi
+
   apply tagalong-app \
     --template-file infra/app.cfn.yml \
     --capabilities CAPABILITY_IAM \
