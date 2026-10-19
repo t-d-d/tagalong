@@ -222,8 +222,19 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
   const keepFresh = () => cli.run(() => login.keepFresh());
 
   async function start(): Promise<Server> {
-    await cli.run(() => login.restore());
-    await checkDevice();
+    // Nothing at start may stop the service: a crash loop would roll the
+    // deploy back, and the heartbeat and alarms say what is wrong.
+    await cli
+      .run(() => login.restore())
+      .catch((error: unknown) => {
+        log.error("login-missing", {
+          why: "the stored login cannot be read",
+          ...errorFields(error),
+        });
+      });
+    await checkDevice().catch((error: unknown) => {
+      log.warn("loop-failed", { loop: "device", ...errorFields(error) });
+    });
     if (env.ATTACHMENTS_BUCKET === undefined) log.info("attachments-off");
     const server = webhookServer(token, onPayload);
     await new Promise<void>((resolve) =>
