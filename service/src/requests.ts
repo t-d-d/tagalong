@@ -75,6 +75,7 @@ async function files(
   const rows = pickMedia({
     config: deps.groups.config,
     group,
+    claude,
     people: deps.people,
     store: deps.store,
     chat: payload.chatJID,

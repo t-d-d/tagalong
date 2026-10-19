@@ -34,8 +34,10 @@ export const standardGroups: GroupsFile = {
   groups: {
     [GROUP]: {
       label: "Side projects",
-      claudes: ["podstow", "brainstorm"],
-      members: [MEMBER],
+      claudes: {
+        podstow: { members: [MEMBER] },
+        brainstorm: { members: [MEMBER] },
+      },
     },
   },
 };

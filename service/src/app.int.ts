@@ -450,11 +450,49 @@ describe("who is answered", () => {
     );
     await says(t, "r2", MEMBER, "@critic have a look");
     expect(t.bridge.sent.at(-1)?.message).toBe(
-      "@critic isn't in this group. Here: @podstow, @brainstorm. An owner can add one with @claude add <name>.",
+      "@critic isn't here. You can ask: @podstow, @brainstorm. An owner can add one with @claude add <name>.",
     );
     expect(t.fake.calls).toEqual([]);
   });
 
+  it("lets each Claude answer only the people allowed to ask it here", async () => {
+    const t = (h = await harness({
+      groups: {
+        ...standardGroups,
+        groups: {
+          [GROUP]: {
+            label: "Side projects",
+            claudes: {
+              podstow: { members: [] },
+              brainstorm: { members: [MEMBER] },
+            },
+          },
+        },
+      },
+    }));
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION);
+    started(t, SECOND);
+    await says(t, "r1", MEMBER, "@podstow @brainstorm what do you think?");
+    expect(
+      launches(t).map((call) => call.prompt?.match(/You are "(\w+)"/u)?.[1]),
+    ).toEqual(["brainstorm"]);
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({
+        event: "request-ignored",
+        why: "not-a-member",
+        claudes: 1,
+      }),
+    );
+    await says(t, "r2", MEMBER, "@claude anyone around?");
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Ask one of us by name: @brainstorm.",
+    );
+    // podstow never hears someone who may not ask it.
+    await says(t, "r3", OWNER, "@podstow what did Ollie say?");
+    expect(launches(t)[1]?.prompt).not.toContain("what do you think?");
+    expect(launches(t)[1]?.prompt).toContain('You are "podstow"');
+  });
   it("answers an owner who writes from their LID", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);
@@ -465,7 +503,7 @@ describe("who is answered", () => {
 });
 
 describe("commands", () => {
-  it("lets an owner define a Claude, add it, add people, and stop", async () => {
+  it("lets an owner define a Claude, add it, allow people for it, and stop", async () => {
     const t = (h = await harness());
     await says(
       t,
@@ -488,34 +526,91 @@ describe("commands", () => {
     });
     expect(t.groupsFile().groups?.[OTHER_GROUP]).toEqual({
       label: "Family",
-      claudes: ["reviewer", "podstow"],
+      claudes: { reviewer: { members: [] }, podstow: { members: [] } },
     });
-    expect(t.bridge.sent.at(-1)?.message).toContain(
-      "Claudes here:\n*@reviewer*: o/other, read-only, spare\n*@podstow*: o/r, read-write, Default Full",
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      [
+        "Claudes here:",
+        "*@reviewer*: o/other, read-only, spare",
+        "  Asked by: Thomas",
+        "*@podstow*: o/r, read-write, Default Full",
+        "  Asked by: Thomas",
+        "",
+        "Owners can ask them all: Thomas",
+        "Others you can add: brainstorm, critic",
+        "",
+        "Only owners can ask @reviewer and @podstow until you allow someone: `@claude allow @Name reviewer`",
+      ].join("\n"),
     );
 
     await says(t, "c3", OWNER, `@claude allow @${MEMBER}`, {
       chatJID: OTHER_GROUP,
       mentionedJids: [`${MEMBER}@s.whatsapp.net`],
     });
-    expect(t.groupsFile().groups?.[OTHER_GROUP]?.members).toEqual([MEMBER]);
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Which Claude? `@claude allow @Name reviewer`. Allowing someone for one Claude does not let them ask the others.",
+    );
+    await says(t, "c4", OWNER, `@claude allow @${MEMBER} reviewer`, {
+      chatJID: OTHER_GROUP,
+      mentionedJids: [`${MEMBER}@s.whatsapp.net`],
+    });
+    expect(t.groupsFile().groups?.[OTHER_GROUP]?.claudes).toEqual({
+      reviewer: { members: [MEMBER] },
+      podstow: { members: [] },
+    });
     expect(t.bridge.sent.at(-1)?.message).toContain(
-      "Who can ask them: Thomas, Ollie",
+      "*@reviewer*: o/other, read-only, spare\n  Asked by: Thomas, Ollie\n*@podstow*",
     );
 
-    await says(t, "c4", OWNER, "@claude revoke +447700900002", {
+    await says(t, "c5", OWNER, "@claude revoke +447700900002", {
       chatJID: OTHER_GROUP,
     });
-    expect(t.groupsFile().groups?.[OTHER_GROUP]?.members).toEqual([]);
+    expect(t.groupsFile().groups?.[OTHER_GROUP]?.claudes).toEqual({
+      reviewer: { members: [] },
+      podstow: { members: [] },
+    });
 
-    await says(t, "c5", OWNER, "@claude remove reviewer podstow", {
+    await says(t, "c6", OWNER, "@claude remove reviewer podstow", {
       chatJID: OTHER_GROUP,
     });
     expect(t.app.parts.groups.config.groups.has(OTHER_GROUP)).toBe(false);
-    expect(t.groupsFile().groups?.[OTHER_GROUP]?.claudes).toEqual([]);
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "No Claudes left here, so I'll ignore this chat.",
+    );
 
-    await says(t, "c6", OWNER, "@claude stop", { chatJID: OTHER_GROUP });
+    await says(t, "c7", OWNER, "@claude stop", { chatJID: OTHER_GROUP });
     expect(t.groupsFile().groups?.[OTHER_GROUP]).toBeUndefined();
+  });
+
+  it("opens a read-only Claude to everyone in the chat, and never a read-write one", async () => {
+    const t = (h = await harness());
+    await says(t, "c1", OWNER, "@claude allow everyone brainstorm");
+    expect(t.groupsFile().groups?.[GROUP]?.claudes.brainstorm).toEqual({
+      members: [MEMBER],
+      everyone: true,
+    });
+    expect(t.bridge.sent.at(-1)?.message).toContain(
+      "*@brainstorm*: o/kickoff, read-only, default environment\n  Asked by: everyone here",
+    );
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", STRANGER, "@brainstorm wild idea");
+    expect(launches(t)).toHaveLength(1);
+    await says(t, "r2", STRANGER, "@podstow and you?");
+    expect(launches(t)).toHaveLength(1);
+
+    await says(t, "c2", OWNER, "@claude allow everyone podstow");
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Couldn't do that: everyone is only for read-only Claudes. @podstow can change a repo, so allow people by name.",
+    );
+    expect(t.groupsFile().groups?.[GROUP]?.claudes.podstow).toEqual({
+      members: [MEMBER],
+    });
+
+    await says(t, "c3", OWNER, "@claude revoke everyone brainstorm");
+    expect(t.groupsFile().groups?.[GROUP]?.claudes.brainstorm).toEqual({
+      members: [MEMBER],
+    });
   });
 
   it("works the same in a one-to-one chat with the number", async () => {

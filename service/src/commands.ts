@@ -12,6 +12,8 @@ import {
   type Config,
   type Group,
   type GroupsFile,
+  membersOf,
+  openTo,
   type GroupsStore,
   claudeSchema,
   isAccess,
@@ -145,14 +147,20 @@ export function describe(
   people: People,
   api: ClaudeApi,
 ): string {
-  const who = [
-    ...new Set(
-      [...config.owners, ...group.members].map((user) => people.nameOf(user)),
-    ),
-  ];
+  const owners = config.owners.map((user) => people.nameOf(user));
   const here = group.claudes.flatMap((name) => {
     const claude = config.claudes.get(name);
-    return claude === undefined ? [] : [line(claude, api)];
+    if (claude === undefined) return [];
+    const askers = openTo(config, group, name)
+      ? ["everyone here"]
+      : [
+          ...new Set(
+            [...config.owners, ...membersOf(group, name)].map((user) =>
+              people.nameOf(user),
+            ),
+          ),
+        ];
+    return [line(claude, api), `  Asked by: ${askers.join(", ")}`];
   });
   const others = [...config.claudes.keys()].filter(
     (name) => !group.claudes.includes(name),
@@ -161,7 +169,7 @@ export function describe(
     "Claudes here:",
     ...here,
     "",
-    `Who can ask them: ${who.join(", ")}`,
+    `Owners can ask them all: ${owners.join(", ")}`,
     ...(others.length > 0 ? [`Others you can add: ${others.join(", ")}`] : []),
   ].join("\n");
 }
@@ -324,24 +332,22 @@ export async function runCommand(
         const label = isGroupChat(chat)
           ? (deps.store.chatName(chat) ?? group?.label ?? chat)
           : DIRECT_LABEL;
+        // A Claude added to a chat starts with only the owners able to ask it.
         const config = deps.groups.update((file) => {
           const entry = entryOf(file, chat);
+          const claudes = { ...entry?.claudes };
+          for (const name of names) claudes[name] ??= { members: [] };
           return {
             ...file,
-            groups: {
-              ...file.groups,
-              [chat]: {
-                ...entry,
-                label,
-                claudes: [...new Set([...(entry?.claudes ?? []), ...names])],
-              },
-            },
+            groups: { ...file.groups, [chat]: { ...entry, label, claudes } },
           };
         });
         const updated = config.groups.get(chat);
         if (updated === undefined)
           throw new CommandError("the change did not stick");
-        await reply(describe(updated, config, deps.people, deps.api));
+        await reply(
+          `${describe(updated, config, deps.people, deps.api)}\n\nOnly owners can ask ${names.map((name) => `@${name}`).join(" and ")} until you allow someone: \`@claude allow @Name ${names[0] ?? ""}\``,
+        );
         return;
       }
       case "remove": {
@@ -354,6 +360,7 @@ export async function runCommand(
           );
           return;
         }
+        // Who could ask a removed Claude goes with it.
         const config = deps.groups.update((file) => {
           const entry = entryOf(file, chat);
           return entry === undefined
@@ -364,8 +371,10 @@ export async function runCommand(
                   ...file.groups,
                   [chat]: {
                     ...entry,
-                    claudes: entry.claudes.filter(
-                      (name) => !names.includes(name),
+                    claudes: Object.fromEntries(
+                      Object.entries(entry.claudes).filter(
+                        ([name]) => !names.includes(name),
+                      ),
                     ),
                   },
                 },
@@ -374,7 +383,7 @@ export async function runCommand(
         const updated = config.groups.get(chat);
         await reply(
           updated === undefined
-            ? "No Claudes left here, so I'll ignore this group. Its people are remembered for when you add one again."
+            ? "No Claudes left here, so I'll ignore this chat."
             : describe(updated, config, deps.people, deps.api),
         );
         return;
@@ -413,28 +422,64 @@ export async function runCommand(
           await reply("Add a Claude first: `@claude add <name>`");
           return;
         }
+        const words = tokens(command.args).map((word) => word.toLowerCase());
+        const everyone = words.includes("everyone");
         const people = peopleIn(message, command.args, deps.people);
-        if (people.length === 0) {
-          await reply(`Who? Mention them: \`@claude ${command.verb} @Name\``);
+        const named = namesIn(command.args).filter((name) =>
+          group.claudes.includes(name),
+        );
+        // Allowing needs a Claude named, unless there is only one here.
+        // Revoking with none named takes the person off every Claude here.
+        const claudes =
+          named.length > 0
+            ? named
+            : command.verb === "revoke" || group.claudes.length === 1
+              ? group.claudes
+              : [];
+        if (claudes.length === 0) {
+          await reply(
+            `Which Claude? \`@claude allow @Name ${group.claudes[0] ?? ""}\`. Allowing someone for one Claude does not let them ask the others.`,
+          );
           return;
         }
-        const members =
-          command.verb === "allow"
-            ? [...new Set([...group.members, ...people])]
-            : group.members.filter(
-                (member) =>
-                  !people.some((person) =>
-                    deps.people.sameUser(member, person),
-                  ),
-              );
+        if (!everyone && people.length === 0) {
+          await reply(
+            `Who? Mention them, or say everyone: \`@claude ${command.verb} @Name ${claudes[0] ?? ""}\``,
+          );
+          return;
+        }
+        const readWrite = claudes.filter(
+          (name) =>
+            deps.groups.config.claudes.get(name)?.access === "read-write",
+        );
+        if (everyone && command.verb === "allow" && readWrite.length > 0)
+          throw new CommandError(
+            `everyone is only for read-only Claudes. ${readWrite.map((name) => `@${name}`).join(" and ")} can change a repo, so allow people by name.`,
+          );
         const config = deps.groups.update((file) => {
           const entry = entryOf(file, chat);
-          return entry === undefined
-            ? file
-            : {
-                ...file,
-                groups: { ...file.groups, [chat]: { ...entry, members } },
-              };
+          if (entry === undefined) return file;
+          const next = { ...entry.claudes };
+          for (const name of claudes) {
+            const askers = next[name] ?? { members: [] };
+            const members =
+              command.verb === "allow"
+                ? [...new Set([...askers.members, ...people])]
+                : askers.members.filter(
+                    (member) =>
+                      !people.some((person) =>
+                        deps.people.sameUser(member, person),
+                      ),
+                  );
+            const open = everyone
+              ? command.verb === "allow"
+              : askers.everyone === true;
+            next[name] = { members, ...(open ? { everyone: true } : {}) };
+          }
+          return {
+            ...file,
+            groups: { ...file.groups, [chat]: { ...entry, claudes: next } },
+          };
         });
         const updated = config.groups.get(chat);
         await reply(

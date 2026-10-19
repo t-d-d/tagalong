@@ -108,20 +108,28 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
     });
     if (asked.claudes.length === 0 && !asked.bare && asked.missing.length === 0)
       return;
-    if (!allowed(config, group, people, payload.sender)) {
-      log.info("request-ignored", { why: "not-a-member", group: group.label });
-      return;
-    }
+    // Each Claude answers only the people allowed to ask it here.
+    const may = (claude: string) =>
+      allowed(config, group, claude, people, payload.sender);
+    const askable = group.claudes.filter(may);
+    const turns = asked.claudes.filter(may);
+    if (turns.length < asked.claudes.length || askable.length === 0)
+      log.info("request-ignored", {
+        why: "not-a-member",
+        group: group.label,
+        claudes: asked.claudes.length - turns.length,
+      });
+    if (askable.length === 0) return;
     const quote = {
       id: payload.messageId,
       sender: payload.sender,
       content: payload.content,
     };
     if (asked.claudes.length === 0) {
-      const here = group.claudes.map((name) => `@${name}`).join(", ");
+      const here = askable.map((name) => `@${name}`).join(", ");
       const text =
         asked.missing.length > 0
-          ? `${asked.missing.map((name) => `@${name}`).join(", ")} isn't in this group. Here: ${here}. An owner can add one with @claude add <name>.`
+          ? `${asked.missing.map((name) => `@${name}`).join(", ")} isn't here. You can ask: ${here}. An owner can add one with @claude add <name>.`
           : `Ask one of us by name: ${here}.`;
       pending = requests
         .run(() => bridge.send(payload.chatJID, text, quote))
@@ -130,8 +138,9 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
         });
       return;
     }
+    if (turns.length === 0) return;
     const claudes = claudesOf(config, group).filter((claude) =>
-      asked.claudes.includes(claude.name),
+      turns.includes(claude.name),
     );
     const deps = {
       env,

@@ -16,9 +16,11 @@ describe("groups.json on disk", () => {
     store.update((file) => ({
       ...file,
       claudes: { podstow: { repo: "o/r", access: "read-write" } },
-      groups: { [GROUP]: { claudes: ["podstow"], members: [MEMBER] } },
+      groups: { [GROUP]: { claudes: { podstow: { members: [MEMBER] } } } },
     }));
-    expect(store.config.groups.get(GROUP)?.members).toEqual([MEMBER]);
+    expect(store.config.groups.get(GROUP)?.members).toEqual({
+      podstow: [MEMBER],
+    });
     expect(new GroupsStore(path, []).config.claudes.get("podstow")?.repo).toBe(
       "o/r",
     );
@@ -29,17 +31,17 @@ describe("groups.json on disk", () => {
     const store = new GroupsStore(path, []);
     store.update(() => ({
       claudes: { podstow: { repo: "o/r", access: "read-only" } },
-      groups: { [GROUP]: { claudes: ["podstow"] } },
+      groups: { [GROUP]: { claudes: { podstow: { members: [] } } } },
     }));
     const before = readFileSync(path, "utf8");
     expect(() =>
       store.update((file) => ({
         ...file,
-        groups: { [GROUP]: { claudes: ["podstow"], members: ["Ollie"] } },
+        groups: { [GROUP]: { claudes: { podstow: { members: ["Ollie"] } } } },
       })),
     ).toThrow();
     expect(readFileSync(path, "utf8")).toBe(before);
-    expect(store.config.groups.get(GROUP)?.members).toEqual([]);
+    expect(store.config.groups.get(GROUP)?.members).toEqual({ podstow: [] });
   });
 
   it("writes a file from before named Claudes back in the new shape", () => {
@@ -61,7 +63,7 @@ describe("groups.json on disk", () => {
     store.update((file) => file);
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
       claudes: { podstow: { repo: "o/podstow", access: "read-write" } },
-      groups: { [GROUP]: { claudes: ["podstow"], members: [MEMBER] } },
+      groups: { [GROUP]: { claudes: { podstow: { members: [MEMBER] } } } },
     });
   });
 

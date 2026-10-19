@@ -48,10 +48,15 @@ export const claudeSchema = z.object({
     .optional(),
 });
 
+// Each Claude in a chat, with the people who may ask it there, besides the
+// owners: named ones, or everyone in the chat (read-only Claudes only).
+export const askersSchema = z.object({
+  members: z.array(digits).default([]),
+  everyone: z.boolean().optional(),
+});
 export const groupSchema = z.object({
   label: z.string().optional(),
-  claudes: z.array(name),
-  members: z.array(digits).optional(),
+  claudes: z.record(name, askersSchema),
 });
 
 // A group from before named Claudes: one repo of its own. Read, and written
@@ -98,8 +103,20 @@ export interface Group {
   label: string;
   /** The Claudes added here that the catalogue defines, in the order added. */
   claudes: string[];
-  members: string[];
+  /** Who may ask each Claude here, besides the owners. */
+  members: Record<string, string[]>;
+  /** The Claudes here that anyone in the chat may ask. */
+  everyone: string[];
 }
+
+/** Who may ask `claude` in `group`, by name, besides the owners. */
+export const membersOf = (group: Group, claude: string): string[] =>
+  group.members[claude] ?? [];
+
+/** Whether anyone in `group` may ask `claude`: only ever a read-only one. */
+export const openTo = (config: Config, group: Group, claude: string): boolean =>
+  group.everyone.includes(claude) &&
+  config.claudes.get(claude)?.access === "read-only";
 
 export interface Config {
   owners: string[];
@@ -145,7 +162,7 @@ export function parseFile(raw: unknown): GroupsFile {
   const claudes = { ...parsed.data.claudes };
   const groups: Record<string, GroupEntry> = {};
   for (const [key, entry] of Object.entries(parsed.data.groups ?? {})) {
-    if ("claudes" in entry) {
+    if (!("repo" in entry)) {
       groups[key] = entry;
       continue;
     }
@@ -158,8 +175,7 @@ export function parseFile(raw: unknown): GroupsFile {
     claudes[claude] = context;
     groups[key] = {
       ...(label === undefined ? {} : { label }),
-      claudes: [claude],
-      ...(members === undefined ? {} : { members }),
+      claudes: { [claude]: { members: members ?? [] } },
     };
   }
   return {
@@ -186,14 +202,21 @@ export function toConfig(file: GroupsFile, extraOwners: string[]): Config {
   }
   const groups = new Map<string, Group>();
   for (const [key, entry] of Object.entries(file.groups ?? {})) {
-    const here = entry.claudes.filter((claude) => claudes.has(claude));
+    const here = Object.entries(entry.claudes).filter(([claude]) =>
+      claudes.has(claude),
+    );
     if (here.length === 0) continue;
     groups.set(key, {
       jid: key,
       // A one-to-one chat's JID is a phone number: never a label (logging.md).
       label: entry.label ?? (key.endsWith("@g.us") ? key : "direct chat"),
-      claudes: here,
-      members: entry.members ?? [],
+      claudes: here.map(([claude]) => claude),
+      members: Object.fromEntries(
+        here.map(([claude, { members }]) => [claude, members]),
+      ),
+      everyone: here
+        .filter(([, askers]) => askers.everyone === true)
+        .map(([claude]) => claude),
     });
   }
   return {

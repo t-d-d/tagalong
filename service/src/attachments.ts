@@ -30,6 +30,8 @@ export interface Attachment {
 export interface Pick {
   config: Config;
   group: Group;
+  /** The Claude the files are for: only from people who may ask it. */
+  claude: string;
   people: People;
   store: WhatsAppStore;
   chat: string;
@@ -49,7 +51,7 @@ export function pickMedia(pick: Pick): MessageRow[] {
     row !== undefined &&
     MEDIA.has(row.mediaType) &&
     !row.isFromMe &&
-    allowed(pick.config, pick.group, pick.people, row.sender);
+    allowed(pick.config, pick.group, pick.claude, pick.people, row.sender);
   const own = pick.store.message(pick.chat, pick.messageId);
   const quoted = pick.store.message(pick.chat, pick.quotedMessageId);
   const recent = pick.store
