@@ -22,7 +22,7 @@ nothing about what the bridge, claude.ai or a stored file sent.
 - No floating promises. Every switch is exhaustive.
 - A lint rule is an error or off. Zero warnings.
 - A disabled rule carries its reason on the same line.
-- The service runs as TypeScript on Node 22 with type stripping. There
+- The service runs as TypeScript on Node 24 with type stripping. There
   is no build step.
 
 ## Do not
