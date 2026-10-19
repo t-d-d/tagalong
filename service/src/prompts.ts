@@ -129,8 +129,10 @@ export const firstPrompt = (first: First): string => {
     first.others.length === 0
       ? ""
       : ` The other Claudes here are ${first.others.map((other) => `@${other}`).join(", ")}; their answers appear in the conversation under their names.`;
+  const role =
+    claude.role === undefined ? "" : `\nYour role:\n${claude.role}\n`;
   return `You are "${claude.name}", one of the Claudes in the WhatsApp chat "${first.chatName}". People ask you by writing @${claude.name}.${others} You are working in ${claude.repo}.
-
+${role}
 The conversation so far, oldest first:
 ${first.conversation || "(nothing yet)"}
 

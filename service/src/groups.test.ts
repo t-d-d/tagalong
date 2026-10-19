@@ -48,6 +48,7 @@ describe("groups.json", () => {
       access: "read-only",
       ref: "main",
       model: undefined,
+      role: undefined,
     });
     const group = config.groups.get(GROUP);
     if (group === undefined) throw new Error("no group");

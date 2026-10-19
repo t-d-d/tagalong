@@ -46,6 +46,14 @@ export const claudeSchema = z.object({
     .string()
     .regex(/^[\w.-]+$/u, "must be a model name")
     .optional(),
+  // A brief sent at the start of each session: who it is, how it works,
+  // and any skill from the repo it should use.
+  role: z
+    .string()
+    .trim()
+    .min(1)
+    .max(2000, "must be at most 2000 characters")
+    .optional(),
 });
 
 // Each Claude in a chat, with the people who may ask it there, besides the
@@ -96,6 +104,7 @@ export interface Claude {
   access: Access;
   ref: string;
   model: string | undefined;
+  role: string | undefined;
 }
 
 export interface Group {
@@ -198,6 +207,7 @@ export function toConfig(file: GroupsFile, extraOwners: string[]): Config {
       access: entry.access,
       ref: entry.ref ?? "main",
       model: entry.model,
+      role: entry.role,
     });
   }
   const groups = new Map<string, Group>();

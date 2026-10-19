@@ -26,6 +26,7 @@ describe("workspaces", () => {
       access: "read-only" as const,
       ref: "main",
       model: undefined,
+      role: undefined,
     };
     const dir = cloud.workspaceFor(claude);
     expect(dir.endsWith("o__r")).toBe(true);

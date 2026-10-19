@@ -582,6 +582,29 @@ describe("commands", () => {
     expect(t.groupsFile().groups?.[OTHER_GROUP]).toBeUndefined();
   });
 
+  it("gives a Claude a role, and starts it afresh when it is redefined", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION, [result("Fine.")]);
+    started(t, SECOND);
+    await says(t, "r1", MEMBER, "@brainstorm hello");
+    await poll(t);
+    await says(
+      t,
+      "c1",
+      OWNER,
+      '@claude define brainstorm role="You coach a brainstorm: go wide before narrowing."',
+    );
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      'Updated.\n*@brainstorm*: o/kickoff, read-only, default environment, role "You coach a brainstorm: go wide before narrowing."\n\nIts conversations start afresh next time it is asked.',
+    );
+    await says(t, "r2", MEMBER, "@brainstorm again");
+    expect(followUps(t)).toHaveLength(0);
+    expect(launches(t)[1]?.prompt).toContain(
+      "Your role:\nYou coach a brainstorm: go wide before narrowing.",
+    );
+  });
+
   it("opens a read-only Claude to everyone in the chat, and never a read-write one", async () => {
     const t = (h = await harness());
     await says(t, "c1", OWNER, "@claude allow everyone brainstorm");

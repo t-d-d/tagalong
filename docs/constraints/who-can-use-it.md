@@ -11,8 +11,10 @@ there and who may ask them.
 - Owners are the numbers in /tagalong/owners and in groups.json. A
   person is matched on their number or their LID, never on a name.
 - A Claude is a name for a context: a repo, an environment, an access
-  level, a ref and a model. The catalogue in groups.json defines each
-  once, for every chat. read-write starts sessions in auto mode;
+  level, a ref, a model and an optional role, a brief sent at the start
+  of each of its sessions. Several Claudes can share a repo and differ
+  by role. The catalogue in groups.json defines each once, for every
+  chat. read-write starts sessions in auto mode;
   read-only in dontAsk mode, with an instruction not to change anything.
 - A chat is a group or a one-to-one chat with the number; both work the
   same. A chat is answered only once an owner has added a Claude to it.

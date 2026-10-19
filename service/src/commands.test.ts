@@ -64,6 +64,7 @@ describe("defineEntry", () => {
     access: "read-write",
     ref: "main",
     model: undefined,
+    role: undefined,
   };
 
   it("starts read-only on main, with the default environment", async () => {
@@ -91,6 +92,28 @@ describe("defineEntry", () => {
       ref: "dev",
       model: "opus",
     });
+  });
+
+  it("takes a role in quotes, straight or curly, and clears it when empty", async () => {
+    expect(
+      await defineEntry(
+        "ops o/podstow read-only role=\u201cYou are Podstow's ops operator. Use the ops-tooling skill.\u201d",
+        undefined,
+        undefined,
+        api,
+      ),
+    ).toEqual({
+      repo: "o/podstow",
+      access: "read-only",
+      role: "You are Podstow's ops operator. Use the ops-tooling skill.",
+    });
+    const ops = { ...current, name: "ops", role: "Old role." };
+    expect(
+      (await defineEntry('ops role=""', ops, undefined, api)).role,
+    ).toBeUndefined();
+    expect((await defineEntry("ops read-only", ops, undefined, api)).role).toBe(
+      "Old role.",
+    );
   });
 
   it("asks for a repo when there is none", async () => {

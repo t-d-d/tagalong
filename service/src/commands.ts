@@ -115,9 +115,12 @@ export function peopleIn(
 
 /** The words of a command, a "quoted name" kept whole. */
 export const tokens = (args: string): string[] =>
-  (args.match(/\w+="[^"]*"|"[^"]*"|\S+/gu) ?? []).map((token) =>
-    token.replace(/"/gu, ""),
-  );
+  // A phone's keyboard may turn straight quotes curly.
+  (
+    args
+      .replace(/[\u201c\u201d\u201e\u201f]/gu, '"')
+      .match(/\w+="[^"]*"|"[^"]*"|\S+/gu) ?? []
+  ).map((token) => token.replace(/"/gu, ""));
 
 /** Claude names in a command's words, with or without an @. */
 const namesIn = (args: string): string[] => [
@@ -137,6 +140,11 @@ export function line(claude: Claude, api: ClaudeApi): string {
       : (api.nameOf(claude.environment) ?? claude.environment),
     ...(claude.ref === "main" ? [] : [`from ${claude.ref}`]),
     ...(claude.model === undefined ? [] : [claude.model]),
+    ...(claude.role === undefined
+      ? []
+      : [
+          `role "${claude.role.length > 60 ? `${claude.role.slice(0, 60)}…` : claude.role}"`,
+        ]),
   ];
   return `*@${claude.name}*: ${claude.repo}, ${extras.join(", ")}`;
 }
@@ -205,12 +213,15 @@ export async function defineEntry(
       : await api.resolve(wanted);
   const model = option("model") ?? current?.model;
   const ref = option("ref") ?? current?.ref;
+  // role="" clears it.
+  const role = option("role") ?? current?.role;
   return claudeSchema.parse({
     repo,
     ...(environment === undefined ? {} : { environment }),
     access: words.find(isAccess) ?? current?.access ?? "read-only",
     ...(ref === undefined || ref === "main" ? {} : { ref }),
     ...(model === undefined ? {} : { model }),
+    ...(role === undefined || role.trim() === "" ? {} : { role }),
   });
 }
 
@@ -295,7 +306,8 @@ export async function runCommand(
         );
         return;
       case "define": {
-        const [name] = namesIn(command.args);
+        const first = tokens(command.args)[0]?.replace(/^@/u, "").toLowerCase();
+        const name = first !== undefined && isName(first) ? first : undefined;
         if (name === undefined)
           throw new CommandError(
             "Name it first: `@claude define critic owner/repo read-only`",
@@ -314,8 +326,20 @@ export async function runCommand(
         const defined = config.claudes.get(name);
         if (defined === undefined)
           throw new CommandError("the definition did not stick");
+        // A running session carries on with the old repo and role,
+        // so a changed Claude starts afresh everywhere.
+        const changed =
+          current !== undefined &&
+          JSON.stringify(current) !== JSON.stringify(defined);
+        if (changed) {
+          for (const [key, thread] of Object.entries(deps.state.state.threads))
+            if (key.endsWith(` ${name}`)) thread.session = null;
+          deps.state.save();
+        }
         await reply(
-          `${current === undefined ? "Defined" : "Updated"}.\n${line(defined, deps.api)}\n\nAdd it to a group with \`@claude add ${name}\` there.`,
+          current === undefined
+            ? `Defined.\n${line(defined, deps.api)}\n\nAdd it to a group with \`@claude add ${name}\` there.`
+            : `Updated.\n${line(defined, deps.api)}${changed ? `\n\nIts conversations start afresh next time it is asked.` : ""}`,
         );
         return;
       }

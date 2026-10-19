@@ -6,7 +6,7 @@ A few people talk about their side projects in WhatsApp groups. When a question 
 
 ## What version 1 does
 
-1. Keeps a catalogue of named Claudes, each a repo, an environment, an access level (read-write in auto mode, or read-only in dontAsk mode and told not to change anything), a ref and a model.
+1. Keeps a catalogue of named Claudes, each a repo, an environment, an access level (read-write in auto mode, or read-only in dontAsk mode and told not to change anything), a ref, a model and an optional role: a brief sent at the start of its sessions, which can name a skill from the repo.
 2. Lets an owner add Claudes to a group or a one-to-one chat, and say who else may ask each one there, or open a read-only one to everyone in the chat. Nothing answers in a chat with no Claudes, and there is no default Claude.
 3. Answers a Claude asked by name (`@podstow`), or by a reply to one of its answers, from an owner or someone allowed to ask that Claude in that chat. One message can ask several.
 4. Keeps one running cloud session per Claude per chat. Each turn carries what the people who may ask it said in the chat since that Claude's last turn, the other Claudes' answers included, then the request, and any photos or files members sent in the last ten minutes, as links that last an hour. A new session starts with the chat's last messages.

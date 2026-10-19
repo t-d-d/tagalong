@@ -1,6 +1,6 @@
 # tagalong
 
-Claudes in your WhatsApp chats. Each Claude has a name and its own context: a repo, a cloud environment, an access level and a model. Add a few to a group, ask one by name (`@podstow why is the build red?`, `@brainstorm go wide on this`), and it answers in the chat. Each keeps one running Claude Code cloud session per chat, and hears what was said since its last turn, the other Claudes included.
+Claudes in your WhatsApp chats. Each Claude has a name and its own context: a repo, a cloud environment, an access level, a model and, if you like, a role, so `@podstow` and `@ops` can share a repo and still work differently. Add a few to a group, ask one by name (`@podstow why is the build red?`, `@brainstorm go wide on this`), and it answers in the chat. Each keeps one running Claude Code cloud session per chat, and hears what was said since its last turn, the other Claudes included.
 
 It runs as one small always-on task in AWS: a linked WhatsApp device (the [whatsapp-mcp](https://github.com/verygoodplugins/whatsapp-mcp) bridge) and tagalong beside it, which starts sessions with `claude --cloud` and reads their answers from the sessions API.
 
@@ -14,7 +14,7 @@ WhatsApp group ──> bridge ──webhook──> tagalong ──claude --cloud
 
 The owner types `@claude help` in a chat. tagalong answers with messages to copy, edit and send back:
 
-- `@claude define brainstorm owner/kickoff read-only env="Default Full"` defines a Claude, once, for every chat.
+- `@claude define ops owner/podstow read-only role="You are Podstow's ops operator. Use the ops-tooling skill."` defines a Claude, once, for every chat.
 - `@claude add podstow brainstorm` and `@claude remove brainstorm` say which Claudes are in this chat.
 - `@claude allow @Name podstow` and `@claude revoke @Name podstow` say who else may ask each Claude in this chat. `@claude allow everyone brainstorm` opens a read-only Claude to everyone here.
 - `@claude fresh brainstorm` starts one over, `@claude who` lists who is here, and `@claude stop` makes tagalong ignore the chat again.

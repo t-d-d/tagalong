@@ -19,6 +19,8 @@ result, so nothing has to be scraped or posted back by the session.
 - service/launch.py runs claude --cloud in a pseudo-terminal with the
   group's permission mode, ref, model and a session name, and returns
   once the CLI prints "Resume with:".
+- Redefining a Claude starts its conversations afresh everywhere: a
+  running session would carry on with the old repo and role.
 - A Claude has one running session in each chat. Each time it is
   asked, a turn goes into that session with claude -p --cloud
   session_<id>: what was said in the chat since its last turn, then the
