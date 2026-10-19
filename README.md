@@ -12,9 +12,9 @@ WhatsApp group ──> bridge ──webhook──> tagalong ──claude --cloud
 
 ## Its number
 
-tagalong is a WhatsApp account of its own: people add its number to a group, or message it directly, and its answers come from that number. So it needs a number of its own, with WhatsApp set up on a phone that keeps it. The bridge then joins that account as a linked device, the way WhatsApp Web does.
+tagalong is a WhatsApp account of its own: people add its number to a group, or message it directly, and its answers come from that number. So it needs a number of its own, with WhatsApp set up on a phone. The bridge then joins that account as a linked device, the way WhatsApp Web does.
 
-- Use a spare number, such as a cheap SIM or an eSIM, not your own. tagalong ignores every message its own account sends, so if it ran on your number nothing you typed would reach it. It would also store every chat on that number, not only the ones with Claudes in.
+- Use a spare number, such as a cheap SIM or an eSIM, not your own. It needs no spare phone: put it in the WhatsApp Business app on your own phone, beside your personal WhatsApp. tagalong ignores every message its own account sends, so if it ran on your number nothing you typed would reach it. It would also store every chat on that number, not only the ones with Claudes in.
 - An ordinary WhatsApp account works, and so does the free WhatsApp Business app. A WhatsApp Business Platform (Cloud API) number does not: the bridge is a linked device, and those numbers have no app to link to.
 - The phone has to come online now and then. WhatsApp logs out linked devices on a phone that has been offline for about two weeks.
 - The bridge is not an official WhatsApp client, and WhatsApp can ban numbers that use one. Pick a number you could lose.
