@@ -132,6 +132,19 @@ describe("fitness: the task can tell a missing upload from a refusal (one-device
   });
 });
 
+describe("fitness: the task may only run its own transcription jobs (attachments.md)", () => {
+  it("may start, read and delete transcription jobs, and do nothing else in Transcribe", () => {
+    const roles = JSON.stringify(resourcesOf("AWS::IAM::Role"));
+    const statements = roles.match(
+      /\{"Effect":"Allow","Action":[^{}]*transcribe:[^{}]*"Resource":\{"Fn::Sub":"[^"]*"\}\}/gu,
+    );
+    expect(roles.match(/"transcribe:/gu)).toHaveLength(3);
+    expect(statements).toEqual([
+      '{"Effect":"Allow","Action":["transcribe:StartTranscriptionJob","transcribe:GetTranscriptionJob","transcribe:DeleteTranscriptionJob"],"Resource":{"Fn::Sub":"arn:${AWS::Partition}:transcribe:${AWS::Region}:${AWS::AccountId}:transcription-job/tagalong-*"}}',
+    ]);
+  });
+});
+
 describe("fitness: phone numbers never sit in the task definition (public-repo.md)", () => {
   it("reads the owners from Parameter Store as a secret", () => {
     const task = readRepoFile("infra/app.cfn.yml");

@@ -9,7 +9,7 @@ A few people talk about their side projects in WhatsApp groups. When a question 
 1. Keeps a catalogue of named Claudes, each a repo, an environment, an access level (read-write in auto mode, or read-only in dontAsk mode and told not to change anything), a ref, a model and an optional role: a brief sent at the start of its sessions, which can name a skill from the repo.
 2. Lets an owner add Claudes to a group or a one-to-one chat, and say who else may ask each one there, or open a read-only one to everyone in the chat. Nothing answers in a chat with no Claudes, and there is no default Claude.
 3. Answers a Claude asked by name (`@podstow`), or by a reply to one of its answers, from an owner or someone allowed to ask that Claude in that chat. One message can ask several.
-4. Keeps one running cloud session per Claude per chat. Each turn carries what the people who may ask it said in the chat since that Claude's last turn, the other Claudes' answers included, then the request, and any photos or files members sent in the last ten minutes, as links that last an hour. A Claude's first session in a chat starts with the chat's last messages.
+4. Keeps one running cloud session per Claude per chat. Each turn carries what the people who may ask it said in the chat since that Claude's last turn, the other Claudes' answers included, then the request, and any photos or files members sent in the last ten minutes, as links that last an hour. A voice note comes with its transcript, by Amazon Transcribe. A Claude's first session in a chat starts with the chat's last messages.
 5. Posts each answer as a reply to the request, after the Claude's name. Says once when a session waits for an approval, and says when it has had no answer for two hours.
 6. Keeps each chat on the version of a Claude its conversation started with. An owner moves it to the current definition and repo with `update`, which carries the conversation over, as does a session that was archived. `fresh` starts it over.
 7. Lets an owner run it all from WhatsApp: `define`, `undefine`, `add`, `remove`, `allow`, `revoke`, `update`, `fresh`, `who`, `stop` and `help`, with environments named by their names.
@@ -24,7 +24,6 @@ A few people talk about their side projects in WhatsApp groups. When a question 
 - Pairing a device in the cloud. A device is paired on a laptop and moved.
 - Approving a session's actions from WhatsApp.
 - Sending files or images back to WhatsApp.
-- Transcribing voice notes.
 - Progress messages while a session works.
 - A real read-only sandbox. read-only rests on the permission mode and the instruction.
 - A web page or dashboard.

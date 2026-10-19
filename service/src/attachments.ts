@@ -25,6 +25,8 @@ export interface Attachment {
   type: string;
   bytes: number;
   url: string;
+  /** A voice note's words, by speech recognition. */
+  transcript?: string;
 }
 
 export interface Pick {
@@ -104,6 +106,25 @@ export interface Share {
   chat: string;
 }
 
+/** A voice note's transcript, or undefined when it cannot be had: the link still goes. */
+async function transcribed(
+  share: Share,
+  key: string,
+): Promise<string | undefined> {
+  const started = Date.now();
+  try {
+    const text = await share.aws.transcribe(share.bucket, key);
+    log.info("attachment-transcribed", {
+      ms: Date.now() - started,
+      length: text.length,
+    });
+    return text === "" ? undefined : text;
+  } catch (error) {
+    log.warn("attachment-untranscribed", errorFields(error));
+    return undefined;
+  }
+}
+
 /** Upload each to the bucket and link it. A file that cannot be passed on is skipped and logged. */
 export async function shareMedia(
   rows: MessageRow[],
@@ -126,11 +147,14 @@ export async function shareMedia(
         readFileSync(file.path),
         typeOf(name),
       );
+      const transcript =
+        row.mediaType === "audio" ? await transcribed(share, key) : undefined;
       shared.push({
         name,
         type: typeOf(name),
         bytes,
         url: await share.aws.presign(share.bucket, key, LIMITS.linkSeconds),
+        ...(transcript === undefined ? {} : { transcript }),
       });
     } catch (error) {
       log.warn("attachment-skipped", { why: "failed", ...errorFields(error) });

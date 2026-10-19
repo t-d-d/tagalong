@@ -344,6 +344,74 @@ describe("asking a Claude", () => {
     expect(launches(t)[1]?.prompt).toContain("screen_shot.png");
   });
 
+  it("gives a Claude a member's voice note with its transcript, and the link alone when it cannot be transcribed", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    t.bridge.media.set("v1", {
+      filename: "audio_1.ogg",
+      bytes: Buffer.from("ogg bytes"),
+    });
+    t.bridge.media.set("v2", {
+      filename: "audio_2.ogg",
+      bytes: Buffer.from("garbled"),
+    });
+    t.aws.speech.set("ogg bytes", "the CI broke again");
+    t.db.message({
+      id: "v1",
+      sender: MEMBER,
+      content: "",
+      at: NOW - 60_000,
+      mediaType: "audio",
+    });
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION);
+    started(t, SECOND);
+    await says(t, "r1", MEMBER, "@podstow what did I say?");
+    const prompt = launches(t)[0]?.prompt ?? "";
+    expect(prompt).toMatch(
+      /- audio_1\.ogg \(audio\/ogg, 1 KB\): https:\/\/files\.s3\.example\.test\/attachments\/[\w-]+\/audio_1\.ogg\?expires=3600\n {2}Transcript, by speech recognition, so it may have errors: "the CI broke again"\n/u,
+    );
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({ event: "attachment-transcribed" }),
+    );
+
+    t.db.message({
+      id: "v2",
+      sender: MEMBER,
+      content: "",
+      at: t.clock.now,
+      mediaType: "audio",
+    });
+    await says(t, "r2", MEMBER, "@brainstorm and this one?");
+    const second = launches(t)[1]?.prompt ?? "";
+    expect(second).toMatch(
+      /- audio_2\.ogg \(audio\/ogg, 1 KB\): \S+\n(?! {2}Transcript)/u,
+    );
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({
+        event: "attachment-untranscribed",
+        level: "warn",
+        error: "Error",
+      }),
+    );
+  });
+
+  it("transcribes only voice notes", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    t.bridge.media.set("p1", { filename: "a.png", bytes: Buffer.from("png") });
+    t.db.message({
+      id: "p1",
+      sender: MEMBER,
+      content: "",
+      at: NOW - 60_000,
+      mediaType: "image",
+    });
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow look");
+    expect(launches(t)[0]?.prompt).toContain("a.png");
+    expect(t.aws.transcribed).toEqual([]);
+  });
+
   it("trusts each workspace it makes, in the task (cloud-sessions.md)", async () => {
     const t = (h = await harness({
       env: { LOGIN_PARAMETER: "/tagalong/claude-login" },
