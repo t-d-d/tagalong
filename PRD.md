@@ -12,7 +12,7 @@ A few people talk about their side projects in WhatsApp groups. When a question 
 4. Keeps one running cloud session per Claude per chat. Each turn carries what the people who may ask it said in the chat since that Claude's last turn, the other Claudes' answers included, then the request, and any photos or files members sent in the last ten minutes, as links that last an hour. A Claude's first session in a chat starts with the chat's last messages.
 5. Posts each answer as a reply to the request, after the Claude's name. Says once when a session waits for an approval, and says when it has had no answer for two hours.
 6. Keeps each chat on the version of a Claude its conversation started with. An owner moves it to the current definition and repo with `update`, which carries the conversation over, as does a session that was archived. `fresh` starts it over.
-7. Lets an owner run it all from WhatsApp: `define`, `add`, `remove`, `allow`, `revoke`, `update`, `fresh`, `who`, `stop` and `help`, with environments named by their names.
+7. Lets an owner run it all from WhatsApp: `define`, `undefine`, `add`, `remove`, `allow`, `revoke`, `update`, `fresh`, `who`, `stop` and `help`, with environments named by their names.
 8. Runs as one always-on Fargate Spot task in its own AWS account, deployed by a merge to main, and emails the owner on an error line, a silent bridge or a high bill.
 
 ## Out of scope

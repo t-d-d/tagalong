@@ -17,6 +17,10 @@ describe("commandIn", () => {
       verb: "define",
       args: "critic o/r read-only",
     });
+    expect(commandIn("@claude undefine critic", self)).toEqual({
+      verb: "undefine",
+      args: "critic",
+    });
     expect(commandIn("@447700900100 who", self)).toEqual({
       verb: "who",
       args: "",
