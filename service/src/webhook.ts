@@ -5,7 +5,6 @@ import { type Server, createServer } from "node:http";
 import { z } from "zod";
 import { readBody } from "./http.ts";
 import { errorFields, log } from "./log.ts";
-import { userPart } from "./people.ts";
 
 export const payloadSchema = z.looseObject({
   eventType: z.string().optional(),
@@ -23,23 +22,6 @@ export const payloadSchema = z.looseObject({
 });
 
 export type Payload = z.infer<typeof payloadSchema>;
-export type Trigger = "mention" | "@claude" | "reply";
-
-/** Why a message asks for Claude, or null when it does not. */
-export function trigger(
-  payload: Payload,
-  self: ReadonlySet<string>,
-): Trigger | null {
-  if (payload.eventType === "reaction" || payload.isFromMe) return null;
-  const text = payload.content.trim();
-  if (text === "") return null;
-  if ((payload.mentionedJids ?? []).some((jid) => self.has(userPart(jid))))
-    return "mention";
-  if (/(^|\s)@claude\b/iu.test(text)) return "@claude";
-  if (payload.quotedIsFromMe === true) return "reply";
-  return null;
-}
-
 export const WEBHOOK_PATH = "/whatsapp/webhook";
 const LIMIT = 16 * 1024 * 1024;
 

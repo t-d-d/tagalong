@@ -64,7 +64,7 @@ Never start a bridge anywhere else with that device: two bridges on one device g
 
 ## 6. Trying it
 
-In a group, from an owner's phone, send `@claude help`, then the `setup` message it sends back, edited for the group's repo. Then ask it something.
+In a group, from an owner's phone, send `@claude help`. Define a Claude with the `define` message it sends back, edited for your repo, then `@claude add` it. Then ask it something by name. Groups carried over from the laptop already have a Claude each, named after their repo.
 
 To check that an alarm reaches you, run this in CloudShell in `us-east-1`:
 

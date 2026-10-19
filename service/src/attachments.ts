@@ -35,7 +35,8 @@ export interface Pick {
   chat: string;
   messageId: string | undefined;
   quotedMessageId: string | undefined;
-  sent: ReadonlySet<string>;
+  /** Media already given to this Claude. */
+  sent: { has(id: string): boolean };
   now: number;
 }
 

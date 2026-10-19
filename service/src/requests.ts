@@ -1,4 +1,7 @@
-// A request from a group: start a session, or carry on the one a reply names.
+// A message that asks one or more Claudes. Each Claude keeps one running
+// session in the group (cloud-sessions.md): a turn is sent into it with what
+// was said since that Claude's last turn, or, when it has none or it is gone,
+// a new session starts with the last messages here.
 import type { Aws } from "./aws.ts";
 import { pickMedia, shareMedia, type Attachment } from "./attachments.ts";
 import type { Bridge } from "./bridge.ts";
@@ -6,15 +9,21 @@ import type { ClaudeApi } from "./claude-api.ts";
 import type { Cloud } from "./cloud.ts";
 import type { Env } from "./env.ts";
 import { oneLine } from "./format.ts";
-import type { Group, GroupsStore } from "./groups.ts";
+import type { Claude, Group, GroupsStore } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
 import type { People } from "./people.ts";
-import { firstPrompt, followUp, transcript } from "./prompts.ts";
+import {
+  type Ask,
+  answerBy,
+  conversation,
+  firstPrompt,
+  followUp,
+} from "./prompts.ts";
 import { sessionFor } from "./replies.ts";
 import type { Serial } from "./run.ts";
-import type { StateStore } from "./state.ts";
-import type { WhatsAppStore } from "./store.ts";
-import type { Payload, Trigger } from "./webhook.ts";
+import { type StateStore, threadKey } from "./state.ts";
+import { type WhatsAppStore, timeOf } from "./store.ts";
+import type { Payload } from "./webhook.ts";
 
 export interface RequestDeps {
   env: Env;
@@ -28,32 +37,41 @@ export interface RequestDeps {
   aws: Aws | undefined;
   cli: Serial;
   now: () => number;
-  /** When each request in the last hour arrived, for the hourly cap. */
+  /** When each turn in the last hour started, for the hourly cap. */
   recent: number[];
 }
 
-/** The session a reply belongs to: the one linked in the Claude message it quotes, in this chat. */
-export function sessionOf(
+/** The Claude whose answer `payload` replies to, if it replies to one in this chat. */
+export function repliedTo(
   payload: Payload,
   deps: Pick<RequestDeps, "store" | "state">,
-): string | null {
-  if (payload.quotedIsFromMe === false) return null;
+): string | undefined {
+  if (payload.quotedIsFromMe !== true) return undefined;
   const quoted =
     payload.quotedContent ??
     deps.store.message(payload.chatJID, payload.quotedMessageId)?.content;
   const id = sessionFor(deps.state.state, payload.quotedMessageId, quoted);
-  return id !== null && deps.state.state.sessions[id]?.chat === payload.chatJID
-    ? id
-    : null;
+  const session = id === null ? undefined : deps.state.state.sessions[id];
+  if (
+    session !== undefined &&
+    session.chat === payload.chatJID &&
+    session.claude !== ""
+  )
+    return session.claude;
+  return quoted === undefined ? undefined : answerBy(quoted);
 }
 
 async function files(
   payload: Payload,
   group: Group,
+  claude: string,
   deps: RequestDeps,
 ): Promise<Attachment[]> {
   const bucket = deps.env.ATTACHMENTS_BUCKET;
   if (bucket === undefined || deps.aws === undefined) return [];
+  // A file goes once to each Claude.
+  const key = (id: string) => `${claude}:${id}`;
+  const given = new Set(deps.state.state.sentMedia);
   const rows = pickMedia({
     config: deps.groups.config,
     group,
@@ -62,11 +80,11 @@ async function files(
     chat: payload.chatJID,
     messageId: payload.messageId,
     quotedMessageId: payload.quotedMessageId,
-    sent: new Set(deps.state.state.sentMedia),
+    sent: { has: (id: string) => given.has(key(id)) },
     now: deps.now(),
   });
   if (rows.length === 0) return [];
-  deps.state.state.sentMedia.push(...rows.map((row) => row.id));
+  deps.state.state.sentMedia.push(...rows.map((row) => key(row.id)));
   return shareMedia(rows, {
     bridge: deps.bridge,
     aws: deps.aws,
@@ -75,9 +93,32 @@ async function files(
   });
 }
 
+/** What the request quotes, as the Claude will read it. */
+function quotedOf(payload: Payload, deps: RequestDeps): Ask["quoted"] {
+  if (
+    payload.quotedMessageId === undefined &&
+    payload.quotedContent === undefined
+  )
+    return undefined;
+  const row = deps.store.message(payload.chatJID, payload.quotedMessageId);
+  const text = payload.quotedContent ?? row?.content ?? "";
+  if (text === "") return undefined;
+  const by = answerBy(text);
+  const who =
+    payload.quotedIsFromMe === true
+      ? by === undefined
+        ? "tagalong"
+        : `@${by}`
+      : deps.people.nameOf(payload.quotedSender ?? row?.sender ?? "");
+  return {
+    who,
+    text: deps.people.readable(text.replace(/^\*[a-z0-9-]+:\*\s?/u, "")),
+  };
+}
+
 export async function handleRequest(
   payload: Payload,
-  why: Trigger,
+  claudes: Claude[],
   group: Group,
   deps: RequestDeps,
 ): Promise<void> {
@@ -86,8 +127,8 @@ export async function handleRequest(
   while (recent.length > 0 && now - (recent[0] ?? 0) > 3_600_000)
     recent.shift();
   const message = { id: payload.messageId, sender: payload.sender };
-  const request = { ...message, content: payload.content };
-  if (recent.length >= deps.env.MAX_PER_HOUR) {
+  const room = deps.env.MAX_PER_HOUR - recent.length;
+  if (room < claudes.length) {
     log.info("request-capped", {
       group: group.label,
       cap: deps.env.MAX_PER_HOUR,
@@ -95,66 +136,100 @@ export async function handleRequest(
     await deps.bridge.react(payload.chatJID, message, "⏳");
     return;
   }
-  recent.push(now);
-
-  const text = deps.people.readable(payload.content).trim();
-  const existing = sessionOf(payload, deps);
   if (deps.env.DRY_RUN) {
-    log.info("request-ignored", {
-      why: "dry-run",
-      trigger: why,
-      followUp: existing !== null,
-    });
+    log.info("request-ignored", { why: "dry-run", claudes: claudes.length });
     return;
   }
-
   await deps.bridge.react(payload.chatJID, message, "👀");
-  const attached = await files(payload, group, deps);
-  const from = deps.people.nameOf(payload.sender);
+  for (const claude of claudes) {
+    recent.push(now);
+    await turn(payload, claude, group, deps);
+  }
+}
 
-  if (existing !== null) {
-    const sent = await deps.cli.run(() =>
-      deps.cloud.send(existing, followUp(from, text, attached)),
-    );
-    const session = deps.state.state.sessions[existing];
-    if (sent === "sent" && session !== undefined) {
-      Object.assign(session, {
+/** One Claude's turn: into its running session, or a new one. */
+async function turn(
+  payload: Payload,
+  claude: Claude,
+  group: Group,
+  deps: RequestDeps,
+): Promise<void> {
+  const chat = payload.chatJID;
+  const now = deps.now();
+  const key = threadKey(chat, claude.name);
+  const thread = deps.state.state.threads[key] ?? { session: null, heard: 0 };
+  const row = deps.store.message(chat, payload.messageId);
+  const at = row === undefined ? now : timeOf(row.timestamp);
+  const request = {
+    id: payload.messageId,
+    sender: payload.sender,
+    content: payload.content,
+  };
+  const lines = {
+    store: deps.store,
+    people: deps.people,
+    config: deps.groups.config,
+    group,
+    claude: claude.name,
+    except: payload.messageId,
+  };
+  const ask: Ask = {
+    from: deps.people.nameOf(payload.sender),
+    text: deps.people.readable(payload.content).trim(),
+    quoted: quotedOf(payload, deps),
+    files: await files(payload, group, claude.name, deps),
+  };
+  const waitFor = (session: string) => {
+    const state = deps.state.state.sessions[session];
+    if (state !== undefined)
+      Object.assign(state, {
         request,
         waiting: true,
         since: now,
         nudged: false,
       });
-      deps.state.save();
+    deps.state.state.threads[key] = { session, heard: at };
+    deps.state.save();
+  };
+
+  const existing =
+    thread.session === null
+      ? undefined
+      : deps.state.state.sessions[thread.session];
+  if (thread.session !== null && existing !== undefined) {
+    const id = thread.session;
+    // Everything said since this Claude's last turn, not only the last few.
+    const said = conversation(lines, thread.heard, deps.env.HISTORY * 3);
+    const sent = await deps.cli.run(() =>
+      deps.cloud.send(id, followUp(claude.name, said, ask)),
+    );
+    if (sent === "sent") {
+      waitFor(id);
       log.info("session-followup", {
-        session: existing,
+        session: id,
         group: group.label,
-        files: attached.length,
+        claude: claude.name,
+        files: ask.files.length,
       });
       return;
     }
     // podstow archives a session that signs off; carry on in a fresh one.
-    log.info("session-gone", { session: existing });
-    if (session !== undefined) session.waiting = false;
+    log.info("session-gone", { session: id, claude: claude.name });
+    existing.waiting = false;
   }
 
   const prompt = firstPrompt({
-    group,
-    chatName: deps.store.chatName(payload.chatJID) ?? group.label,
-    from,
-    text,
-    transcript: transcript(
-      deps.store,
-      deps.people,
-      deps.groups.config,
-      group,
-      deps.env.HISTORY,
-    ),
-    files: attached,
+    claude,
+    chatName: deps.store.chatName(chat) ?? group.label,
+    others: group.claudes.filter((other) => other !== claude.name),
+    conversation: conversation(lines, 0, deps.env.HISTORY),
+    ask,
   });
-  const name = `WhatsApp: ${oneLine(text.replace(/@claude\b/giu, "")).slice(0, 60)}`;
-  const id = await deps.cli.run(() => deps.cloud.start(group, prompt, name));
+  const name = `WhatsApp ${claude.name}: ${oneLine(ask.text.replace(/@[a-z][a-z0-9-]*\b/giu, "")).slice(0, 50)}`;
+  const id = await deps.cli.run(() => deps.cloud.start(claude, prompt, name));
   deps.state.state.sessions[id] = {
-    chat: payload.chatJID,
+    chat,
+    claude: claude.name,
     request,
     cursor: null,
     waiting: true,
@@ -162,25 +237,30 @@ export async function handleRequest(
     nudged: false,
     lastText: "",
   };
-  deps.state.save();
+  waitFor(id);
   log.info("session-started", {
     session: id,
     group: group.label,
-    access: group.access,
-    files: attached.length,
+    claude: claude.name,
+    access: claude.access,
+    files: ask.files.length,
   });
-  await verify(id, group, deps.api);
+  await verify(id, claude, deps.api);
 }
 
-/** Say loudly when a session landed in another environment than the group's. */
-async function verify(id: string, group: Group, api: ClaudeApi): Promise<void> {
-  if (group.environment === undefined) return;
+/** Say loudly when a session landed in another environment than its Claude's. */
+async function verify(
+  id: string,
+  claude: Claude,
+  api: ClaudeApi,
+): Promise<void> {
+  if (claude.environment === undefined) return;
   try {
     const record = await api.record(id);
-    if (record.environmentId !== group.environment) {
+    if (record.environmentId !== claude.environment) {
       log.warn("session-environment-mismatch", {
         session: id,
-        expected: group.environment,
+        expected: claude.environment,
         actual: record.environmentId ?? "unknown",
       });
     }

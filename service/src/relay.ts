@@ -4,6 +4,7 @@ import { type ClaudeApi, textOf } from "./claude-api.ts";
 import { sessionLink, toWhatsApp } from "./format.ts";
 import type { GroupsStore } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
+import { answerText } from "./prompts.ts";
 import { remember } from "./replies.ts";
 import type { SessionState, StateStore } from "./state.ts";
 import type { WhatsAppStore } from "./store.ts";
@@ -49,7 +50,10 @@ export async function check(
       log.info("session-waiting-approval", { session: id });
       await deps.bridge.send(
         session.chat,
-        `Claude is waiting for an approval in the session.\n\n↗ ${sessionLink(id)}`,
+        answerText(
+          session.claude,
+          `waiting for an approval in the session.\n\n↗ ${sessionLink(id)}`,
+        ),
         session.request,
       );
     } else if (
@@ -66,7 +70,10 @@ export async function check(
         log.info("session-gave-up", { session: id });
         await deps.bridge.send(
           session.chat,
-          `No reply from Claude after ${String(Math.round(deps.giveUpMs / 60_000))} minutes; it may still be working.`,
+          answerText(
+            session.claude,
+            `no reply after ${String(Math.round(deps.giveUpMs / 60_000))} minutes; I may still be working.`,
+          ),
           session.request,
         );
       }
@@ -75,7 +82,8 @@ export async function check(
   }
   session.waiting = false;
   session.lastText = "";
-  const text = toWhatsApp(answer);
+  const words = toWhatsApp(answer);
+  const text = words === "" ? "" : answerText(session.claude, words);
   if (text !== "") {
     await deps.bridge.send(session.chat, text, session.request);
     remember(deps.state.state, deps.store, session.chat, text, id);
@@ -91,7 +99,13 @@ export async function poll(deps: RelayDeps): Promise<void> {
   polling = true;
   try {
     for (const [id, session] of Object.entries(deps.state.state.sessions)) {
-      if (!session.waiting || !deps.groups.config.groups.has(session.chat))
+      const group = deps.groups.config.groups.get(session.chat);
+      // Sessions of a Claude no longer in the group are left alone.
+      if (
+        !session.waiting ||
+        group === undefined ||
+        (session.claude !== "" && !group.claudes.includes(session.claude))
+      )
         continue;
       try {
         await check(id, session, deps);

@@ -1,18 +1,11 @@
 // The operator's commands, run with `npm run cli -- <command>` on a laptop, or
 // in the task through ECS Exec (docs/setup.md). They print their answers.
-import { parseArgs } from "node:util";
 import { realAws } from "./aws.ts";
 import { ClaudeApi, textOf } from "./claude-api.ts";
 import { readEnv } from "./env.ts";
 import { lastSession, oneLine } from "./format.ts";
-import {
-  type GroupEntry,
-  GroupsStore,
-  checkEntry,
-  isAccess,
-  parseOwners,
-  withoutGroup,
-} from "./groups.ts";
+import { line } from "./commands.ts";
+import { GroupsStore, parseOwners } from "./groups.ts";
 import { CommandError } from "./log.ts";
 import { Login } from "./login.ts";
 import { run } from "./run.ts";
@@ -41,32 +34,6 @@ const say = (line: string) => {
   console.log(line);
 };
 
-/** Group chats whose name contains `query`, or whose JID is it. */
-function pickGroup(query: string | undefined): { jid: string; name: string } {
-  if (query === undefined || query === "")
-    throw new CommandError("name the group, or part of its name, in quotes");
-  const rows = store.groupChats();
-  if (query.endsWith("@g.us")) {
-    const exact = rows.find((row) => row.jid === query);
-    if (exact !== undefined) return exact;
-  }
-  const q = query.toLowerCase();
-  const exact = rows.filter((row) => row.name.toLowerCase() === q);
-  const found =
-    exact.length > 0
-      ? exact
-      : rows.filter((row) => row.name.toLowerCase().includes(q));
-  const [only] = found;
-  if (found.length === 1 && only !== undefined) return only;
-  if (found.length === 0)
-    throw new CommandError(
-      `no group chat matches "${query}". If it is new, send a message in it first so the bridge records it.`,
-    );
-  throw new CommandError(
-    `"${query}" matches ${String(found.length)} groups, be more specific:\n${found.map((row) => `  ${row.name}`).join("\n")}`,
-  );
-}
-
 const commands: Record<string, (args: string[]) => Promise<void>> = {
   async probe([target]) {
     const id = lastSession(target);
@@ -91,9 +58,13 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
 
   async "list-groups"() {
     const configured = groups().config.groups;
-    for (const row of store.groupChats())
-      say(`${configured.has(row.jid) ? "✓" : " "} ${row.jid}  ${row.name}`);
-    say("\n✓ = set up in groups.json");
+    for (const row of store.groupChats()) {
+      const group = configured.get(row.jid);
+      say(
+        `${group === undefined ? " " : "✓"} ${row.jid}  ${row.name}${group === undefined ? "" : `  (${group.claudes.map((name) => `@${name}`).join(" ")})`}`,
+      );
+    }
+    say("\n✓ = has Claudes. Set groups up with @claude add in the group.");
     await Promise.resolve();
   },
 
@@ -102,54 +73,17 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
       say(`${environment.id}  ${environment.name}  (${environment.kind})`);
   },
 
-  async "add-group"([query, ...rest]) {
-    const chat = pickGroup(query);
-    const { values } = parseArgs({
-      args: rest,
-      options: {
-        repo: { type: "string" },
-        access: { type: "string", default: "read-only" },
-        env: { type: "string" },
-        ref: { type: "string" },
-        label: { type: "string" },
-        model: { type: "string" },
-      },
-    });
-    if (values.repo === undefined)
-      throw new CommandError("--repo owner/name is needed");
-    if (!isAccess(values.access))
-      throw new CommandError("--access is read-write or read-only");
-    const environment =
-      values.env === undefined ? undefined : await api.resolve(values.env);
-    const store_ = groups();
-    const current = store_.config.groups.get(chat.jid);
-    const entry: GroupEntry = {
-      label: values.label ?? chat.name,
-      repo: values.repo,
-      ...(environment === undefined ? {} : { environment }),
-      access: values.access,
-      ...(values.ref === undefined ? {} : { ref: values.ref }),
-      ...(values.model === undefined ? {} : { model: values.model }),
-      members: current?.members ?? [],
-    };
-    checkEntry(chat.jid, entry);
-    store_.update((file) => ({
-      ...file,
-      groups: { ...file.groups, [chat.jid]: entry },
-    }));
-    say(
-      `${current === undefined ? "Added" : "Updated"} "${chat.name}". Restart tagalong to pick it up, or use @claude setup in the group next time.`,
-    );
-  },
-
-  async "remove-group"([query]) {
-    const chat = pickGroup(query);
-    const store_ = groups();
-    if (!store_.config.groups.has(chat.jid))
-      throw new CommandError(`"${chat.name}" is not set up`);
-    store_.update((file) => withoutGroup(file, chat.jid));
-    say(`Removed "${chat.name}". Restart tagalong to pick it up.`);
-    await Promise.resolve();
+  async "list-claudes"() {
+    await api.environments().catch(() => []);
+    const config = groups().config;
+    for (const claude of config.claudes.values()) {
+      const where = [...config.groups.values()]
+        .filter((group) => group.claudes.includes(claude.name))
+        .map((group) => group.label);
+      say(
+        `${line(claude, api).replace(/\*/gu, "")}  in: ${where.join(", ") || "no group"}`,
+      );
+    }
   },
 };
 

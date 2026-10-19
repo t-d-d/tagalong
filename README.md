@@ -1,6 +1,6 @@
 # tagalong
 
-Claude in your WhatsApp groups. Mention `@claude` in a group it has been set up for, and it starts a Claude Code cloud session on that group's repo, then posts the session's answer back as a reply. Reply to that answer and the same session carries on.
+Claudes in your WhatsApp chats. Each Claude has a name and its own context: a repo, a cloud environment, an access level and a model. Add a few to a group, ask one by name (`@podstow why is the build red?`, `@brainstorm go wide on this`), and it answers in the chat. Each keeps one running Claude Code cloud session per chat, and hears what was said since its last turn, the other Claudes included.
 
 It runs as one small always-on task in AWS: a linked WhatsApp device (the [whatsapp-mcp](https://github.com/verygoodplugins/whatsapp-mcp) bridge) and tagalong beside it, which starts sessions with `claude --cloud` and reads their answers from the sessions API.
 
@@ -12,15 +12,16 @@ WhatsApp group ──> bridge ──webhook──> tagalong ──claude --cloud
 
 ## Using it
 
-In a group, the owner types `@claude help`. tagalong answers with messages to copy, edit and send back:
+The owner types `@claude help` in a chat. tagalong answers with messages to copy, edit and send back:
 
-- `@claude setup owner/repo read-write env="Default Full"` sets the group up for a repo and an environment.
-- `@claude allow @Name` and `@claude revoke @Name` say who else may ask.
-- `@claude status` says how the group is set up, and `@claude stop` makes tagalong ignore it again.
+- `@claude define brainstorm owner/kickoff read-only env="Default Full"` defines a Claude, once, for every chat.
+- `@claude add podstow brainstorm` and `@claude remove brainstorm` say which Claudes are in this chat.
+- `@claude allow @Name` and `@claude revoke @Name` say who else may ask them.
+- `@claude fresh brainstorm` starts one over, `@claude who` lists who is here, and `@claude stop` makes tagalong ignore the chat again.
 
-Then anyone allowed asks: `@claude why is the build red?` Photos and files they sent in the last ten minutes go with the request.
+Then anyone allowed asks a Claude by name. Photos and files they sent in the last ten minutes go with the request. A one-to-one chat with the number works the same as a group.
 
-Only owners can run commands. tagalong ignores anyone an owner has not allowed, and any group nobody has set up ([who-can-use-it.md](docs/constraints/who-can-use-it.md)).
+Only owners can run commands. tagalong ignores anyone an owner has not allowed, and any chat with no Claudes ([who-can-use-it.md](docs/constraints/who-can-use-it.md)).
 
 ## Running it
 

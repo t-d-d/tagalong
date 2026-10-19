@@ -23,10 +23,10 @@ aws ecs execute-command --cluster tagalong --task "$task" --container app \
   --interactive --command "npm run cli -- list-groups"
 ```
 
-- `list-groups`: every group the device is in, ticked where tagalong is set up.
+- `list-groups`: every group the device is in, ticked where it has Claudes, with their names.
+- `list-claudes`: the catalogue, and the chats each Claude is in.
 - `list-environments`: your cloud environments, by id and name.
 - `probe <session id or link>`: a session's status, environment and last events.
-- `add-group "<group name>" --repo owner/name [--access read-write] [--env <name or id>] [--ref <branch>] [--model <model>]` and `remove-group "<group name>"`: what `@claude setup` and `@claude stop` do, for when WhatsApp is not to hand. Restart the task afterwards.
 
 To restart the task, which runs the same build again:
 

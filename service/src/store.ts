@@ -157,6 +157,21 @@ export class WhatsAppStore {
     return row === undefined ? undefined : idSchema.parse(row).id;
   }
 
+  /** The chat's messages sent after `after` (ms), oldest first, at most `limit` of the latest; and how many more there were. */
+  since(
+    chat: string,
+    after: number,
+    limit: number,
+  ): { rows: MessageRow[]; left: number } {
+    const rows = this.recent(chat, 1000).filter(
+      (row) => timeOf(row.timestamp) > after,
+    );
+    return {
+      rows: rows.slice(-limit),
+      left: Math.max(0, rows.length - limit),
+    };
+  }
+
   /** The chat's latest messages, oldest first, reactions and deleted ones left out. */
   recent(chat: string, limit: number): MessageRow[] {
     return this.#db("messages")

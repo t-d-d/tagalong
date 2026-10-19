@@ -11,6 +11,8 @@ const quoteSchema = z.object({
 
 const sessionSchema = z.object({
   chat: z.string(),
+  // The Claude the session is; "" for one from before named Claudes.
+  claude: z.string().default(""),
   // The WhatsApp message the answer replies to.
   request: quoteSchema.optional(),
   // The last event read, as the sessions API numbers them.
@@ -28,9 +30,22 @@ const stateSchema = z.object({
   sentMedia: z.array(z.string()).default([]),
   // Which session each answer came from, by message id and by text (replies.ts).
   replies: z.record(z.string(), z.string()).default({}),
+  // Each Claude's running conversation in each group, by threadKey: its
+  // session, and when the last message it has heard was sent.
+  threads: z
+    .record(
+      z.string(),
+      z.object({ session: z.string().nullable(), heard: z.number() }),
+    )
+    .default({}),
 });
 
 export type SessionState = z.infer<typeof sessionSchema>;
+export type Thread = State["threads"][string];
+
+/** The key of a Claude's conversation in a group. */
+export const threadKey = (chat: string, claude: string): string =>
+  `${chat} ${claude}`;
 export type State = z.infer<typeof stateSchema>;
 
 export class StateStore {

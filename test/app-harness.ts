@@ -24,13 +24,17 @@ import { serviceEnv } from "./service-env.ts";
 
 export const NOW = Date.parse("2026-10-18T17:00:00Z");
 
+// podstow is in the group; brainstorm too; critic is defined but not added.
 export const standardGroups: GroupsFile = {
+  claudes: {
+    podstow: { repo: "o/r", environment: "env_fake1", access: "read-write" },
+    brainstorm: { repo: "o/kickoff", access: "read-only" },
+    critic: { repo: "o/critic", access: "read-only" },
+  },
   groups: {
     [GROUP]: {
       label: "Side projects",
-      repo: "o/r",
-      environment: "env_fake1",
-      access: "read-write",
+      claudes: ["podstow", "brainstorm"],
       members: [MEMBER],
     },
   },

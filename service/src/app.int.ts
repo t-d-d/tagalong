@@ -1,9 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { createServer } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { type Harness, NOW, harness } from "../../test/app-harness.ts";
+import {
+  type Harness,
+  NOW,
+  harness,
+  standardGroups,
+} from "../../test/app-harness.ts";
 import {
   CLAUDE,
   CLAUDE_LID,
@@ -19,6 +24,8 @@ import { eventsOf } from "../../test/log-lines.ts";
 
 const SESSION = "01SessionAaaaaaaaaaaaaaa";
 const SECOND = "01SessionBbbbbbbbbbbbbbb";
+const THIRD = "01SessionCccccccccccccccc";
+const DIRECT = `${OWNER}@s.whatsapp.net`;
 
 // Numbers, names and every message a test sends. None may reach a log line (logging.md).
 const PEOPLE = [
@@ -53,7 +60,7 @@ afterEach(async () => {
   expect(leaked).toEqual([]);
 });
 
-/** A message from `sender`, stored as the bridge stores it, then delivered. */
+/** A message from `sender`, a second after the last, stored as the bridge stores it, then delivered. */
 async function says(
   t: Harness,
   id: string,
@@ -61,7 +68,8 @@ async function says(
   content: string,
   extra: Record<string, unknown> = {},
 ) {
-  spoken.push(content.replace(/^@claude /u, ""));
+  spoken.push(content.replace(/^@\w+ /u, ""));
+  t.clock.now += 1000;
   const chat = typeof extra.chatJID === "string" ? extra.chatJID : GROUP;
   const at = typeof extra.at === "number" ? extra.at : t.clock.now;
   t.db.message({
@@ -80,16 +88,28 @@ async function says(
   await t.deliver({ messageId: id, sender, content, ...fields });
 }
 
-function started(t: Harness, id: string, events: unknown[] = []) {
-  t.api.sessions.set(id, {
-    status: "running",
-    environmentId: "env_fake1",
-    events,
-  });
+/** A poll a second later, as the loop would make. */
+async function poll(t: Harness) {
+  t.clock.now += 1000;
+  await t.app.pollOnce();
 }
 
-describe("a request in a group that is set up", () => {
-  it("starts a session in the group's repo and environment, then posts its answer", async () => {
+function started(
+  t: Harness,
+  id: string,
+  events: unknown[] = [],
+  environmentId = "env_fake1",
+) {
+  t.api.sessions.set(id, { status: "running", environmentId, events });
+}
+
+const launches = (t: Harness) =>
+  t.fake.calls.filter((call) => call.command === t.env.PYTHON);
+const followUps = (t: Harness) =>
+  t.fake.calls.filter((call) => call.command === t.env.CLAUDE_BIN);
+
+describe("asking a Claude", () => {
+  it("starts its session in its repo and environment, then posts its answer under its name", async () => {
     const t = (h = await harness({
       db: (db) =>
         db.message({
@@ -101,21 +121,24 @@ describe("a request in a group that is set up", () => {
     }));
     t.fake.launches.push(SESSION);
     started(t, SESSION);
-    await says(t, "r1", MEMBER, "@claude why is the build red?");
+    await says(t, "r1", MEMBER, "@podstow why is the build red?");
 
     expect(t.bridge.reactions).toEqual([
       expect.objectContaining({ message_id: "r1", emoji: "👀" }),
     ]);
-    const [launch] = t.fake.calls;
+    const [launch] = launches(t);
     expect(launch?.prompt).toContain(
-      "Request from Ollie:\n@claude why is the build red?",
+      'You are "podstow", one of the Claudes in the WhatsApp chat "Side projects"',
     );
+    expect(launch?.prompt).toContain("The other Claudes here are @brainstorm");
     expect(launch?.prompt).toContain("Ollie: the CI broke again");
-    expect(launch?.prompt).toContain("You are working in o/r");
+    expect(launch?.prompt).toContain(
+      "Ollie asks you, @podstow:\n@podstow why is the build red?",
+    );
     expect(launch?.options.env).toMatchObject({
       CLAUDE_PERMISSION_MODE: "auto",
       CLAUDE_REF: "main",
-      CLAUDE_SESSION_NAME: "WhatsApp: why is the build red?",
+      CLAUDE_SESSION_NAME: "WhatsApp podstow: why is the build red?",
     });
     const cwd = launch?.options.cwd ?? "";
     expect(
@@ -129,7 +152,6 @@ describe("a request in a group that is set up", () => {
         encoding: "utf8",
       }).trim(),
     ).toBe("https://github.com/o/r.git");
-    expect(eventsOf(t.lines)).toContain("session-started");
 
     t.api.sessions.set(SESSION, {
       status: "idle",
@@ -139,100 +161,134 @@ describe("a request in a group that is set up", () => {
         result("The **build** fails on lint."),
       ],
     });
-    await t.app.pollOnce();
+    await poll(t);
     expect(t.bridge.sent).toEqual([
       {
         recipient: GROUP,
-        message: "The *build* fails on lint.",
+        message: "*podstow:* The *build* fails on lint.",
         quoted_message_id: "r1",
       },
     ]);
-    await t.app.pollOnce();
+    await poll(t);
     expect(t.bridge.sent).toHaveLength(1);
   });
 
-  it("trusts each workspace it makes, in the task (cloud-sessions.md)", async () => {
-    const t = (h = await harness({
-      env: { LOGIN_PARAMETER: "/tagalong/claude-login" },
-    }));
-    t.fake.launches.push(SESSION);
-    started(t, SESSION);
-    await says(t, "r1", MEMBER, "@claude hello");
-    const cwd = t.fake.calls[0]?.options.cwd ?? "";
-    const config: unknown = JSON.parse(
-      readFileSync(join(t.env.HOME, ".claude.json"), "utf8"),
-    );
-    expect(config).toMatchObject({
-      projects: { [cwd]: { hasTrustDialogAccepted: true } },
-    });
-  });
-
-  it("leaves a laptop's own Claude config alone", async () => {
-    const t = (h = await harness());
-    t.fake.launches.push(SESSION);
-    started(t, SESSION);
-    await says(t, "r1", MEMBER, "@claude hello");
-    expect(existsSync(join(t.env.HOME, ".claude.json"))).toBe(false);
-  });
-
-  it("carries a reply to Claude on in the session it came from", async () => {
+  it("carries on the same session at the next turn, with what was said since", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);
     started(t, SESSION, [result("It fails on lint.")]);
-    await says(t, "r1", MEMBER, "@claude why is the build red?");
-    await t.app.pollOnce();
+    await says(t, "r1", MEMBER, "@podstow why is the build red?");
+    await poll(t);
+    await says(t, "m1", OWNER, "we ship on Friday");
+    await says(t, "s1", STRANGER, "the secret plan");
+    await says(t, "r2", MEMBER, "@podstow can you fix it?");
 
-    await says(t, "r2", MEMBER, "can you fix it?", {
-      quotedIsFromMe: true,
-      quotedMessageId: "sent-1",
-      quotedContent: "It fails on lint.",
-    });
-    const followUp = t.fake.calls.find(
-      (call) => call.command === t.env.CLAUDE_BIN,
-    );
-    expect(followUp?.args).toEqual([
+    expect(launches(t)).toHaveLength(1);
+    const [next] = followUps(t);
+    expect(next?.args).toEqual([
       "-p",
       "--cloud",
       `session_${SESSION}`,
       "--output-format",
       "json",
     ]);
-    expect(followUp?.options.input).toBe(
-      "Ollie on WhatsApp:\ncan you fix it?\n",
+    const input = next?.options.input ?? "";
+    expect(input).toMatch(/^Said in the chat since your last turn:\n/u);
+    expect(input).toContain("podstow (you): It fails on lint.");
+    expect(input).toContain("Thomas: we ship on Friday");
+    expect(input).not.toContain("secret plan");
+    expect(input).toContain(
+      "Ollie asks you, @podstow:\n@podstow can you fix it?",
     );
-    expect(eventsOf(t.lines)).toContain("session-followup");
+    expect(input.match(/can you fix it/gu)).toHaveLength(1);
 
     t.api.sessions.get(SESSION)?.events.push(result("Opened a PR."));
-    await t.app.pollOnce();
-    expect(t.bridge.sent.at(-1)?.message).toContain("Opened a PR.");
-    expect(t.bridge.sent.at(-1)?.quoted_message_id).toBe("r2");
+    await poll(t);
+    expect(t.bridge.sent.at(-1)).toMatchObject({
+      message: "*podstow:* Opened a PR.",
+      quoted_message_id: "r2",
+    });
   });
 
-  it("finds the session from the quoted text when the id is not stored", async () => {
+  it("lets Claudes hear each other through the chat", async () => {
     const t = (h = await harness());
-    t.fake.launches.push(SESSION);
-    started(t, SESSION, [result("It fails on lint.")]);
-    await says(t, "r1", MEMBER, "@claude why is the build red?");
-    await t.app.pollOnce();
-    await says(t, "r2", MEMBER, "and now?", {
-      quotedIsFromMe: true,
-      quotedMessageId: "unknown",
-      quotedContent: "It fails on lint.",
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION, [result("Three ideas: A, B and C.")]);
+    started(t, SECOND, [result("B could become an offline queue.")]);
+    await says(t, "r1", OWNER, "@podstow what could we add for commuters?");
+    await poll(t);
+    await says(t, "r2", OWNER, "@brainstorm take idea B and go wide");
+    const brainstorm = launches(t)[1];
+    expect(brainstorm?.prompt).toContain('You are "brainstorm"');
+    expect(brainstorm?.prompt).toContain("podstow: Three ideas: A, B and C.");
+    expect(brainstorm?.options.env).toMatchObject({
+      CLAUDE_PERMISSION_MODE: "dontAsk",
     });
-    expect(eventsOf(t.lines)).toContain("session-followup");
+    await poll(t);
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "*brainstorm:* B could become an offline queue.",
+    );
+
+    await says(
+      t,
+      "r3",
+      OWNER,
+      "@podstow write-prd for what brainstorm landed on",
+    );
+    const input = followUps(t)[0]?.options.input ?? "";
+    expect(input).toContain("brainstorm: B could become an offline queue.");
+    expect(input).toContain("Thomas: @brainstorm take idea B and go wide");
   });
 
-  it("still follows a link in an older answer", async () => {
+  it("asks each Claude a message names", async () => {
     const t = (h = await harness());
-    t.fake.launches.push(SESSION);
-    started(t, SESSION, [result("Old.")]);
-    await says(t, "r1", MEMBER, "@claude hi");
-    await t.app.pollOnce();
-    await says(t, "r2", MEMBER, "and now?", {
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION);
+    started(t, SECOND);
+    await says(t, "r1", MEMBER, "@podstow @brainstorm what do you both think?");
+    expect(
+      launches(t).map((call) => call.prompt?.match(/You are "(\w+)"/u)?.[1]),
+    ).toEqual(["podstow", "brainstorm"]);
+    expect(t.bridge.reactions).toHaveLength(1);
+  });
+
+  it("sends a reply to an answer to the Claude that wrote it", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION, [result("Three options.")]);
+    started(t, SECOND, [result("Go wide.")]);
+    await says(t, "r1", MEMBER, "@brainstorm ideas?");
+    await poll(t);
+    await says(t, "r2", MEMBER, "@podstow thoughts?");
+    await poll(t);
+    await says(t, "r3", MEMBER, "and the second one?", {
       quotedIsFromMe: true,
-      quotedContent: `Old answer.\n\n↗ claude.ai/code/session_${SESSION}`,
+      quotedMessageId: "sent-1",
+      quotedContent: "*brainstorm:* Three options.",
     });
-    expect(eventsOf(t.lines)).toContain("session-followup");
+    const input = followUps(t)[0]?.options.input ?? "";
+    expect(followUps(t)[0]?.args[2]).toBe(`session_${SESSION}`);
+    expect(input).toContain(
+      'Ollie asks you, @brainstorm, replying to @brainstorm: "Three options.":\nand the second one?',
+    );
+  });
+
+  it("starts a new session when its running one is archived", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION, [result("Done.")]);
+    started(t, SECOND);
+    await says(t, "r1", MEMBER, "@podstow tidy the README");
+    await poll(t);
+    t.fake.followUps.set(SESSION, "archived");
+    await says(t, "r2", MEMBER, "@podstow and the docs?");
+    expect(eventsOf(t.lines)).toEqual(
+      expect.arrayContaining(["session-gone", "session-started"]),
+    );
+    expect(launches(t)).toHaveLength(2);
+    expect(launches(t)[1]?.prompt).toContain("podstow (you): Done.");
+    await says(t, "r3", MEMBER, "@podstow thanks");
+    expect(followUps(t).at(-1)?.args[2]).toBe(`session_${SECOND}`);
   });
 
   it("posts an answer without the session's link, even one the session wrote", async () => {
@@ -241,80 +297,14 @@ describe("a request in a group that is set up", () => {
     started(t, SESSION, [
       result(`Fixed in #12.\n\n↗ claude.ai/code/session_${SESSION}`),
     ]);
-    await says(t, "r1", MEMBER, "@claude fix it");
-    await t.app.pollOnce();
+    await says(t, "r1", MEMBER, "@podstow fix it");
+    await poll(t);
     expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
-      "Fixed in #12.",
+      "*podstow:* Fixed in #12.",
     ]);
   });
 
-  it("starts a fresh session when the one replied to is archived", async () => {
-    const t = (h = await harness());
-    t.fake.launches.push(SESSION, SECOND);
-    started(t, SESSION, [result("Done.")]);
-    started(t, SECOND);
-    await says(t, "r1", MEMBER, "@claude tidy the README");
-    await t.app.pollOnce();
-    t.fake.followUps.set(SESSION, "archived");
-    await says(t, "r2", MEMBER, "and the docs?", {
-      quotedIsFromMe: true,
-      quotedMessageId: "sent-1",
-      quotedContent: "Done.",
-    });
-    expect(eventsOf(t.lines)).toEqual(
-      expect.arrayContaining(["session-gone", "session-started"]),
-    );
-    expect(
-      t.fake.calls.filter((call) => call.command === t.env.PYTHON),
-    ).toHaveLength(2);
-  });
-
-  it("answers the same message once, however often the bridge sends it", async () => {
-    const t = (h = await harness());
-    t.fake.launches.push(SESSION, SECOND);
-    started(t, SESSION);
-    await says(t, "r1", MEMBER, "@claude hello");
-    await t.deliver({
-      messageId: "r1",
-      sender: MEMBER,
-      content: "@claude hello",
-    });
-    expect(t.fake.calls).toHaveLength(1);
-  });
-
-  it("gives a session only what members said, and leaves commands out", async () => {
-    const t = (h = await harness({
-      db: (db) =>
-        db
-          .message({
-            id: "s1",
-            sender: STRANGER,
-            content: "the secret plan is here",
-            at: NOW - 3000,
-          })
-          .message({
-            id: "c1",
-            sender: OWNER,
-            content: "@claude status",
-            at: NOW - 2000,
-          })
-          .message({
-            id: "o1",
-            sender: OWNER,
-            content: "we ship on Friday",
-            at: NOW - 1000,
-          }),
-    }));
-    t.fake.launches.push(SESSION);
-    started(t, SESSION);
-    await says(t, "r1", MEMBER, "@claude what's the plan?");
-    const prompt = t.fake.calls[0]?.prompt ?? "";
-    expect(prompt).toContain("Thomas: we ship on Friday");
-    expect(prompt).not.toContain("secret plan");
-    expect(prompt).not.toContain("@claude status");
-  });
-
-  it("passes on recent photos from members as short-lived links, and nobody else's", async () => {
+  it("gives each Claude a member's recent photos once, as short-lived links, and nobody else's", async () => {
     const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
     t.bridge.media.set("p1", {
       filename: "screen shot.png",
@@ -338,48 +328,84 @@ describe("a request in a group that is set up", () => {
       at: NOW - 30_000,
       mediaType: "image",
     });
-    t.fake.launches.push(SESSION);
+    t.fake.launches.push(SESSION, SECOND);
     started(t, SESSION);
-    await says(t, "r1", MEMBER, "@claude what's wrong in this screenshot?");
-    const prompt = t.fake.calls[0]?.prompt ?? "";
+    started(t, SECOND);
+    await says(t, "r1", MEMBER, "@podstow what's wrong in this screenshot?");
+    const prompt = launches(t)[0]?.prompt ?? "";
     expect(prompt).toMatch(
       /- screen_shot\.png \(image\/png, 1 KB\): https:\/\/files\.s3\.example\.test\/attachments\/[\w-]+\/screen_shot\.png\?expires=3600/u,
     );
     expect(prompt).not.toContain("theirs.png");
-    expect([...t.aws.objects.keys()]).toEqual([
-      expect.stringMatching(/^files\/attachments\/[\w-]+\/screen_shot\.png$/u),
-    ]);
-    expect(t.stateFile()).toMatchObject({ sentMedia: ["p1"] });
+    await says(t, "r2", MEMBER, "@podstow and now?");
+    expect(followUps(t)[0]?.options.input).not.toContain("screen_shot.png");
+    await says(t, "r3", MEMBER, "@brainstorm what do you see?");
+    expect(launches(t)[1]?.prompt).toContain("screen_shot.png");
+  });
+
+  it("trusts each workspace it makes, in the task (cloud-sessions.md)", async () => {
+    const t = (h = await harness({
+      env: { LOGIN_PARAMETER: "/tagalong/claude-login" },
+    }));
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow hello");
+    const cwd = launches(t)[0]?.options.cwd ?? "";
+    const config: unknown = JSON.parse(
+      readFileSync(join(t.env.HOME, ".claude.json"), "utf8"),
+    );
+    expect(config).toMatchObject({
+      projects: { [cwd]: { hasTrustDialogAccepted: true } },
+    });
+  });
+
+  it("leaves a laptop's own Claude config alone", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow hello");
+    expect(existsSync(join(t.env.HOME, ".claude.json"))).toBe(false);
+  });
+
+  it("answers the same message once, however often the bridge sends it", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow hello");
+    await t.deliver({
+      messageId: "r1",
+      sender: MEMBER,
+      content: "@podstow hello",
+    });
+    expect(t.fake.calls).toHaveLength(1);
   });
 
   it("starts nothing in a dry run", async () => {
     const t = (h = await harness({ env: { DRY_RUN: "1" } }));
-    await says(t, "r1", MEMBER, "@claude hello");
+    await says(t, "r1", MEMBER, "@podstow hello");
     expect(t.fake.calls).toEqual([]);
     expect(t.bridge.reactions).toEqual([]);
   });
 
-  it("holds requests past the hourly cap", async () => {
-    const t = (h = await harness({ env: { MAX_PER_HOUR: "1" } }));
-    t.fake.launches.push(SESSION, SECOND);
+  it("holds turns past the hourly cap", async () => {
+    const t = (h = await harness({ env: { MAX_PER_HOUR: "2" } }));
+    t.fake.launches.push(SESSION, SECOND, THIRD);
     started(t, SESSION);
-    await says(t, "r1", MEMBER, "@claude one");
-    await says(t, "r2", MEMBER, "@claude two");
+    started(t, SECOND);
+    await says(t, "r1", MEMBER, "@podstow one");
+    await says(t, "r2", MEMBER, "@podstow @brainstorm two");
     expect(t.bridge.reactions.map((reaction) => reaction.emoji)).toEqual([
       "👀",
       "⏳",
     ]);
     t.clock.now += 3_600_001;
-    started(t, SECOND);
-    await says(t, "r3", MEMBER, "@claude three");
-    expect(
-      t.fake.calls.filter((call) => call.command === t.env.PYTHON),
-    ).toHaveLength(2);
+    await says(t, "r3", MEMBER, "@brainstorm three");
+    expect(launches(t)).toHaveLength(2);
   });
 
-  it("marks a request it could not start, and says so at error level", async () => {
+  it("marks a request it could not start, and says why at error level", async () => {
     const t = (h = await harness());
-    await says(t, "r1", MEMBER, "@claude hello");
+    await says(t, "r1", MEMBER, "@podstow hello");
     expect(t.bridge.reactions.map((reaction) => reaction.emoji)).toEqual([
       "👀",
       "⚠️",
@@ -395,9 +421,9 @@ describe("a request in a group that is set up", () => {
 });
 
 describe("who is answered", () => {
-  it("ignores someone the owner has not added", async () => {
+  it("ignores someone the owner has not allowed", async () => {
     const t = (h = await harness());
-    await says(t, "r1", STRANGER, "@claude hello");
+    await says(t, "r1", STRANGER, "@podstow hello");
     expect(t.fake.calls).toEqual([]);
     expect(t.bridge.reactions).toEqual([]);
     expect(t.lines).toContainEqual(
@@ -408,95 +434,158 @@ describe("who is answered", () => {
     );
   });
 
-  it("says nothing at all about a group that is not set up", async () => {
+  it("says nothing at all in a chat with no Claudes", async () => {
     const t = (h = await harness());
-    await says(t, "x1", OWNER, "@claude hello", { chatJID: OTHER_GROUP });
+    await says(t, "x1", OWNER, "@podstow hello", { chatJID: OTHER_GROUP });
     expect(t.fake.calls).toEqual([]);
-    expect(t.bridge.reactions).toEqual([]);
+    expect(t.bridge.sent).toEqual([]);
     expect(t.lines).toEqual([]);
+  });
+
+  it("says who is here when asked with no name, or with one that is not here", async () => {
+    const t = (h = await harness());
+    await says(t, "r1", MEMBER, "@claude can you look at this?");
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Ask one of us by name: @podstow, @brainstorm.",
+    );
+    await says(t, "r2", MEMBER, "@critic have a look");
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "@critic isn't in this group. Here: @podstow, @brainstorm. An owner can add one with @claude add <name>.",
+    );
+    expect(t.fake.calls).toEqual([]);
   });
 
   it("answers an owner who writes from their LID", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);
     started(t, SESSION);
-    await says(t, "r1", OWNER_LID, "@claude hello");
-    expect(t.fake.calls).toHaveLength(1);
+    await says(t, "r1", OWNER_LID, "@podstow hello");
+    expect(launches(t)).toHaveLength(1);
   });
 });
 
 describe("commands", () => {
-  it("lets an owner set a group up, add and remove people, and stop", async () => {
+  it("lets an owner define a Claude, add it, add people, and stop", async () => {
     const t = (h = await harness());
-    await says(t, "c1", OWNER, '@claude setup o/other read-only env="spare"', {
+    await says(
+      t,
+      "c1",
+      OWNER,
+      '@claude define reviewer o/other read-only env="spare"',
+      { chatJID: OTHER_GROUP },
+    );
+    expect(t.groupsFile().claudes?.reviewer).toEqual({
+      repo: "o/other",
+      environment: "env_fake2",
+      access: "read-only",
+    });
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Defined.\n*@reviewer*: o/other, read-only, spare\n\nAdd it to a group with `@claude add reviewer` there.",
+    );
+
+    await says(t, "c2", OWNER, "@claude add reviewer podstow", {
       chatJID: OTHER_GROUP,
     });
     expect(t.groupsFile().groups?.[OTHER_GROUP]).toEqual({
       label: "Family",
-      repo: "o/other",
-      environment: "env_fake2",
-      access: "read-only",
-      ref: "main",
-      members: [],
-    });
-    expect(t.bridge.sent.at(-1)).toMatchObject({
-      recipient: OTHER_GROUP,
-      quoted_message_id: "c1",
+      claudes: ["reviewer", "podstow"],
     });
     expect(t.bridge.sent.at(-1)?.message).toContain(
-      "Set up.\n*o/other* (read-only)\nEnvironment: spare (env_fake2)",
+      "Claudes here:\n*@reviewer*: o/other, read-only, spare\n*@podstow*: o/r, read-write, Default Full",
     );
 
-    await says(t, "c2", OWNER, `@claude allow @${MEMBER}`, {
+    await says(t, "c3", OWNER, `@claude allow @${MEMBER}`, {
       chatJID: OTHER_GROUP,
       mentionedJids: [`${MEMBER}@s.whatsapp.net`],
     });
     expect(t.groupsFile().groups?.[OTHER_GROUP]?.members).toEqual([MEMBER]);
     expect(t.bridge.sent.at(-1)?.message).toContain(
-      "Answers @claude from: Thomas, Ollie",
+      "Who can ask them: Thomas, Ollie",
     );
 
-    await says(t, "c3", OWNER, "@claude revoke +447700900002", {
+    await says(t, "c4", OWNER, "@claude revoke +447700900002", {
       chatJID: OTHER_GROUP,
     });
     expect(t.groupsFile().groups?.[OTHER_GROUP]?.members).toEqual([]);
 
-    await says(t, "c4", OWNER, "@claude stop", { chatJID: OTHER_GROUP });
-    expect(t.groupsFile().groups?.[OTHER_GROUP]).toBeUndefined();
-    expect(t.app.parts.groups.config.groups.has(OTHER_GROUP)).toBe(false);
-  });
-
-  it("refuses an environment it cannot find, and changes nothing", async () => {
-    const t = (h = await harness());
-    await says(t, "c1", OWNER, "@claude setup o/other env=nowhere", {
+    await says(t, "c5", OWNER, "@claude remove reviewer podstow", {
       chatJID: OTHER_GROUP,
     });
+    expect(t.app.parts.groups.config.groups.has(OTHER_GROUP)).toBe(false);
+    expect(t.groupsFile().groups?.[OTHER_GROUP]?.claudes).toEqual([]);
+
+    await says(t, "c6", OWNER, "@claude stop", { chatJID: OTHER_GROUP });
     expect(t.groupsFile().groups?.[OTHER_GROUP]).toBeUndefined();
+  });
+
+  it("works the same in a one-to-one chat with the number", async () => {
+    const t = (h = await harness());
+    await says(t, "c1", OWNER, "@claude add brainstorm", { chatJID: DIRECT });
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", OWNER, "@brainstorm let's think about pricing", {
+      chatJID: DIRECT,
+    });
+    expect(launches(t)[0]?.prompt).toContain('You are "brainstorm"');
+  });
+
+  it("refuses a Claude it does not know, a reserved name, and an environment it cannot find", async () => {
+    const t = (h = await harness());
+    await says(t, "c1", OWNER, "@claude add nobody", { chatJID: OTHER_GROUP });
+    expect(t.bridge.sent.at(-1)?.message).toMatch(
+      /^Couldn't do that: No Claude called nobody\. Defined Claudes:\n\*@podstow\*/u,
+    );
+    await says(t, "c2", OWNER, "@claude define claude o/r", {
+      chatJID: OTHER_GROUP,
+    });
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Couldn't do that: Name it first: `@claude define critic owner/repo read-only`",
+    );
+    await says(t, "c3", OWNER, "@claude define critic o/other env=nowhere", {
+      chatJID: OTHER_GROUP,
+    });
     expect(t.bridge.sent.at(-1)?.message).toBe(
       'Couldn\'t do that: no environment called "nowhere". Yours: Default Full, spare',
     );
+    expect(t.groupsFile()).toEqual(standardGroups);
+  });
+
+  it("starts a Claude afresh, with only the last messages", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION, [result("First answer.")]);
+    started(t, SECOND);
+    await says(t, "r1", MEMBER, "@podstow hello");
+    await poll(t);
+    await says(t, "c1", OWNER, "@claude fresh podstow");
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Next time, @podstow starts afresh, with only the last messages here.",
+    );
+    await says(t, "r2", MEMBER, "@podstow again");
+    expect(launches(t)).toHaveLength(2);
+    expect(followUps(t)).toHaveLength(0);
   });
 
   it("sends help as an intro and messages to copy", async () => {
     const t = (h = await harness());
     await says(t, "c1", OWNER, "@claude help");
     expect(t.bridge.sent.map((sent) => sent.message.split("\n")[0])).toEqual([
-      "Set up here:",
-      '@claude setup o/r read-write env="Default Full"',
+      "Claudes here:",
+      "@claude add critic",
+      "@claude define critic owner/repo read-only",
       "@claude allow @",
       "@claude revoke @",
-      "@claude status",
+      "@claude fresh podstow",
+      "@claude who",
       "@claude stop",
     ]);
   });
 
   it("ignores a command from anyone but an owner, and never treats it as a request", async () => {
     const t = (h = await harness());
-    await says(t, "c1", MEMBER, "@claude setup o/r read-write");
+    await says(t, "c1", MEMBER, "@claude add critic");
     await says(t, "c2", STRANGER, "@claude stop");
-    expect(t.groupsFile()).toEqual(
-      (await import("../../test/app-harness.ts")).standardGroups,
-    );
+    expect(t.groupsFile()).toEqual(standardGroups);
     expect(t.fake.calls).toEqual([]);
     expect(t.bridge.sent).toEqual([]);
     expect(
@@ -519,28 +608,27 @@ describe("commands", () => {
 });
 
 describe("waiting on a session", () => {
-  it("says once when the session waits for an approval, and gives up in the end", async () => {
+  it("says once when a Claude waits for an approval, and gives up in the end", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);
     started(t, SESSION);
-    await says(t, "r1", MEMBER, "@claude deploy it");
+    await says(t, "r1", MEMBER, "@podstow deploy it");
     t.api.sessions.set(SESSION, {
       status: "requires_action",
       environmentId: "env_fake1",
       events: [],
     });
-    await t.app.pollOnce();
-    await t.app.pollOnce();
+    await poll(t);
+    await poll(t);
     expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
-      `Claude is waiting for an approval in the session.\n\n↗ claude.ai/code/session_${SESSION}`,
+      `*podstow:* waiting for an approval in the session.\n\n↗ claude.ai/code/session_${SESSION}`,
     ]);
     t.clock.now += t.env.GIVE_UP_MS + 1;
-    await t.app.pollOnce();
-    expect(t.bridge.sent.at(-1)?.message).toMatch(
-      /^No reply from Claude after 120 minutes/u,
+    await poll(t);
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "*podstow:* no reply after 120 minutes; I may still be working.",
     );
-    expect(t.bridge.sent.at(-1)?.message).not.toContain("claude.ai");
-    await t.app.pollOnce();
+    await poll(t);
     expect(t.bridge.sent).toHaveLength(2);
   });
 
@@ -550,10 +638,10 @@ describe("waiting on a session", () => {
     started(t, SESSION, [
       { type: "result", subtype: "error_max_turns", is_error: true },
     ]);
-    await says(t, "r1", MEMBER, "@claude go");
-    await t.app.pollOnce();
-    expect(t.bridge.sent.at(-1)?.message).toContain(
-      "⚠️ The session stopped with an error (error_max_turns).",
+    await says(t, "r1", MEMBER, "@podstow go");
+    await poll(t);
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "*podstow:* ⚠️ The session stopped with an error (error_max_turns).",
     );
   });
 
@@ -561,24 +649,24 @@ describe("waiting on a session", () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);
     started(t, SESSION, [assistant("Half an answer.")]);
-    await says(t, "r1", MEMBER, "@claude go");
-    await t.app.pollOnce();
+    await says(t, "r1", MEMBER, "@podstow go");
+    await poll(t);
     expect(t.bridge.sent).toEqual([]);
     const session = t.api.sessions.get(SESSION);
     if (session !== undefined) session.status = "idle";
-    await t.app.pollOnce();
-    expect(t.bridge.sent.at(-1)?.message).toContain("Half an answer.");
+    await poll(t);
+    expect(t.bridge.sent.at(-1)?.message).toBe("*podstow:* Half an answer.");
   });
 
-  it("stops watching sessions of a group that was stopped", async () => {
+  it("stops watching a Claude removed from the chat", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);
     started(t, SESSION);
-    await says(t, "r1", MEMBER, "@claude go");
-    await says(t, "c1", OWNER, "@claude stop");
+    await says(t, "r1", MEMBER, "@podstow go");
+    await says(t, "c1", OWNER, "@claude remove podstow");
     const sent = t.bridge.sent.length;
     t.api.sessions.get(SESSION)?.events.push(result("late"));
-    await t.app.pollOnce();
+    await poll(t);
     expect(t.bridge.sent).toHaveLength(sent);
   });
 });

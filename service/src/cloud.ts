@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import type { Env } from "./env.ts";
 import { lastSession, oneLine, stripAnsi } from "./format.ts";
-import { ACCESS, type Group } from "./groups.ts";
+import { ACCESS, type Claude } from "./groups.ts";
 import { CommandError } from "./log.ts";
 import type { Login } from "./login.ts";
 import type { Runner } from "./run.ts";
@@ -59,29 +59,29 @@ export class Cloud {
   }
 
   /**
-   * A bare workspace for the group's repo and environment: an empty git repo
+   * A bare workspace for the Claude's repo and environment: an empty git repo
    * whose origin is the GitHub repo, which `claude --cloud` clones from its
    * side, and the environment in its local settings.
    */
-  workspaceFor(group: Group): string {
+  workspaceFor(claude: Claude): string {
     const dir = join(
       this.#env.WORKSPACES_DIR,
-      `${group.repo.replace("/", "__")}${group.environment === undefined ? "" : `__${group.environment}`}`,
+      `${claude.repo.replace("/", "__")}${claude.environment === undefined ? "" : `__${claude.environment}`}`,
     );
     if (!existsSync(join(dir, ".git"))) {
       mkdirSync(dir, { recursive: true });
       execFileSync("git", ["init", "-q"], { cwd: dir });
       execFileSync(
         "git",
-        ["remote", "add", "origin", `https://github.com/${group.repo}.git`],
+        ["remote", "add", "origin", `https://github.com/${claude.repo}.git`],
         { cwd: dir },
       );
     }
     mkdirSync(join(dir, ".claude"), { recursive: true });
     const settings =
-      group.environment === undefined
+      claude.environment === undefined
         ? {}
-        : { remote: { defaultEnvironmentId: group.environment } };
+        : { remote: { defaultEnvironmentId: claude.environment } };
     writeFileSync(
       join(dir, ".claude", "settings.local.json"),
       `${JSON.stringify(settings, null, 2)}\n`,
@@ -90,9 +90,9 @@ export class Cloud {
     return dir;
   }
 
-  /** Start a session for `group`; returns its id. */
-  async start(group: Group, prompt: string, name: string): Promise<string> {
-    const cwd = this.workspaceFor(group);
+  /** Start a session for `claude`; returns its id. */
+  async start(claude: Claude, prompt: string, name: string): Promise<string> {
+    const cwd = this.workspaceFor(claude);
     const dir = mkdtempSync(join(tmpdir(), "tagalong-prompt-"));
     const file = join(dir, "prompt.txt");
     writeFileSync(file, prompt, { mode: 0o600 });
@@ -104,9 +104,9 @@ export class Cloud {
           cwd,
           env: this.#login.cliEnv({
             CLAUDE_SESSION_NAME: name,
-            CLAUDE_PERMISSION_MODE: ACCESS[group.access],
-            CLAUDE_REF: group.ref,
-            CLAUDE_MODEL: group.model ?? "",
+            CLAUDE_PERMISSION_MODE: ACCESS[claude.access],
+            CLAUDE_REF: claude.ref,
+            CLAUDE_MODEL: claude.model ?? "",
           }),
           timeoutMs: 300_000,
         },

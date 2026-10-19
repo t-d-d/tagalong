@@ -1,6 +1,6 @@
 # Cloud sessions
 Relevance: Starting a session, sending it a follow-up, reading its answer, or environments: service/launch.py, service/src/cloud.ts, service/src/claude-api.ts, service/src/relay.ts, service/src/requests.ts
-Decision: Sessions start the way podstow's dispatcher starts them, with claude --cloud in a terminal; answers are read from the sessions API the CLI itself uses.
+Decision: Each Claude keeps one running session per chat, started with claude --cloud in a terminal; answers are read from the sessions API the CLI uses.
 
 Why: claude --cloud is the supported way to start a cloud session, and
 it needs a terminal. The CLI's own sessions endpoints give each turn's
@@ -19,15 +19,19 @@ result, so nothing has to be scraped or posted back by the session.
 - service/launch.py runs claude --cloud in a pseudo-terminal with the
   group's permission mode, ref, model and a session name, and returns
   once the CLI prints "Resume with:".
-- A reply to Claude's answer carries on the session it came from, with
-  claude -p --cloud session_<id>. Each answer is remembered by the id
-  the bridge stored it under and by a hash of its text; an older answer
-  with a session link in it still works. A session that is archived or
-  gone is replaced by a new one.
+- A Claude has one running session in each chat. Each time it is
+  asked, a turn goes into that session with claude -p --cloud
+  session_<id>: what was said in the chat since its last turn, then the
+  request. A new session, after fresh or when the running one is
+  archived or gone, starts with the chat's last HISTORY messages.
+- Each answer is remembered by the id the bridge stored it under and by
+  a hash of its text, so a reply to it reaches the Claude that wrote
+  it. An older answer with a session link in it still works.
 - Answers are read from /v1/code/sessions/cse_<id>/events, after the
   last sequence number read. A result event ends a turn; its text is
-  posted as a reply to the request, without the session's link, and a
-  line the session ended with its own link is dropped.
+  posted as a reply to the request, after the Claude's name in bold,
+  without the session's link. A line the session ended with its own
+  link is dropped.
 - A session waiting for an approval is mentioned once, with its link,
   the one place to approve it. A turn with no answer after GIVE_UP_MS
   is given up on.

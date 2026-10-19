@@ -8,17 +8,18 @@ import { ClaudeApi } from "./claude-api.ts";
 import { Cloud } from "./cloud.ts";
 import { commandIn, mayRun, runCommand } from "./commands.ts";
 import { type Env, cliEnv } from "./env.ts";
-import { GroupsStore, parseOwners } from "./groups.ts";
+import { GroupsStore, claudesOf, parseOwners } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
 import { Login } from "./login.ts";
 import { People } from "./people.ts";
 import { poll } from "./relay.ts";
-import { handleRequest } from "./requests.ts";
+import { handleRequest, repliedTo } from "./requests.ts";
 import { type Runner, Serial } from "./run.ts";
 import { type DeviceState, ensureDevice } from "./seed.ts";
 import { StateStore } from "./state.ts";
 import { WhatsAppStore } from "./store.ts";
-import { type Payload, trigger, webhookServer } from "./webhook.ts";
+import { type Payload, webhookServer } from "./webhook.ts";
+import { addressed } from "./addressing.ts";
 
 export interface AppDeps {
   aws: Aws | undefined;
@@ -68,14 +69,15 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       content: payload.content,
       mentioned: payload.mentionedJids ?? [],
     };
-    const group = groups.config.groups.get(payload.chatJID);
+    const { config } = groups;
+    const group = config.groups.get(payload.chatJID);
     // A command is never a request, whoever sends it (who-can-use-it.md).
     const command =
       payload.isFromMe || payload.eventType === "reaction"
         ? null
         : commandIn(payload.content, people.self);
     if (command !== null) {
-      const deps = { groups, people, store, api, bridge, now };
+      const deps = { groups, people, store, state, api, bridge, now };
       if (mayRun(incoming, deps)) {
         pending = commands
           .run(() => runCommand(incoming, command, deps))
@@ -90,19 +92,47 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       }
       return;
     }
-    // Nothing is logged about a chat that is not set up: this account is in other groups too.
+    // Nothing is logged about a chat with no Claudes: this account is in other groups too.
     if (group === undefined) return;
-    const why = trigger(payload, people.self);
+    const asked = addressed(
+      payload,
+      group.claudes,
+      new Set(config.claudes.keys()),
+      people.self,
+      repliedTo(payload, { store, state }),
+    );
     log.info("message", {
       group: group.label,
-      trigger: why ?? "none",
+      claudes: asked.claudes.length,
       chars: payload.content.length,
     });
-    if (why === null) return;
-    if (!allowed(groups.config, group, people, payload.sender)) {
+    if (asked.claudes.length === 0 && !asked.bare && asked.missing.length === 0)
+      return;
+    if (!allowed(config, group, people, payload.sender)) {
       log.info("request-ignored", { why: "not-a-member", group: group.label });
       return;
     }
+    const quote = {
+      id: payload.messageId,
+      sender: payload.sender,
+      content: payload.content,
+    };
+    if (asked.claudes.length === 0) {
+      const here = group.claudes.map((name) => `@${name}`).join(", ");
+      const text =
+        asked.missing.length > 0
+          ? `${asked.missing.map((name) => `@${name}`).join(", ")} isn't in this group. Here: ${here}. An owner can add one with @claude add <name>.`
+          : `Ask one of us by name: ${here}.`;
+      pending = requests
+        .run(() => bridge.send(payload.chatJID, text, quote))
+        .catch((error: unknown) => {
+          log.warn("bridge-unreachable", errorFields(error));
+        });
+      return;
+    }
+    const claudes = claudesOf(config, group).filter((claude) =>
+      asked.claudes.includes(claude.name),
+    );
     const deps = {
       env,
       groups,
@@ -118,7 +148,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       recent,
     };
     pending = requests
-      .run(() => handleRequest(payload, why, group, deps))
+      .run(() => handleRequest(payload, claudes, group, deps))
       .catch(async (error: unknown) => {
         log.error("request-failed", {
           group: group.label,

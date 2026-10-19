@@ -14,7 +14,9 @@ agree to have them kept in CloudWatch.
 - Every line names an event from the one exported list in
   service/src/log.ts.
 - No message text, phone number, LID, contact name or file name in any
-  line. Group labels, session ids, counts, statuses and lengths only.
+  line. Group labels, Claude names, session ids, counts, statuses and
+  lengths only. A one-to-one chat is labelled "direct chat", never by
+  its number or name.
 - Nothing at all is logged about a chat that is not set up.
 - Log a dependency's error class and status, never its message.
 - The heartbeat line names the bridge's state. The heartbeat alarm

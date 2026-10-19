@@ -15,12 +15,11 @@ describe("groups.json on disk", () => {
     expect(store.config.groups.size).toBe(0);
     store.update((file) => ({
       ...file,
-      groups: {
-        [GROUP]: { repo: "o/r", access: "read-write", members: [MEMBER] },
-      },
+      claudes: { podstow: { repo: "o/r", access: "read-write" } },
+      groups: { [GROUP]: { claudes: ["podstow"], members: [MEMBER] } },
     }));
     expect(store.config.groups.get(GROUP)?.members).toEqual([MEMBER]);
-    expect(new GroupsStore(path, []).config.groups.get(GROUP)?.repo).toBe(
+    expect(new GroupsStore(path, []).config.claudes.get("podstow")?.repo).toBe(
       "o/r",
     );
   });
@@ -29,18 +28,41 @@ describe("groups.json on disk", () => {
     const path = join(folder(), "groups.json");
     const store = new GroupsStore(path, []);
     store.update(() => ({
-      groups: { [GROUP]: { repo: "o/r", access: "read-only" } },
+      claudes: { podstow: { repo: "o/r", access: "read-only" } },
+      groups: { [GROUP]: { claudes: ["podstow"] } },
     }));
     const before = readFileSync(path, "utf8");
     expect(() =>
-      store.update(() => ({
-        groups: {
-          [GROUP]: { repo: "o/r", access: "read-write", members: ["Ollie"] },
-        },
+      store.update((file) => ({
+        ...file,
+        groups: { [GROUP]: { claudes: ["podstow"], members: ["Ollie"] } },
       })),
     ).toThrow();
     expect(readFileSync(path, "utf8")).toBe(before);
-    expect(store.config.groups.get(GROUP)?.access).toBe("read-only");
+    expect(store.config.groups.get(GROUP)?.members).toEqual([]);
+  });
+
+  it("writes a file from before named Claudes back in the new shape", () => {
+    const path = join(folder(), "groups.json");
+    writeFileSync(
+      path,
+      JSON.stringify({
+        groups: {
+          [GROUP]: {
+            repo: "o/podstow",
+            access: "read-write",
+            members: [MEMBER],
+          },
+        },
+      }),
+    );
+    const store = new GroupsStore(path, []);
+    expect(store.config.groups.get(GROUP)?.claudes).toEqual(["podstow"]);
+    store.update((file) => file);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      claudes: { podstow: { repo: "o/podstow", access: "read-write" } },
+      groups: { [GROUP]: { claudes: ["podstow"], members: [MEMBER] } },
+    });
   });
 
   it("reloads a file that changed underneath", () => {
@@ -57,6 +79,7 @@ describe("state.json on disk", () => {
     const state = new StateStore(path);
     state.state.sessions.abc12345 = {
       chat: GROUP,
+      claude: "podstow",
       cursor: "4",
       waiting: true,
       since: 1,

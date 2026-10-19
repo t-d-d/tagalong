@@ -17,20 +17,18 @@ function setup() {
 }
 
 describe("workspaces", () => {
-  it("drops the environment setting when a group no longer names one", () => {
+  it("is one per repo and environment, shared by Claudes that share them", () => {
     const { cloud } = setup();
-    const group = {
-      jid: "g@g.us",
-      label: "g",
+    const claude = {
+      name: "critic",
       repo: "o/r",
       environment: undefined,
       access: "read-only" as const,
       ref: "main",
       model: undefined,
-      members: [],
     };
-    const dir = cloud.workspaceFor(group);
+    const dir = cloud.workspaceFor(claude);
     expect(dir.endsWith("o__r")).toBe(true);
-    expect(cloud.workspaceFor(group)).toBe(dir);
+    expect(cloud.workspaceFor({ ...claude, name: "other" })).toBe(dir);
   });
 });
