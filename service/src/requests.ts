@@ -26,7 +26,7 @@ import {
 } from "./prompts.ts";
 import { sessionFor } from "./replies.ts";
 import type { Serial } from "./run.ts";
-import { type StateStore, threadKey } from "./state.ts";
+import { type SessionState, type StateStore, threadKey } from "./state.ts";
 import { type WhatsAppStore, timeOf } from "./store.ts";
 import type { Payload } from "./webhook.ts";
 
@@ -219,6 +219,7 @@ async function turn(
     const id = thread.session;
     // Everything said since this Claude's last turn, not only the last few.
     const said = conversation(lines, thread.heard, deps.env.HISTORY * 3);
+    await skipPast(id, existing, deps.api);
     const sent = await deps.cli.run(() =>
       deps.cloud.send(id, followUp(claude.name, said, ask)),
     );
@@ -276,6 +277,25 @@ async function turn(
     files: ask.files.length,
   });
   await verify(id, claude, deps.api);
+}
+
+/**
+ * Move a session's cursor past everything in it now, so the answer posted is
+ * to this turn: someone may have carried on in it from elsewhere, such as
+ * Claude Desktop, and that turn's result is not this one's.
+ */
+async function skipPast(
+  id: string,
+  session: SessionState,
+  api: ClaudeApi,
+): Promise<void> {
+  try {
+    const { cursor } = await api.eventsAfter(id, session.cursor, 200);
+    session.cursor = cursor;
+    session.lastText = "";
+  } catch (error) {
+    log.warn("session-poll-failed", { session: id, ...errorFields(error) });
+  }
 }
 
 /** The dialogue of a session being replaced; empty, and logged, if it cannot be read. */
