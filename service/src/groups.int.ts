@@ -87,6 +87,7 @@ describe("state.json on disk", () => {
       since: 1,
       nudged: false,
       lastText: "",
+      outbox: null,
     };
     state.state.sentMedia.push(
       ...Array.from({ length: 600 }, (_, index) => `m${String(index)}`),

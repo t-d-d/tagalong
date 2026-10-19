@@ -24,6 +24,7 @@ import {
   firstPrompt,
   followUp,
 } from "./prompts.ts";
+import { type Upload, uploadFor } from "./outgoing.ts";
 import { sessionFor } from "./replies.ts";
 import type { Serial } from "./run.ts";
 import { type SessionState, type StateStore, threadKey } from "./state.ts";
@@ -100,6 +101,18 @@ async function files(
     bucket,
     chat: payload.chatJID,
   });
+}
+
+/** A folder and form for the turn to upload files to send back; none without a bucket, or if it cannot be made. */
+async function uploadOf(deps: RequestDeps): Promise<Upload | undefined> {
+  const bucket = deps.env.ATTACHMENTS_BUCKET;
+  if (bucket === undefined || deps.aws === undefined) return undefined;
+  try {
+    return await uploadFor(deps.aws, bucket);
+  } catch (error) {
+    log.warn("file-skipped", { why: "no-upload", ...errorFields(error) });
+    return undefined;
+  }
 }
 
 /** What the request quotes, as the Claude will read it. */
@@ -193,6 +206,9 @@ async function turn(
     quoted: quotedOf(payload, deps),
     files: await files(payload, group, claude.name, deps),
   };
+  const upload = await uploadOf(deps);
+  if (upload !== undefined) ask.upload = upload;
+  const outbox = upload?.folder ?? null;
   const waitFor = (session: string, version: string) => {
     const state = deps.state.state.sessions[session];
     if (state !== undefined)
@@ -201,6 +217,7 @@ async function turn(
         waiting: true,
         since: now,
         nudged: false,
+        outbox,
       });
     deps.state.state.threads[key] = {
       session,
@@ -266,6 +283,7 @@ async function turn(
     since: now,
     nudged: false,
     lastText: "",
+    outbox,
   };
   waitFor(id, versionOf(claude));
   log.info("session-started", {

@@ -319,6 +319,13 @@ Resources:
                   - s3:PutObject
                   - s3:GetObject
                 Resource: !Sub "${Bucket.Arn}/attachments/*"
+              # Files a Claude sends back: the upload form is signed with
+              # this role, and tagalong reads what landed (attachments.md).
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub "${Bucket.Arn}/outgoing/*"
               - Effect: Allow
                 Action:
                   - s3:GetObject

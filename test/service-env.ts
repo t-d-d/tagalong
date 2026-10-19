@@ -20,6 +20,7 @@ export function serviceEnv(
     GROUPS_FILE: join(root, "groups.json"),
     STATE_FILE: join(root, "state.json"),
     WORKSPACES_DIR: join(root, "workspaces"),
+    OUTBOX_DIR: join(root, "outbox"),
     PYTHON: "fake-python",
     CLAUDE_BIN: "fake-claude",
     CLAUDE_API_BASE: "http://127.0.0.1:1",

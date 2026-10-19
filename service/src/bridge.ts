@@ -100,6 +100,15 @@ export class Bridge {
     );
   }
 
+  /** Send a file from the outbox, as a picture, audio, video or document by its extension. */
+  async sendFile(chat: string, path: string): Promise<void> {
+    await this.#call(
+      "send",
+      { recipient: chat, message: "", media_path: path },
+      sendSchema,
+    );
+  }
+
   async react(
     chat: string,
     message: { id: string; sender: string },

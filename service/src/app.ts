@@ -218,7 +218,24 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
   }
 
   const pollOnce = () =>
-    poll({ api, bridge, groups, state, store, giveUpMs: env.GIVE_UP_MS, now });
+    poll({
+      api,
+      bridge,
+      groups,
+      state,
+      store,
+      giveUpMs: env.GIVE_UP_MS,
+      now,
+      ...(env.ATTACHMENTS_BUCKET === undefined || aws === undefined
+        ? {}
+        : {
+            files: {
+              aws,
+              bucket: env.ATTACHMENTS_BUCKET,
+              outboxDir: env.OUTBOX_DIR,
+            },
+          }),
+    });
   const keepFresh = () => cli.run(() => login.keepFresh());
 
   async function start(): Promise<Server> {

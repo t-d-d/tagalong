@@ -47,6 +47,23 @@ export function fakeAws(): FakeAws {
         ? Promise.reject(new Error("transcription failed"))
         : Promise.resolve(text);
     },
+    presignPost: (bucket, prefix, maxBytes, seconds) =>
+      Promise.resolve({
+        url: `https://${bucket}.s3.example.test/`,
+        fields: {
+          key: `${prefix}\${filename}`,
+          Policy: `max-${String(maxBytes)}-for-${String(seconds)}`,
+        },
+      }),
+    listObjects: (bucket, prefix) =>
+      Promise.resolve(
+        [...objects.entries()]
+          .filter(([path]) => path.startsWith(`${bucket}/${prefix}`))
+          .map(([path, object]) => ({
+            key: path.slice(bucket.length + 1),
+            bytes: object.body.length,
+          })),
+      ),
     deleteObject: (bucket, key) => {
       objects.delete(`${bucket}/${key}`);
       return Promise.resolve();

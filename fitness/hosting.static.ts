@@ -145,6 +145,14 @@ describe("fitness: the task may only run its own transcription jobs (attachments
   });
 });
 
+describe("fitness: a turn's uploads stay in their own folder (attachments.md)", () => {
+  it("may write and read outgoing/*, so it can sign the upload form and fetch what came", () => {
+    expect(JSON.stringify(resourcesOf("AWS::IAM::Role"))).toContain(
+      '{"Effect":"Allow","Action":["s3:PutObject","s3:GetObject"],"Resource":{"Fn::Sub":"${Bucket.Arn}/outgoing/*"}}',
+    );
+  });
+});
+
 describe("fitness: phone numbers never sit in the task definition (public-repo.md)", () => {
   it("reads the owners from Parameter Store as a secret", () => {
     const task = readRepoFile("infra/app.cfn.yml");
