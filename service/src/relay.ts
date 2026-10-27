@@ -8,11 +8,24 @@ import { type ClaudeApi, textOf } from "./claude-api.ts";
 import { sessionLink, toWhatsApp } from "./format.ts";
 import type { GroupsStore } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
-import { answering, busy, heard, messageFor, readAnswer } from "./mailbox.ts";
+import {
+  type Reading,
+  answering,
+  busy,
+  heard,
+  messageFor,
+  readAnswer,
+} from "./mailbox.ts";
 import { OUTGOING, sendUploads } from "./outgoing.ts";
 import { answerText } from "./prompts.ts";
 import { remember } from "./replies.ts";
-import type { Delivery, SessionState, StateStore } from "./state.ts";
+import {
+  type Delivery,
+  type SessionState,
+  type StateStore,
+  eyesKey,
+  unsee,
+} from "./state.ts";
 import type { WhatsAppStore } from "./store.ts";
 
 export interface RelayDeps {
@@ -25,9 +38,17 @@ export interface RelayDeps {
   now: () => number;
   /** Sessions with a message on its way in, left alone until it is. */
   sending: Set<string>;
+  /** Requests, by eyesKey, still being delivered to their Claudes: their 👀 stays. */
+  asking: Set<string>;
   /** Where a turn's uploads are, and where the bridge sends files from; none without a bucket. */
   files?: { aws: Aws; bucket: string; outboxDir: string };
 }
+
+/** The asks these deliveries carry. */
+const asksOf = (deliveries: Delivery[]): Quote[] =>
+  deliveries.flatMap((delivery) =>
+    delivery.ask === null ? [] : [delivery.ask],
+  );
 
 /** The ask an answer to these deliveries replies to: the latest they carry. */
 const latestAsk = (deliveries: Delivery[]): Quote | undefined =>
@@ -157,14 +178,41 @@ async function waitOn(
     ),
     latestAsk(overdue),
   );
+  await lookAway(session.chat, asksOf(overdue), deps);
 }
 
 /**
- * Post a turn's answer to `answers`: nothing for the pass word, a reaction
- * for one emoji, otherwise a message. It replies to the line a label at its
- * start names, or else the latest ask it answers; with neither it stands
- * alone. Then the files uploaded with it.
+ * Take tagalong's 👀 off each of these asks that no delivery, in any
+ * session, still waits on, once all its Claudes have their deliveries.
+ * One a Claude's reaction replaced is left.
  */
+export async function lookAway(
+  chat: string,
+  asks: { id: string; sender: string }[],
+  deps: Pick<RelayDeps, "bridge" | "state" | "asking">,
+): Promise<void> {
+  const { state } = deps.state;
+  for (const ask of asks) {
+    const key = eyesKey(chat, ask.id);
+    if (!state.eyes.includes(key) || deps.asking.has(key)) continue;
+    const waited = Object.values(state.sessions).some(
+      (session) =>
+        session.chat === chat &&
+        session.deliveries.some(
+          (delivery) => !delivery.answered && delivery.ask?.id === ask.id,
+        ),
+    );
+    if (waited) continue;
+    unsee(state, chat, ask.id);
+    try {
+      await deps.bridge.react(chat, ask, "");
+    } catch (error) {
+      log.warn("bridge-unreachable", errorFields(error));
+    }
+  }
+}
+
+/** Post a turn's answer to `answers`, then take the 👀 off what it answered. */
 async function post(
   id: string,
   session: SessionState,
@@ -174,10 +222,24 @@ async function post(
 ): Promise<void> {
   for (const delivery of answers) delivery.answered = true;
   const reading = readAnswer(text);
-  if (reading.kind === "pass") {
-    log.info("session-passed", { session: id });
-    return;
-  }
+  if (reading.kind === "pass") log.info("session-passed", { session: id });
+  else await say(id, session, reading, answers, deps);
+  // An answer that could not be posted leaves the 👀: it has none in the chat.
+  await lookAway(session.chat, asksOf(answers), deps);
+}
+
+/**
+ * A reaction for one emoji, otherwise a message. It goes on the line a label
+ * at its start names, or else the latest ask it answers; with neither it
+ * stands alone. Then the files uploaded with it.
+ */
+async function say(
+  id: string,
+  session: SessionState,
+  reading: Reading,
+  answers: Delivery[],
+  deps: RelayDeps,
+): Promise<void> {
   const line =
     reading.label === undefined
       ? undefined
@@ -191,6 +253,8 @@ async function post(
         };
   if (reading.kind === "reaction" && target !== undefined) {
     await deps.bridge.react(session.chat, target, reading.text);
+    // It replaces tagalong's 👀, if the message had one.
+    unsee(deps.state.state, session.chat, target.id);
     log.info("session-relayed", { session: id, reaction: true });
   } else {
     const words = toWhatsApp(reading.text);

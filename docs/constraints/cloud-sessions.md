@@ -57,6 +57,9 @@ result, so nothing has to be scraped or posted back by the session.
   busy session waiting for an approval is mentioned once, with its
   link, the one place to approve it. A delivery with no result after
   GIVE_UP_MS is given up on, and the chat is told.
+- tagalong reacts 👀 to a request as it delivers it, and takes the 👀
+  off once no delivery that carries the request still waits. A Claude's
+  own reaction on the request replaces the 👀 and is left alone.
 - Those endpoints are not documented, so every answer goes through a
   schema, and the CLI's version is pinned in the image.
 - Environments are named by their names from /v1/environment_providers,
@@ -83,4 +86,4 @@ History: Set when the repo was made, October 2026, following podstow's
 dispatcher. Each session is a mailbox since 27 October 2026, at the
 owner's request (#17): deliveries go in at any time and every result is
 posted. That replaced reading to the latest event before a follow-up
-(#10).
+(#10). The 👀 comes off an answered request since the same day (#24).

@@ -16,7 +16,7 @@ import { poll } from "./relay.ts";
 import { handleRequest, repliedTo } from "./requests.ts";
 import { type Runner, Serial } from "./run.ts";
 import { type DeviceState, ensureDevice } from "./seed.ts";
-import { StateStore } from "./state.ts";
+import { StateStore, unsee } from "./state.ts";
 import { WhatsAppStore } from "./store.ts";
 import { type Payload, webhookServer } from "./webhook.ts";
 import { addressed } from "./addressing.ts";
@@ -53,6 +53,8 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
   const recent: number[] = [];
   // Sessions with a message on its way in, which the relay leaves alone.
   const sending = new Set<string>();
+  // Requests whose deliveries are still going in, whose 👀 stays (relay.ts).
+  const asking = new Set<string>();
   let device: DeviceState = store.present() ? "present" : "waiting";
   if (device === "present") people.refresh();
   // Work started by a message, for tests to wait on.
@@ -158,6 +160,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       now,
       recent,
       sending,
+      asking,
     };
     pending = requests
       .run(() => handleRequest(payload, claudes, group, deps))
@@ -166,6 +169,8 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
           group: group.label,
           ...errorFields(error),
         });
+        // The ⚠️ replaces the 👀, and stays.
+        unsee(state.state, payload.chatJID, payload.messageId);
         await bridge
           .react(
             payload.chatJID,
@@ -230,6 +235,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       giveUpMs: env.GIVE_UP_MS,
       now,
       sending,
+      asking,
       ...(env.ATTACHMENTS_BUCKET === undefined || aws === undefined
         ? {}
         : {
