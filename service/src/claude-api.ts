@@ -46,6 +46,10 @@ const payloadSchema = z.looseObject({
   result: z.unknown().optional(),
   isMeta: z.boolean().optional(),
   message: z.looseObject({ content: z.unknown() }).optional(),
+  uuid: z.string().optional(),
+  // The user messages a result's turn answers; none for a turn the session
+  // started by itself (cloud-sessions.md).
+  user_message_uuids: z.array(z.string()).optional(),
 });
 export type Payload = z.infer<typeof payloadSchema>;
 

@@ -18,6 +18,8 @@ export const events = [
   "session-environment-mismatch",
   "session-followup",
   "session-relayed",
+  "session-passed",
+  "session-elsewhere",
   "session-waiting-approval",
   "session-gave-up",
   "session-poll-failed",

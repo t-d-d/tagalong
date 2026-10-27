@@ -1,6 +1,7 @@
-// Files a Claude sends back to the chat (attachments.md). Each turn gets its
-// own folder in the bucket and a form to upload to it; once the turn's answer
-// is posted, what landed there goes to the chat through the bridge's outbox.
+// Files a Claude sends back to the chat (attachments.md). Each delivery gets
+// its own folder in the bucket and a form to upload to it; once a turn's
+// answer is posted, what landed there goes to the chat through the bridge's
+// outbox, each file once.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -42,43 +43,63 @@ export interface Send {
   outboxDir: string;
 }
 
-/** Send what the turn uploaded to `folder`, at most five, each at most 16 MB. */
+/** A delivery's upload folder, and the files from it already sent or skipped. */
+export interface Box {
+  folder: string;
+  sent: string[];
+}
+
+/**
+ * Send what was uploaded to these folders and has not gone yet, at most five,
+ * each at most 16 MB. Each file is noted in its box, sent or not, so it goes
+ * once.
+ */
 export async function sendUploads(
   chat: string,
-  folder: string,
+  boxes: Box[],
   send: Send,
 ): Promise<void> {
-  let count = 0;
-  let bytes = 0;
-  try {
-    const objects = await send.aws.listObjects(send.bucket, folder);
-    const fit = objects.filter(
-      (object) => object.bytes > 0 && object.bytes <= OUTGOING.bytes,
-    );
-    if (fit.length < objects.length)
-      log.info("file-skipped", {
-        why: "too-large",
-        count: objects.length - fit.length,
-      });
-    for (const object of fit.slice(0, OUTGOING.files)) {
-      const dir = join(send.outboxDir, randomUUID());
-      const path = join(dir, safeName(object.key.slice(folder.length)));
+  const listed = await Promise.all(
+    boxes.map(async (box) => {
       try {
-        const body = await send.aws.getObject(send.bucket, object.key);
-        if (body === undefined) continue;
-        mkdirSync(dir, { recursive: true });
-        writeFileSync(path, body);
-        await send.bridge.sendFile(chat, path);
-        count += 1;
-        bytes += body.length;
+        const objects = await send.aws.listObjects(send.bucket, box.folder);
+        return objects
+          .filter((object) => !box.sent.includes(object.key))
+          .map((object) => ({ box, ...object }));
       } catch (error) {
         log.warn("file-skipped", { why: "failed", ...errorFields(error) });
-      } finally {
-        rmSync(dir, { recursive: true, force: true });
+        return [];
       }
+    }),
+  );
+  const fresh = listed.flat();
+  for (const { box, key } of fresh) box.sent.push(key);
+  const fit = fresh.filter(
+    (object) => object.bytes > 0 && object.bytes <= OUTGOING.bytes,
+  );
+  if (fit.length < fresh.length)
+    log.info("file-skipped", {
+      why: "too-large",
+      count: fresh.length - fit.length,
+    });
+  let count = 0;
+  let bytes = 0;
+  for (const { box, key } of fit.slice(0, OUTGOING.files)) {
+    const dir = join(send.outboxDir, randomUUID());
+    const path = join(dir, safeName(key.slice(box.folder.length)));
+    try {
+      const body = await send.aws.getObject(send.bucket, key);
+      if (body === undefined) continue;
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path, body);
+      await send.bridge.sendFile(chat, path);
+      count += 1;
+      bytes += body.length;
+    } catch (error) {
+      log.warn("file-skipped", { why: "failed", ...errorFields(error) });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
-  } catch (error) {
-    log.warn("file-skipped", { why: "failed", ...errorFields(error) });
   }
   if (count > 0) log.info("files-sent", { count, bytes });
 }

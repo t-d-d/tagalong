@@ -19,9 +19,11 @@ result, so nothing has to be scraped or posted back by the session.
 - service/launch.py runs claude --cloud in a pseudo-terminal with the
   group's permission mode, ref, model and a session name, and returns
   once the CLI prints "Resume with:".
-- A Claude has one running session in each chat. Each time it is
-  asked, a turn goes into that session with claude -p --cloud
-  session_<id>: what was said in the chat since its last turn, then the
+- A Claude has one running session in each chat, used as a mailbox.
+  Each time the Claude is asked, a delivery goes into the session
+  straight away with claude -p --cloud session_<id>, whether or not the
+  session is working: what was said in the chat since the Claude's last
+  delivery, each line with a short label such as [m41], then the
   request.
 - A conversation never loses its context by itself. A running session
   keeps the definition and repo it started on: redefining a Claude, or
@@ -36,15 +38,25 @@ result, so nothing has to be scraped or posted back by the session.
   a hash of its text, so a reply to it reaches the Claude that wrote
   it. An older answer with a session link in it still works.
 - Answers are read from /v1/code/sessions/cse_<id>/events, after the
-  last sequence number read. A result event ends a turn; its text is
-  posted as a reply to the request, after the Claude's name in bold,
-  without the session's link. A line the session ended with its own
-  link is dropped. Before a follow-up is sent, the session is read up to
-  its latest event, so a turn someone gave it elsewhere, such as from
-  Claude Desktop, is never posted as this one's answer (#10).
-- A session waiting for an approval is mentioned once, with its link,
-  the one place to approve it. A turn with no answer after GIVE_UP_MS
-  is given up on.
+  last sequence number read, from a session's first delivery until it
+  has had no delivery and no result for GIVE_UP_MS. tagalong notes each
+  delivery's uuid from the user event that carries its text.
+- A result event ends a turn. It is posted after the Claude's name in
+  bold, without the session's link, unless every message its
+  user_message_uuids lists came from elsewhere, such as Claude Desktop.
+  A result that lists no messages, from a turn the session started by
+  itself, is posted. A line the session ended with its own link is
+  dropped.
+- A result that is only the pass word, PASS, posts nothing. A result
+  that starts with a label replies to that line, without the label.
+  Otherwise it replies to the latest ask among the deliveries it lists,
+  and with neither it is a plain message. A result that is only one
+  emoji, with or without a label, goes as a reaction on the message it
+  would have replied to, or as a message when there is none.
+- A session is busy while a delivery has no result that lists it. A
+  busy session waiting for an approval is mentioned once, with its
+  link, the one place to approve it. A delivery with no result after
+  GIVE_UP_MS is given up on, and the chat is told.
 - Those endpoints are not documented, so every answer goes through a
   schema, and the CLI's version is pinned in the image.
 - Environments are named by their names from /v1/environment_providers,
@@ -62,6 +74,13 @@ result, so nothing has to be scraped or posted back by the session.
 - Let the CLI update itself: an update can change what the launcher
   reads.
 - Trust the workspaces folder and expect its workspaces to inherit it.
+- Read a session to its latest event before a delivery: a turn still
+  running would lose its answer.
+- Stop reading a session at a turn's result: a session that works in
+  the background answers in a later turn it starts by itself.
 
 History: Set when the repo was made, October 2026, following podstow's
-dispatcher.
+dispatcher. Each session is a mailbox since 27 October 2026, at the
+owner's request (#17): deliveries go in at any time and every result is
+posted. That replaced reading to the latest event before a follow-up
+(#10).

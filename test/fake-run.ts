@@ -25,6 +25,10 @@ export interface FakeRun {
   followUps: Map<string, "sent" | "archived">;
   /** Anything else the CLI is asked, such as a login refresh. */
   onClaude: (args: string[], options: RunOptions) => RunResult;
+  /** Each message that reaches a session: a launch's prompt, or a follow-up's input. */
+  onDeliver: (session: string, text: string) => void;
+  /** Work that happens while a follow-up is on its way, such as a poll. */
+  during: (() => Promise<void>) | undefined;
 }
 
 export function fakeRun(names: { python: string; claude: string }): FakeRun {
@@ -33,12 +37,15 @@ export function fakeRun(names: { python: string; claude: string }): FakeRun {
     launches: [],
     followUps: new Map(),
     onClaude: () => ({ code: 0, out: "{}" }),
+    onDeliver: () => undefined,
+    during: undefined,
     run: (command, args, options) => {
       const call: Call = { command, args, options };
       fake.calls.push(call);
       if (command === names.python) {
         call.prompt = readFileSync(args[1] ?? "", "utf8");
         const id = fake.launches.shift();
+        if (id !== undefined) fake.onDeliver(id, call.prompt);
         return Promise.resolve(
           id === undefined
             ? { code: 1, out: "Error: could not start a session\n" }
@@ -54,7 +61,9 @@ export function fakeRun(names: { python: string; claude: string }): FakeRun {
         if (target !== undefined) {
           const id = target.replace(/^session_/u, "");
           const answer = fake.followUps.get(id) ?? "sent";
-          return Promise.resolve(
+          if (answer === "sent") fake.onDeliver(id, options.input ?? "");
+          const done = fake.during?.() ?? Promise.resolve();
+          return done.then(() =>
             answer === "sent"
               ? {
                   code: 0,

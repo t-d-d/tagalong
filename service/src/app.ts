@@ -51,6 +51,8 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
 
   const seen = new Set<string>();
   const recent: number[] = [];
+  // Sessions with a message on its way in, which the relay leaves alone.
+  const sending = new Set<string>();
   let device: DeviceState = store.present() ? "present" : "waiting";
   if (device === "present") people.refresh();
   // Work started by a message, for tests to wait on.
@@ -155,6 +157,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       cli,
       now,
       recent,
+      sending,
     };
     pending = requests
       .run(() => handleRequest(payload, claudes, group, deps))
@@ -226,6 +229,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       store,
       giveUpMs: env.GIVE_UP_MS,
       now,
+      sending,
       ...(env.ATTACHMENTS_BUCKET === undefined || aws === undefined
         ? {}
         : {
