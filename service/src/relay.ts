@@ -23,6 +23,8 @@ export interface RelayDeps {
   store: WhatsAppStore;
   giveUpMs: number;
   now: () => number;
+  /** Sessions with a message on its way in, left alone until it is. */
+  sending: Set<string>;
   /** Where a turn's uploads are, and where the bridge sends files from; none without a bucket. */
   files?: { aws: Aws; bucket: string; outboxDir: string };
 }
@@ -30,6 +32,13 @@ export interface RelayDeps {
 /** The ask an answer to these deliveries replies to: the latest they carry. */
 const latestAsk = (deliveries: Delivery[]): Quote | undefined =>
   deliveries.findLast((delivery) => delivery.ask !== null)?.ask ?? undefined;
+
+/** How many answered deliveries a session keeps. */
+const KEPT = 20;
+
+/** Whether a delivery's upload form still works (outgoing.ts). */
+const formWorks = (delivery: Delivery, now: number): boolean =>
+  now - delivery.at < OUTGOING.linkSeconds * 1000;
 
 /** Look at one session; post what each turn that ended says. */
 export async function check(
@@ -79,10 +88,12 @@ export async function check(
   const now = deps.now();
   if (!busy(session) && now - session.since > deps.giveUpMs)
     session.waiting = false;
-  // A delivery is kept while it waits, and while its upload form works.
+  // Every delivery still waiting is kept, and the latest answered ones, so
+  // a late answer to one given up on still finds it.
+  const answered = session.deliveries.filter((delivery) => delivery.answered);
+  const old = new Set(answered.slice(0, -KEPT));
   session.deliveries = session.deliveries.filter(
-    (delivery) =>
-      !delivery.answered || now - delivery.at < OUTGOING.linkSeconds * 1000,
+    (delivery) => !old.has(delivery),
   );
 }
 
@@ -96,6 +107,13 @@ async function waitOn(
   const { status } = await deps.api.record(id);
   // An archived or failed session takes no more turns.
   const ended = status === "archived" || status === "failed";
+  // The turn may have ended, with its result, since its events were read:
+  // that result is the answer, read on the next look.
+  if (
+    (ended || (status === "idle" && session.lastText !== "")) &&
+    (await deps.api.eventsAfter(id, session.cursor)).events.length > 0
+  )
+    return;
   if (ended) session.waiting = false;
   if (status === "requires_action" && !session.nudged) {
     session.nudged = true;
@@ -188,9 +206,7 @@ async function post(
   // now. A delivery still waiting may be uploading for its own turn.
   const now = deps.now();
   const boxes = session.deliveries.flatMap((delivery) =>
-    delivery.answered &&
-    delivery.folder !== null &&
-    now - delivery.at < OUTGOING.linkSeconds * 1000
+    delivery.answered && delivery.folder !== null && formWorks(delivery, now)
       ? [{ folder: delivery.folder, sent: delivery.sent }]
       : [],
   );
@@ -213,6 +229,7 @@ export async function poll(deps: RelayDeps): Promise<void> {
       // Sessions of a Claude no longer in the group are left alone.
       if (
         !session.waiting ||
+        deps.sending.has(id) ||
         group === undefined ||
         (session.claude !== "" && !group.claudes.includes(session.claude))
       )

@@ -85,7 +85,12 @@ export function answering(
   const ours = session.deliveries.filter(
     (delivery) => delivery.uuid !== null && uuids.includes(delivery.uuid),
   );
-  return uuids.length > 0 && ours.length === 0 ? null : ours;
+  if (uuids.length === 0 || ours.length > 0) return ours;
+  // A delivery saved before uuids were noted (state.ts) takes the next result.
+  const legacy = session.deliveries.filter(
+    (delivery) => !delivery.answered && delivery.key === "",
+  );
+  return legacy.length > 0 ? legacy : null;
 }
 
 /** A session is busy while a delivery has no result that lists it. */
@@ -110,7 +115,8 @@ export function readAnswer(answer: string): Reading {
   const match = LABEL.exec(answer);
   const label = match?.[1];
   const text = answer.slice(match?.[0].length ?? 0).trim();
-  if (text === "" || text === PASS) return { kind: "pass", label, text: "" };
+  if (text === "" || text === PASS || text === `${PASS}.`)
+    return { kind: "pass", label, text: "" };
   const one = [...graphemes.segment(text)].length === 1;
   return {
     kind: one && EMOJI.test(text) ? "reaction" : "message",

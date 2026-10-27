@@ -128,8 +128,17 @@ describe("state.json on disk", () => {
         },
       }),
     );
-    expect(new StateStore(path).state.sessions.abc12345?.deliveries).toEqual(
-      [],
-    );
+    // The request it waits on becomes a delivery, which takes the next result.
+    expect(new StateStore(path).state.sessions.abc12345?.deliveries).toEqual([
+      {
+        uuid: null,
+        key: "",
+        ask: { id: "r1", sender: OWNER, content: "hi" },
+        at: 1,
+        answered: false,
+        folder: null,
+        sent: [],
+      },
+    ]);
   });
 });

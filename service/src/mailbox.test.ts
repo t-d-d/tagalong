@@ -70,6 +70,10 @@ describe("deliveries", () => {
     expect(answering(s, ["u7"])).toBeNull();
     // A turn the session started by itself lists no messages.
     expect(answering(s, [])).toEqual([]);
+    // A delivery saved before uuids were noted takes the next result.
+    s.deliveries.push({ ...deliveryOf("", ask, null, 3), key: "" });
+    expect(answering(s, ["u7"])).toEqual([s.deliveries[2]]);
+    s.deliveries.pop();
     for (const delivery of s.deliveries) delivery.answered = true;
     expect(busy(s)).toBe(false);
   });
@@ -93,6 +97,7 @@ describe("reading an answer", () => {
     expect(readAnswer(PASS).kind).toBe("pass");
     expect(readAnswer(` [m3] ${PASS}\n`).kind).toBe("pass");
     expect(readAnswer("").kind).toBe("pass");
+    expect(readAnswer(`${PASS}.`).kind).toBe("pass");
     expect(readAnswer(`${PASS} on that, it's fine.`).kind).toBe("message");
   });
 

@@ -50,6 +50,8 @@ export interface RequestDeps {
   now: () => number;
   /** When each turn in the last hour started, for the hourly cap. */
   recent: number[];
+  /** Sessions with a message on its way in, which the relay leaves alone. */
+  sending: Set<string>;
 }
 
 /** The Claude whose answer `payload` replies to, if it replies to one in this chat. */
@@ -246,12 +248,17 @@ async function turn(
     };
     existing.deliveries.push(delivery);
     deps.state.save();
+    // Until the CLI says it is in, the session may read as archived because
+    // it is: the message then goes to a new session, not a warning.
+    deps.sending.add(id);
     let sent: "sent" | "gone";
     try {
       sent = await deps.cli.run(() => deps.cloud.send(id, text));
     } catch (error) {
       drop();
       throw error;
+    } finally {
+      deps.sending.delete(id);
     }
     if (sent === "sent") {
       delivered(existing, id, thread.version);

@@ -1236,6 +1236,71 @@ describe("waiting on a session", () => {
     expect(t.bridge.sent.at(-1)?.message).toBe("*podstow:* Half an answer.");
   });
 
+  it("posts a turn once when its result lands just after its events were read", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [assistant("Half an answer.")]);
+    await says(t, "r1", MEMBER, "@podstow go");
+    const session = t.api.sessions.get(SESSION);
+    if (session !== undefined) {
+      session.status = "idle";
+      // The turn ends between the read of its events and of its status.
+      session.onStatus = () => {
+        delete session.onStatus;
+        session.events.push(result("The whole answer."));
+      };
+    }
+    await poll(t);
+    await poll(t);
+    expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
+      "*podstow:* The whole answer.",
+    ]);
+  });
+
+  it("calls nothing archived while a message is still on its way in", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION, [result("Done.")]);
+    started(t, SECOND, [result("Started afresh.")]);
+    await says(t, "r1", MEMBER, "@podstow tidy the README");
+    await poll(t);
+    // The session signed off and was archived; tagalong still reads it.
+    const session = t.api.sessions.get(SESSION);
+    if (session !== undefined) session.status = "archived";
+    t.fake.followUps.set(SESSION, "archived");
+    t.fake.during = () => t.app.pollOnce();
+    await says(t, "r2", MEMBER, "@podstow and the docs?");
+    t.fake.during = undefined;
+    await poll(t);
+    expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
+      "*podstow:* Done.",
+      "*podstow:* Started afresh.",
+    ]);
+  });
+
+  it("posts a late answer to a request it gave up on, while it still reads the session", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow migrate the database");
+    t.clock.now += t.env.GIVE_UP_MS - 60_000;
+    await says(t, "r2", MEMBER, "@podstow and the backups?");
+    t.clock.now += 120_000;
+    await poll(t);
+    expect(t.bridge.sent.at(-1)).toMatchObject({
+      message: "*podstow:* no reply after 120 minutes; I may still be working.",
+      quoted_message_id: "r1",
+    });
+    t.api.sessions
+      .get(SESSION)
+      ?.events.push({ ...result("Migrated."), user_message_uuids: ["u1"] });
+    await poll(t);
+    expect(t.bridge.sent.at(-1)).toMatchObject({
+      message: "*podstow:* Migrated.",
+      quoted_message_id: "r1",
+    });
+  });
+
   it("stops watching a Claude removed from the chat", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);

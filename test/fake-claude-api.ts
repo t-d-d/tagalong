@@ -13,6 +13,8 @@ export interface FakeSession {
   events: unknown[];
   /** What the session does after each message delivered to it, in order. */
   replies?: unknown[][];
+  /** Called each time the session's status is read, before it is answered. */
+  onStatus?: () => void;
 }
 
 export interface FakeClaudeApi {
@@ -87,7 +89,8 @@ export async function fakeClaudeApi(): Promise<FakeClaudeApi> {
       match?.[1] === undefined ? undefined : sessions.get(match[1]);
     if (match === null || session === undefined)
       return { status: 404, body: { error: "not found" } };
-    if (match[2] === undefined)
+    if (match[2] === undefined) {
+      session.onStatus?.();
       return {
         body: {
           response_shape: {
@@ -99,6 +102,7 @@ export async function fakeClaudeApi(): Promise<FakeClaudeApi> {
           },
         },
       };
+    }
     const after = Number(request.query.get("cursor") ?? "0");
     const data = listed(session.events)
       .map((payload, index) => ({ sequence_num: index + 1, payload }))

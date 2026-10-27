@@ -26,21 +26,42 @@ const deliverySchema = z.object({
   sent: z.array(z.string()).default([]),
 });
 
-const sessionSchema = z.object({
-  chat: z.string(),
-  // The Claude the session is; "" for one from before named Claudes.
-  claude: z.string().default(""),
-  // The last event read, as the sessions API numbers them.
-  cursor: z.string().nullable().default(null),
-  // Whether tagalong still reads the session.
-  waiting: z.boolean(),
-  // When it last had a delivery or a result.
+// A session saved before deliveries were noted (#17): the request it waits
+// on becomes a delivery whose uuid can no longer be read, keyed "".
+const legacySchema = z.looseObject({
+  request: quoteSchema,
+  waiting: z.literal(true),
   since: z.number(),
-  nudged: z.boolean().default(false),
-  // The turn's latest words, kept across polls.
-  lastText: z.string().default(""),
-  deliveries: z.array(deliverySchema).default([]),
+  outbox: z.string().nullable().default(null),
+  deliveries: z.undefined().optional(),
 });
+
+const sessionSchema = z.preprocess(
+  (raw) => {
+    const old = legacySchema.safeParse(raw);
+    if (!old.success) return raw;
+    const { request, since, outbox } = old.data;
+    return {
+      ...old.data,
+      deliveries: [{ key: "", ask: request, at: since, folder: outbox }],
+    };
+  },
+  z.object({
+    chat: z.string(),
+    // The Claude the session is; "" for one from before named Claudes.
+    claude: z.string().default(""),
+    // The last event read, as the sessions API numbers them.
+    cursor: z.string().nullable().default(null),
+    // Whether tagalong still reads the session.
+    waiting: z.boolean(),
+    // When it last had a delivery or a result.
+    since: z.number(),
+    nudged: z.boolean().default(false),
+    // The turn's latest words, kept across polls.
+    lastText: z.string().default(""),
+    deliveries: z.array(deliverySchema).default([]),
+  }),
+);
 
 const stateSchema = z.object({
   sessions: z.record(z.string(), sessionSchema).default({}),

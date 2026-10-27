@@ -27,6 +27,8 @@ export interface FakeRun {
   onClaude: (args: string[], options: RunOptions) => RunResult;
   /** Each message that reaches a session: a launch's prompt, or a follow-up's input. */
   onDeliver: (session: string, text: string) => void;
+  /** Work that happens while a follow-up is on its way, such as a poll. */
+  during: (() => Promise<void>) | undefined;
 }
 
 export function fakeRun(names: { python: string; claude: string }): FakeRun {
@@ -36,6 +38,7 @@ export function fakeRun(names: { python: string; claude: string }): FakeRun {
     followUps: new Map(),
     onClaude: () => ({ code: 0, out: "{}" }),
     onDeliver: () => undefined,
+    during: undefined,
     run: (command, args, options) => {
       const call: Call = { command, args, options };
       fake.calls.push(call);
@@ -59,7 +62,8 @@ export function fakeRun(names: { python: string; claude: string }): FakeRun {
           const id = target.replace(/^session_/u, "");
           const answer = fake.followUps.get(id) ?? "sent";
           if (answer === "sent") fake.onDeliver(id, options.input ?? "");
-          return Promise.resolve(
+          const done = fake.during?.() ?? Promise.resolve();
+          return done.then(() =>
             answer === "sent"
               ? {
                   code: 0,

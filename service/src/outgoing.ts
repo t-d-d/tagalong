@@ -59,16 +59,20 @@ export async function sendUploads(
   boxes: Box[],
   send: Send,
 ): Promise<void> {
-  const fresh: { box: Box; key: string; bytes: number }[] = [];
-  for (const box of boxes) {
-    try {
-      const objects = await send.aws.listObjects(send.bucket, box.folder);
-      for (const object of objects)
-        if (!box.sent.includes(object.key)) fresh.push({ box, ...object });
-    } catch (error) {
-      log.warn("file-skipped", { why: "failed", ...errorFields(error) });
-    }
-  }
+  const listed = await Promise.all(
+    boxes.map(async (box) => {
+      try {
+        const objects = await send.aws.listObjects(send.bucket, box.folder);
+        return objects
+          .filter((object) => !box.sent.includes(object.key))
+          .map((object) => ({ box, ...object }));
+      } catch (error) {
+        log.warn("file-skipped", { why: "failed", ...errorFields(error) });
+        return [];
+      }
+    }),
+  );
+  const fresh = listed.flat();
   for (const { box, key } of fresh) box.sent.push(key);
   const fit = fresh.filter(
     (object) => object.bytes > 0 && object.bytes <= OUTGOING.bytes,
