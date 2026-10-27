@@ -8,11 +8,23 @@ import { type ClaudeApi, textOf } from "./claude-api.ts";
 import { sessionLink, toWhatsApp } from "./format.ts";
 import type { GroupsStore } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
-import { answering, busy, heard, messageFor, readAnswer } from "./mailbox.ts";
+import {
+  type Reading,
+  answering,
+  busy,
+  heard,
+  messageFor,
+  readAnswer,
+} from "./mailbox.ts";
 import { OUTGOING, sendUploads } from "./outgoing.ts";
 import { answerText } from "./prompts.ts";
 import { remember } from "./replies.ts";
-import type { Delivery, SessionState, StateStore } from "./state.ts";
+import {
+  type Delivery,
+  type SessionState,
+  type StateStore,
+  eyesKey,
+} from "./state.ts";
 import type { WhatsAppStore } from "./store.ts";
 
 export interface RelayDeps {
@@ -157,14 +169,40 @@ async function waitOn(
     ),
     latestAsk(overdue),
   );
+  await lookAway(session.chat, overdue, deps);
 }
 
 /**
- * Post a turn's answer to `answers`: nothing for the pass word, a reaction
- * for one emoji, otherwise a message. It replies to the line a label at its
- * start names, or else the latest ask it answers; with neither it stands
- * alone. Then the files uploaded with it.
+ * Take tagalong's 👀 off each ask of these deliveries that no delivery, in
+ * any session, still waits on. One a Claude's reaction replaced is left.
  */
+async function lookAway(
+  chat: string,
+  deliveries: Delivery[],
+  deps: RelayDeps,
+): Promise<void> {
+  const { state } = deps.state;
+  for (const { ask } of deliveries) {
+    if (ask === null) continue;
+    const key = eyesKey(chat, ask.id);
+    const waited = Object.values(state.sessions).some(
+      (session) =>
+        session.chat === chat &&
+        session.deliveries.some(
+          (delivery) => !delivery.answered && delivery.ask?.id === ask.id,
+        ),
+    );
+    if (!state.eyes.includes(key) || waited) continue;
+    state.eyes = state.eyes.filter((each) => each !== key);
+    try {
+      await deps.bridge.react(chat, ask, "");
+    } catch (error) {
+      log.warn("bridge-unreachable", errorFields(error));
+    }
+  }
+}
+
+/** Post a turn's answer to `answers`, then take the 👀 off what it answered. */
 async function post(
   id: string,
   session: SessionState,
@@ -174,10 +212,23 @@ async function post(
 ): Promise<void> {
   for (const delivery of answers) delivery.answered = true;
   const reading = readAnswer(text);
-  if (reading.kind === "pass") {
-    log.info("session-passed", { session: id });
-    return;
-  }
+  if (reading.kind === "pass") log.info("session-passed", { session: id });
+  else await say(id, session, reading, answers, deps);
+  await lookAway(session.chat, answers, deps);
+}
+
+/**
+ * A reaction for one emoji, otherwise a message. It goes on the line a label
+ * at its start names, or else the latest ask it answers; with neither it
+ * stands alone. Then the files uploaded with it.
+ */
+async function say(
+  id: string,
+  session: SessionState,
+  reading: Reading,
+  answers: Delivery[],
+  deps: RelayDeps,
+): Promise<void> {
   const line =
     reading.label === undefined
       ? undefined
@@ -191,6 +242,11 @@ async function post(
         };
   if (reading.kind === "reaction" && target !== undefined) {
     await deps.bridge.react(session.chat, target, reading.text);
+    // It replaces tagalong's 👀, if the message had one.
+    const replaced = eyesKey(session.chat, target.id);
+    deps.state.state.eyes = deps.state.state.eyes.filter(
+      (key) => key !== replaced,
+    );
     log.info("session-relayed", { session: id, reaction: true });
   } else {
     const words = toWhatsApp(reading.text);

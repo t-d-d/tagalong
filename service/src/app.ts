@@ -16,7 +16,7 @@ import { poll } from "./relay.ts";
 import { handleRequest, repliedTo } from "./requests.ts";
 import { type Runner, Serial } from "./run.ts";
 import { type DeviceState, ensureDevice } from "./seed.ts";
-import { StateStore } from "./state.ts";
+import { StateStore, eyesKey } from "./state.ts";
 import { WhatsAppStore } from "./store.ts";
 import { type Payload, webhookServer } from "./webhook.ts";
 import { addressed } from "./addressing.ts";
@@ -166,6 +166,9 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
           group: group.label,
           ...errorFields(error),
         });
+        // The ⚠️ replaces the 👀, and stays.
+        const eyes = eyesKey(payload.chatJID, payload.messageId);
+        state.state.eyes = state.state.eyes.filter((key) => key !== eyes);
         await bridge
           .react(
             payload.chatJID,

@@ -118,6 +118,9 @@ function started(
 const folderIn = (text: string | undefined): string =>
   /-F 'key=(outgoing\/[\w-]+\/)\$\{filename\}'/u.exec(text ?? "")?.[1] ?? "";
 
+/** Each reaction tagalong sent: the message and the emoji, "" to take one off. */
+const reactions = (t: Harness) =>
+  t.bridge.reactions.map((reaction) => [reaction.message_id, reaction.emoji]);
 const launches = (t: Harness) =>
   t.fake.calls.filter((call) => call.command === t.env.PYTHON);
 const followUps = (t: Harness) =>
@@ -662,6 +665,47 @@ describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
     ]);
   });
 
+  it("takes its 👀 off a request once the answer is posted", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("It fails on lint.")]);
+    await says(t, "r1", MEMBER, "@podstow why is the build red?");
+    expect(reactions(t)).toEqual([["r1", "👀"]]);
+    await poll(t);
+    expect(reactions(t)).toEqual([
+      ["r1", "👀"],
+      ["r1", ""],
+    ]);
+  });
+
+  it("keeps the 👀 on a message that asks two Claudes until both have answered", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION, [result("Lint.")]);
+    started(t, SECOND);
+    await says(t, "r1", MEMBER, "@podstow @brainstorm what do you both think?");
+    await poll(t);
+    expect(reactions(t)).toEqual([["r1", "👀"]]);
+    t.api.sessions.get(SECOND)?.events.push(result("Go wide."));
+    await poll(t);
+    expect(reactions(t)).toEqual([
+      ["r1", "👀"],
+      ["r1", ""],
+    ]);
+  });
+
+  it("leaves the ⚠️ on a message one of its Claudes could not start for", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("Lint.")]);
+    await says(t, "r1", MEMBER, "@podstow @brainstorm what do you both think?");
+    await poll(t);
+    expect(reactions(t)).toEqual([
+      ["r1", "👀"],
+      ["r1", "⚠️"],
+    ]);
+  });
+
   it("posts a turn the session started by itself, until it has been quiet for GIVE_UP_MS", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);
@@ -729,7 +773,8 @@ describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
     await says(t, "m1", OWNER, "we ship on Friday");
     await says(t, "r1", MEMBER, "@podstow tag the release");
     await poll(t);
-    expect(t.bridge.reactions.map((r) => [r.message_id, r.emoji])).toEqual([
+    // The Claude's reaction replaced the 👀, and stays.
+    expect(reactions(t)).toEqual([
       ["r1", "👀"],
       ["r1", "👍"],
     ]);
@@ -1192,6 +1237,7 @@ describe("waiting on a session", () => {
     expect(t.bridge.sent.at(-1)?.message).toBe(
       "*podstow:* no reply after 120 minutes; I may still be working.",
     );
+    expect(reactions(t).at(-1)).toEqual(["r1", ""]);
     await poll(t);
     expect(t.bridge.sent).toHaveLength(2);
   });

@@ -69,6 +69,9 @@ const stateSchema = z.object({
   sentMedia: z.array(z.string()).default([]),
   // Which session each answer came from, by message id and by text (replies.ts).
   replies: z.record(z.string(), z.string()).default({}),
+  // The requests showing tagalong's 👀, by eyesKey, until none of their
+  // deliveries waits.
+  eyes: z.array(z.string()).default([]),
   // Each chat's line labels, such as m41, and the message each stands for.
   labels: z
     .record(
@@ -103,6 +106,9 @@ export type SessionState = z.infer<typeof sessionSchema>;
 export type Delivery = z.infer<typeof deliverySchema>;
 export type Thread = State["threads"][string];
 
+/** The key of a request that shows tagalong's 👀. */
+export const eyesKey = (chat: string, id: string): string => `${chat} ${id}`;
+
 /** The key of a Claude's conversation in a group. */
 export const threadKey = (chat: string, claude: string): string =>
   `${chat} ${claude}`;
@@ -133,6 +139,7 @@ export class StateStore {
 
   save(): void {
     this.state.sentMedia = this.state.sentMedia.slice(-500);
+    this.state.eyes = this.state.eyes.slice(-200);
     const replies = Object.entries(this.state.replies);
     if (replies.length > 1000)
       this.state.replies = Object.fromEntries(replies.slice(-1000));

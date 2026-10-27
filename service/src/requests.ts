@@ -29,7 +29,12 @@ import {
 import { type Upload, uploadFor } from "./outgoing.ts";
 import { sessionFor } from "./replies.ts";
 import type { Serial } from "./run.ts";
-import { type SessionState, type StateStore, threadKey } from "./state.ts";
+import {
+  type SessionState,
+  type StateStore,
+  eyesKey,
+  threadKey,
+} from "./state.ts";
 import { type WhatsAppStore, timeOf } from "./store.ts";
 import type { Payload } from "./webhook.ts";
 
@@ -167,6 +172,7 @@ export async function handleRequest(
     return;
   }
   await deps.bridge.react(payload.chatJID, message, "👀");
+  deps.state.state.eyes.push(eyesKey(payload.chatJID, message.id));
   for (const claude of claudes) {
     recent.push(now);
     await turn(payload, claude, group, deps);
