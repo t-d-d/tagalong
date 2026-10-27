@@ -29,6 +29,8 @@ export interface FakeRun {
   onDeliver: (session: string, text: string) => void;
   /** Work that happens while a follow-up is on its way, such as a poll. */
   during: (() => Promise<void>) | undefined;
+  /** Work that happens while a session is being started, such as a poll. */
+  duringLaunch: (() => Promise<void>) | undefined;
 }
 
 export function fakeRun(names: { python: string; claude: string }): FakeRun {
@@ -39,6 +41,7 @@ export function fakeRun(names: { python: string; claude: string }): FakeRun {
     onClaude: () => ({ code: 0, out: "{}" }),
     onDeliver: () => undefined,
     during: undefined,
+    duringLaunch: undefined,
     run: (command, args, options) => {
       const call: Call = { command, args, options };
       fake.calls.push(call);
@@ -46,7 +49,8 @@ export function fakeRun(names: { python: string; claude: string }): FakeRun {
         call.prompt = readFileSync(args[1] ?? "", "utf8");
         const id = fake.launches.shift();
         if (id !== undefined) fake.onDeliver(id, call.prompt);
-        return Promise.resolve(
+        const done = fake.duringLaunch?.() ?? Promise.resolve();
+        return done.then(() =>
           id === undefined
             ? { code: 1, out: "Error: could not start a session\n" }
             : {

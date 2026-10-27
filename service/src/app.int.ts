@@ -694,6 +694,27 @@ describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
     ]);
   });
 
+  it("keeps the 👀 while the second Claude's session is still starting", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION, [result("Lint.")]);
+    started(t, SECOND);
+    // The first Claude answers while the second one's session starts.
+    t.fake.duringLaunch = () => t.app.pollOnce();
+    await says(t, "r1", MEMBER, "@podstow @brainstorm what do you both think?");
+    t.fake.duringLaunch = undefined;
+    expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
+      "*podstow:* Lint.",
+    ]);
+    expect(reactions(t)).toEqual([["r1", "👀"]]);
+    t.api.sessions.get(SECOND)?.events.push(result("Go wide."));
+    await poll(t);
+    expect(reactions(t)).toEqual([
+      ["r1", "👀"],
+      ["r1", ""],
+    ]);
+  });
+
   it("leaves the ⚠️ on a message one of its Claudes could not start for", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);

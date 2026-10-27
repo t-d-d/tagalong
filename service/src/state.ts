@@ -109,6 +109,12 @@ export type Thread = State["threads"][string];
 /** The key of a request that shows tagalong's 👀. */
 export const eyesKey = (chat: string, id: string): string => `${chat} ${id}`;
 
+/** Forget a request's 👀: it was taken off, or something replaced it. */
+export function unsee(state: State, chat: string, id: string): void {
+  const key = eyesKey(chat, id);
+  state.eyes = state.eyes.filter((each) => each !== key);
+}
+
 /** The key of a Claude's conversation in a group. */
 export const threadKey = (chat: string, claude: string): string =>
   `${chat} ${claude}`;

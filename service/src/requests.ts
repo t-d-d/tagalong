@@ -27,6 +27,7 @@ import {
   followUp,
 } from "./prompts.ts";
 import { type Upload, uploadFor } from "./outgoing.ts";
+import { lookAway } from "./relay.ts";
 import { sessionFor } from "./replies.ts";
 import type { Serial } from "./run.ts";
 import {
@@ -57,6 +58,8 @@ export interface RequestDeps {
   recent: number[];
   /** Sessions with a message on its way in, which the relay leaves alone. */
   sending: Set<string>;
+  /** Requests, by eyesKey, still being delivered to their Claudes. */
+  asking: Set<string>;
 }
 
 /** The Claude whose answer `payload` replies to, if it replies to one in this chat. */
@@ -172,11 +175,20 @@ export async function handleRequest(
     return;
   }
   await deps.bridge.react(payload.chatJID, message, "👀");
-  deps.state.state.eyes.push(eyesKey(payload.chatJID, message.id));
-  for (const claude of claudes) {
-    recent.push(now);
-    await turn(payload, claude, group, deps);
+  const eyes = eyesKey(payload.chatJID, message.id);
+  deps.state.state.eyes.push(eyes);
+  // An answer that comes before every Claude has its delivery leaves the 👀.
+  deps.asking.add(eyes);
+  try {
+    for (const claude of claudes) {
+      recent.push(now);
+      await turn(payload, claude, group, deps);
+    }
+  } finally {
+    deps.asking.delete(eyes);
   }
+  // Each Claude may have answered already.
+  await lookAway(payload.chatJID, [message], deps);
 }
 
 /** One Claude's turn: into its running session, or a new one. */
