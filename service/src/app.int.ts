@@ -19,7 +19,12 @@ import {
   OWNER_LID,
   STRANGER,
 } from "../../test/bridge-db.ts";
-import { assistant, result } from "../../test/fake-claude-api.ts";
+import {
+  assistant,
+  result,
+  selfStarted,
+  user,
+} from "../../test/fake-claude-api.ts";
 import { eventsOf } from "../../test/log-lines.ts";
 
 const SESSION = "01SessionAaaaaaaaaaaaaaa";
@@ -94,14 +99,24 @@ async function poll(t: Harness) {
   await t.app.pollOnce();
 }
 
+/** A session that, given its first message, answers with `reply`. */
 function started(
   t: Harness,
   id: string,
-  events: unknown[] = [],
+  reply: unknown[] = [],
   environmentId = "env_fake1",
 ) {
-  t.api.sessions.set(id, { status: "running", environmentId, events });
+  t.api.sessions.set(id, {
+    status: "running",
+    environmentId,
+    events: [],
+    replies: reply.length === 0 ? [] : [reply],
+  });
 }
+
+/** The folder in the bucket a message's upload form writes to. */
+const folderIn = (text: string | undefined): string =>
+  /-F 'key=(outgoing\/[\w-]+\/)\$\{filename\}'/u.exec(text ?? "")?.[1] ?? "";
 
 const launches = (t: Harness) =>
   t.fake.calls.filter((call) => call.command === t.env.PYTHON);
@@ -153,14 +168,12 @@ describe("asking a Claude", () => {
       }).trim(),
     ).toBe("https://github.com/o/r.git");
 
-    t.api.sessions.set(SESSION, {
-      status: "idle",
-      environmentId: "env_fake1",
-      events: [
-        assistant("Looking now."),
-        result("The **build** fails on lint."),
-      ],
-    });
+    const session = t.api.sessions.get(SESSION);
+    if (session !== undefined) session.status = "idle";
+    session?.events.push(
+      assistant("Looking now."),
+      result("The **build** fails on lint."),
+    );
     await poll(t);
     expect(t.bridge.sent).toEqual([
       {
@@ -193,9 +206,10 @@ describe("asking a Claude", () => {
       "json",
     ]);
     const input = next?.options.input ?? "";
-    expect(input).toMatch(/^Said in the chat since your last turn:\n/u);
+    expect(input).toMatch(/^Said in the chat since you last heard from it:\n/u);
     expect(input).toContain("podstow (you): It fails on lint.");
-    expect(input).toContain("Thomas: we ship on Friday");
+    // Each line has a label the Claude can answer it by.
+    expect(input).toMatch(/^\[m\d+\] \S+ \S+ Thomas: we ship on Friday$/mu);
     expect(input).not.toContain("secret plan");
     expect(input).toContain(
       "Ollie asks you, @podstow:\n@podstow can you fix it?",
@@ -220,12 +234,16 @@ describe("asking a Claude", () => {
     t.api.sessions
       .get(SESSION)
       ?.events.push(
+        user("carry on from my laptop", "desktop-1"),
         assistant("Working on it."),
         result("Answered on a laptop."),
       );
     await says(t, "r2", MEMBER, "@podstow can you fix it?");
     await poll(t);
     expect(t.bridge.sent.at(-1)?.message).toBe("*podstow:* It fails on lint.");
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({ event: "session-elsewhere", level: "info" }),
+    );
 
     t.api.sessions.get(SESSION)?.events.push(result("Opened a PR."));
     await poll(t);
@@ -596,6 +614,187 @@ describe("asking a Claude", () => {
   });
 });
 
+describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
+  it("delivers an ask while the last turn runs, and posts each answer as a reply to its own ask", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow why is the build red?");
+    await poll(t);
+    await says(t, "r2", MEMBER, "@podstow and is the deploy stuck?");
+    expect(followUps(t)).toHaveLength(1);
+    // The first turn ends, then the second, each listing its own message.
+    t.api.sessions
+      .get(SESSION)
+      ?.events.push(
+        { ...result("It fails on lint."), user_message_uuids: ["u1"] },
+        { ...result("It waits on CI."), user_message_uuids: ["u2"] },
+      );
+    await poll(t);
+    expect(t.bridge.sent).toEqual([
+      {
+        recipient: GROUP,
+        message: "*podstow:* It fails on lint.",
+        quoted_message_id: "r1",
+      },
+      {
+        recipient: GROUP,
+        message: "*podstow:* It waits on CI.",
+        quoted_message_id: "r2",
+      },
+    ]);
+  });
+
+  it("answers asks that went into one turn once, as a reply to the latest", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow why is the build red?");
+    await says(t, "r2", MEMBER, "@podstow and is the deploy stuck?");
+    t.api.sessions.get(SESSION)?.events.push(result("Lint, and so CI."));
+    await poll(t);
+    expect(t.bridge.sent).toEqual([
+      {
+        recipient: GROUP,
+        message: "*podstow:* Lint, and so CI.",
+        quoted_message_id: "r2",
+      },
+    ]);
+  });
+
+  it("posts a turn the session started by itself, until it has been quiet for GIVE_UP_MS", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("Started the backfill in the background.")]);
+    await says(t, "r1", MEMBER, "@podstow backfill the feed");
+    await poll(t);
+    t.clock.now += 30 * 60_000;
+    t.api.sessions
+      .get(SESSION)
+      ?.events.push(selfStarted("The backfill finished: 120 rows."));
+    await poll(t);
+    expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
+      "*podstow:* Started the backfill in the background.",
+      "*podstow:* The backfill finished: 120 rows.",
+    ]);
+    expect(t.bridge.sent[1]?.quoted_message_id).toBeUndefined();
+
+    t.clock.now += t.env.GIVE_UP_MS;
+    await poll(t);
+    t.api.sessions.get(SESSION)?.events.push(selfStarted("Much later."));
+    await poll(t);
+    expect(t.bridge.sent).toHaveLength(2);
+  });
+
+  it("posts nothing for a turn that passes", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("PASS")]);
+    await says(t, "r1", MEMBER, "@podstow start the backfill");
+    await poll(t);
+    expect(t.bridge.sent).toEqual([]);
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({ event: "session-passed", session: SESSION }),
+    );
+  });
+
+  it("posts an answer that starts with a label as a reply to that line, without the label", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "m1", OWNER, "we ship on Friday");
+    await says(t, "r1", MEMBER, "@podstow does that work?");
+    const label =
+      /^\[(m\d+)\] \S+ \S+ Thomas: we ship on Friday$/mu.exec(
+        launches(t)[0]?.prompt ?? "",
+      )?.[1] ?? "";
+    expect(label).not.toBe("");
+    t.api.sessions
+      .get(SESSION)
+      ?.events.push(result(`[${label}] Friday works.`));
+    await poll(t);
+    expect(t.bridge.sent).toEqual([
+      {
+        recipient: GROUP,
+        message: "*podstow:* Friday works.",
+        quoted_message_id: "m1",
+      },
+    ]);
+  });
+
+  it("puts a one-emoji answer on the message it answers as a reaction, and posts no message", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("👍")]);
+    await says(t, "m1", OWNER, "we ship on Friday");
+    await says(t, "r1", MEMBER, "@podstow tag the release");
+    await poll(t);
+    expect(t.bridge.reactions.map((r) => [r.message_id, r.emoji])).toEqual([
+      ["r1", "👀"],
+      ["r1", "👍"],
+    ]);
+    expect(t.bridge.sent).toEqual([]);
+
+    const label =
+      /^\[(m\d+)\] \S+ \S+ Thomas: we ship on Friday$/mu.exec(
+        launches(t)[0]?.prompt ?? "",
+      )?.[1] ?? "";
+    t.api.sessions
+      .get(SESSION)
+      ?.events.push(selfStarted(`[${label}] 🎉`), selfStarted("✅"));
+    await poll(t);
+    expect(t.bridge.reactions.at(-1)).toMatchObject({
+      message_id: "m1",
+      emoji: "🎉",
+    });
+    // With no message to react to, it is posted.
+    expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
+      "*podstow:* ✅",
+    ]);
+  });
+
+  it("sends the files from every message a turn answers, and a later turn's, each once", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow draw the chart");
+    await says(t, "r2", MEMBER, "@podstow and the table");
+    const first = folderIn(launches(t)[0]?.prompt);
+    const second = folderIn(followUps(t)[0]?.options.input);
+    expect(first).not.toBe("");
+    expect(second).not.toBe("");
+    expect(second).not.toBe(first);
+    const upload = (key: string) => {
+      t.aws.objects.set(`files/${key}`, {
+        body: Buffer.from("png"),
+        contentType: "image/png",
+      });
+    };
+    upload(`${first}chart.png`);
+    upload(`${second}table.png`);
+    t.api.sessions.get(SESSION)?.events.push(result("Both attached."));
+    await poll(t);
+    const names = () =>
+      t.bridge.sent.map(
+        (sent) => sent.media_path?.split("/").at(-1) ?? sent.message,
+      );
+    expect(names()).toEqual([
+      "*podstow:* Both attached.",
+      "chart.png",
+      "table.png",
+    ]);
+
+    // Background work finishes and uploads with the form it was given.
+    upload(`${second}late.png`);
+    t.api.sessions.get(SESSION)?.events.push(selfStarted("And the late one."));
+    await poll(t);
+    expect(names().slice(3)).toEqual([
+      "*podstow:* And the late one.",
+      "late.png",
+    ]);
+  });
+});
+
 describe("who is answered", () => {
   it("ignores someone the owner has not allowed", async () => {
     const t = (h = await harness());
@@ -797,10 +996,6 @@ describe("commands", () => {
     started(t, SESSION, [
       {
         type: "user",
-        message: { content: "Ollie asks you, @brainstorm:\n@brainstorm hello" },
-      },
-      {
-        type: "user",
         message: {
           content: [{ type: "tool_result", content: "secret file contents" }],
         },
@@ -839,10 +1034,13 @@ describe("commands", () => {
       "Your role:\nYou coach a brainstorm: go wide before narrowing.",
     );
     expect(prompt).toContain(
-      "This carries on your conversation in this chat from a previous session. Your dialogue there, oldest first:\nSent to you:\nOllie asks you, @brainstorm:\n@brainstorm hello\n\nYou answered:\nFine.",
+      'This carries on your conversation in this chat from a previous session. Your dialogue there, oldest first:\nSent to you:\nYou are "brainstorm"',
+    );
+    expect(prompt).toMatch(
+      /Ollie asks you, @brainstorm:\n@brainstorm hello\n[\s\S]*\n\nYou answered:\nFine\./u,
     );
     expect(prompt).not.toContain("secret file contents");
-    expect(prompt).toContain("Said in the chat since your last turn:");
+    expect(prompt).toContain("Said in the chat since you last heard from it:");
     expect(prompt).toContain("Thomas: we ship on Friday");
     expect(t.lines).toContainEqual(
       expect.objectContaining({ event: "session-started", carried: true }),
@@ -996,6 +1194,20 @@ describe("waiting on a session", () => {
     );
     await poll(t);
     expect(t.bridge.sent).toHaveLength(2);
+  });
+
+  it("says nothing of an approval once every request has its answer", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("Done.")]);
+    await says(t, "r1", MEMBER, "@podstow tidy up");
+    await poll(t);
+    const session = t.api.sessions.get(SESSION);
+    if (session !== undefined) session.status = "requires_action";
+    await poll(t);
+    expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
+      "*podstow:* Done.",
+    ]);
   });
 
   it("reports a session that ended in an error", async () => {

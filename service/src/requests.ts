@@ -1,7 +1,8 @@
 // A message that asks one or more Claudes. Each Claude keeps one running
-// session in the group (cloud-sessions.md): a turn is sent into it with what
-// was said since that Claude's last turn, or, when it has none or it is gone,
-// a new session starts with the last messages here.
+// session in the group (cloud-sessions.md): a message goes into it straight
+// away, working or not, with what was said since that Claude's last one, or,
+// when it has none or it is gone, a new session starts with the last messages
+// here.
 import type { Aws } from "./aws.ts";
 import { pickMedia, shareMedia, type Attachment } from "./attachments.ts";
 import type { Bridge } from "./bridge.ts";
@@ -16,6 +17,7 @@ import {
   versionOf,
 } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
+import { deliveryOf, labelFor } from "./mailbox.ts";
 import type { People } from "./people.ts";
 import {
   type Ask,
@@ -192,6 +194,8 @@ async function turn(
     sender: payload.sender,
     content: payload.content,
   };
+  const label = (message: { id: string; sender: string }) =>
+    labelFor(deps.state.state, chat, message);
   const lines = {
     store: deps.store,
     people: deps.people,
@@ -199,8 +203,11 @@ async function turn(
     group,
     claude: claude.name,
     except: payload.messageId,
+    label,
   };
+  // Labelled once the lines before it are, so labels run in order.
   const ask: Ask = {
+    label: "",
     from: deps.people.nameOf(payload.sender),
     text: deps.people.readable(payload.content).trim(),
     quoted: quotedOf(payload, deps),
@@ -208,19 +215,11 @@ async function turn(
   };
   const upload = await uploadOf(deps);
   if (upload !== undefined) ask.upload = upload;
-  const outbox = upload?.folder ?? null;
-  const waitFor = (session: string, version: string) => {
-    const state = deps.state.state.sessions[session];
-    if (state !== undefined)
-      Object.assign(state, {
-        request,
-        waiting: true,
-        since: now,
-        nudged: false,
-        outbox,
-      });
+  const folder = upload?.folder ?? null;
+  const delivered = (session: SessionState, id: string, version: string) => {
+    Object.assign(session, { waiting: true, since: now, nudged: false });
     deps.state.state.threads[key] = {
-      session,
+      session: id,
       heard: at,
       version,
       carry: null,
@@ -234,14 +233,28 @@ async function turn(
       : deps.state.state.sessions[thread.session];
   if (thread.session !== null && existing !== undefined) {
     const id = thread.session;
-    // Everything said since this Claude's last turn, not only the last few.
+    // Everything said since this Claude's last message, not only the last few.
     const said = conversation(lines, thread.heard, deps.env.HISTORY * 3);
-    await skipPast(id, existing, deps.api);
-    const sent = await deps.cli.run(() =>
-      deps.cloud.send(id, followUp(claude.name, said, ask)),
-    );
+    ask.label = label(request);
+    const text = followUp(claude.name, said, ask);
+    // Noted before it goes, so its user event is known however soon it is read.
+    const delivery = deliveryOf(text, request, folder, now);
+    const drop = () => {
+      existing.deliveries = existing.deliveries.filter(
+        (each) => each !== delivery,
+      );
+    };
+    existing.deliveries.push(delivery);
+    deps.state.save();
+    let sent: "sent" | "gone";
+    try {
+      sent = await deps.cli.run(() => deps.cloud.send(id, text));
+    } catch (error) {
+      drop();
+      throw error;
+    }
     if (sent === "sent") {
-      waitFor(id, thread.version);
+      delivered(existing, id, thread.version);
       log.info("session-followup", {
         session: id,
         group: group.label,
@@ -253,6 +266,7 @@ async function turn(
     // podstow archives a session that signs off; carry on in a fresh one,
     // with the conversation carried over.
     log.info("session-gone", { session: id, claude: claude.name });
+    drop();
     existing.waiting = false;
     thread.carry = id;
   }
@@ -261,31 +275,33 @@ async function turn(
   // dialogue and everything said since; otherwise the last messages here.
   const carried =
     thread.carry === null ? "" : await dialogueOf(thread.carry, deps.api);
+  const said =
+    carried === ""
+      ? conversation(lines, 0, deps.env.HISTORY)
+      : conversation(lines, thread.heard, deps.env.HISTORY * 3);
+  ask.label = label(request);
   const prompt = firstPrompt({
     claude,
     chatName: deps.store.chatName(chat) ?? group.label,
     others: group.claudes.filter((other) => other !== claude.name),
     carried,
-    conversation:
-      carried === ""
-        ? conversation(lines, 0, deps.env.HISTORY)
-        : conversation(lines, thread.heard, deps.env.HISTORY * 3),
+    conversation: said,
     ask,
   });
   const name = `WhatsApp ${claude.name}: ${oneLine(ask.text.replace(/@[a-z][a-z0-9-]*\b/giu, "")).slice(0, 50)}`;
   const id = await deps.cli.run(() => deps.cloud.start(claude, prompt, name));
-  deps.state.state.sessions[id] = {
+  const session: SessionState = {
     chat,
     claude: claude.name,
-    request,
     cursor: null,
     waiting: true,
     since: now,
     nudged: false,
     lastText: "",
-    outbox,
+    deliveries: [deliveryOf(prompt, request, folder, now)],
   };
-  waitFor(id, versionOf(claude));
+  deps.state.state.sessions[id] = session;
+  delivered(session, id, versionOf(claude));
   log.info("session-started", {
     session: id,
     group: group.label,
@@ -295,25 +311,6 @@ async function turn(
     files: ask.files.length,
   });
   await verify(id, claude, deps.api);
-}
-
-/**
- * Move a session's cursor past everything in it now, so the answer posted is
- * to this turn: someone may have carried on in it from elsewhere, such as
- * Claude Desktop, and that turn's result is not this one's.
- */
-async function skipPast(
-  id: string,
-  session: SessionState,
-  api: ClaudeApi,
-): Promise<void> {
-  try {
-    const { cursor } = await api.eventsAfter(id, session.cursor, 200);
-    session.cursor = cursor;
-    session.lastText = "";
-  } catch (error) {
-    log.warn("session-poll-failed", { session: id, ...errorFields(error) });
-  }
 }
 
 /** The dialogue of a session being replaced; empty, and logged, if it cannot be read. */

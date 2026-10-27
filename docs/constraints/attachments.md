@@ -21,11 +21,13 @@ nothing else.
   once read. The session gets the transcript under the link, marked as
   speech recognition that may have errors. A note that fails or takes
   over a minute still goes, as a link alone.
-- Each turn gets its own folder, outgoing/<random id>/, and a presigned
-  POST form for it that lasts two hours and takes files of at most
-  16 MB. Once the turn's answer is posted, at most five files from that
-  folder go to the chat, each through the bridge's outbox, which is
-  emptied as each is sent. Only the turn's own folder is read.
+- Each delivery to a session gets its own folder,
+  outgoing/<random id>/, and a presigned POST form for it that lasts
+  two hours and takes files of at most 16 MB. Once a turn's answer is posted, at most five
+  new files go to the chat from the folders of the deliveries answered
+  by then whose forms still work, each through the bridge's outbox,
+  which is emptied as each is sent. Each file goes once. The folder of
+  a delivery still waiting for its answer is not read.
 - File names, sizes and types never reach a log line; counts and bytes
   do. A transcript never reaches one; its length may.
 
@@ -35,10 +37,12 @@ nothing else.
 - Put a file's contents in the prompt. A voice note's transcript is the
   one exception.
 - Send audio outside the account to be transcribed.
-- Give a session a way to write anywhere in the bucket but its turn's
-  folder.
+- Give a session a way to write anywhere in the bucket but its
+  deliveries' folders.
 - Keep files past a day.
 
 History: Set when the repo was made, October 2026. Voice notes are
 transcribed since 19 October 2026, at the owner's request (#8). A
-session's files are sent to the chat since the same day (#12).
+session's files are sent to the chat since the same day (#12). A turn
+sends from the folder of each delivery it answers, each file once, since
+27 October 2026 (#17).

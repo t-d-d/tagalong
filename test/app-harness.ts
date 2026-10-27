@@ -107,6 +107,9 @@ export async function harness(
     JSON.stringify(options.groups ?? standardGroups),
   );
   const fake = fakeRun({ python: env.PYTHON, claude: env.CLAUDE_BIN });
+  fake.onDeliver = (id, text) => {
+    api.deliver(id, text);
+  };
   const app = createApp(env, {
     aws,
     run: fake.run,

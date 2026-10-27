@@ -87,7 +87,17 @@ describe("state.json on disk", () => {
       since: 1,
       nudged: false,
       lastText: "",
-      outbox: null,
+      deliveries: [
+        {
+          uuid: "u1",
+          key: "k",
+          ask: null,
+          at: 1,
+          answered: false,
+          folder: null,
+          sent: [],
+        },
+      ],
     };
     state.state.sentMedia.push(
       ...Array.from({ length: 600 }, (_, index) => `m${String(index)}`),
@@ -95,7 +105,31 @@ describe("state.json on disk", () => {
     state.save();
     const again = new StateStore(path);
     expect(again.state.sessions.abc12345?.cursor).toBe("4");
+    expect(again.state.sessions.abc12345?.deliveries[0]?.uuid).toBe("u1");
     expect(again.state.sentMedia).toHaveLength(500);
     expect(again.state.sentMedia.at(-1)).toBe("m599");
+  });
+
+  it("reads a session saved before sessions were mailboxes", () => {
+    const path = join(folder(), "state.json");
+    writeFileSync(
+      path,
+      JSON.stringify({
+        sessions: {
+          abc12345: {
+            chat: GROUP,
+            claude: "podstow",
+            request: { id: "r1", sender: OWNER, content: "hi" },
+            cursor: "4",
+            waiting: true,
+            since: 1,
+            outbox: null,
+          },
+        },
+      }),
+    );
+    expect(new StateStore(path).state.sessions.abc12345?.deliveries).toEqual(
+      [],
+    );
   });
 });
