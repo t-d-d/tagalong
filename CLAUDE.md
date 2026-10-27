@@ -47,7 +47,9 @@ tagalong puts Claude in WhatsApp groups: a linked WhatsApp device and a service 
 ## Issues
 
 - Given an issue number, run the `fetch-ticket` skill first.
+- An issue is picked up as soon as it is labelled `mode: afk`, and goes from its text to a pull request without stopping to ask.
 - Anything only the owner can do is not yours: a Parameter Store value, the device, the Claude login, an AWS or GitHub setting. Say what is needed and stop.
+- When your pull request has merged or closed, or you are done and have none, make the last line of your reply `Signing off.` or `Signing off: <reason>`. That archives the session. Do not sign off while the owner is working with you.
 
 ## GitHub from a cloud session
 
