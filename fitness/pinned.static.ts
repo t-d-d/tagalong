@@ -60,7 +60,9 @@ describe("fitness: an image's tag is a hash of the files it is built from (repo-
     for (const { dockerfile, hashed } of builds) {
       expect(hashed, dockerfile).toContain(dockerfile);
       const copied = [
-        ...readRepoFile(dockerfile).matchAll(/^COPY (?!--)(.+) \S+$/gmu),
+        ...readRepoFile(dockerfile).matchAll(
+          /^COPY (?!--from=)(?:--\S+ )*(.+) \S+$/gmu,
+        ),
       ].flatMap(([, sources = ""]) => sources.split(/\s+/u));
       expect(copied.length, dockerfile).toBeGreaterThan(0);
       for (const source of copied) {

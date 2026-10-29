@@ -24,7 +24,7 @@ index bfba094..9aea685 100644
  				sender, content, chatJID, msg.Info.IsFromMe,
  				quotedMessageId, quotedSender, quotedContent, quotedIsFromMe, mentionedJIDs,
 diff --git a/whatsapp-bridge/webhook.go b/whatsapp-bridge/webhook.go
-index 82e82bb..3dd828a 100644
+index 82e82bb..64d988f 100644
 --- a/whatsapp-bridge/webhook.go
 +++ b/whatsapp-bridge/webhook.go
 @@ -61,7 +61,8 @@ type WebhookPayload struct {
@@ -32,8 +32,8 @@ index 82e82bb..3dd828a 100644
  	QuotedIsFromMe  *bool    `json:"quotedIsFromMe,omitempty"`
  	MentionedJIDs   []string `json:"mentionedJids,omitempty"`
 -	// Media fields - populated when the message contains an image attachment
-+	// Media fields - populated when the message carries media. MediaBase64 is
-+	// only set for an image.
++	// Media fields - populated when the message carries media. MimeType and
++	// MediaBase64 are only set for an image.
  	MessageID     string `json:"messageId,omitempty"`
  	MediaType     string `json:"mediaType,omitempty"`
  	MimeType      string `json:"mimeType,omitempty"`
