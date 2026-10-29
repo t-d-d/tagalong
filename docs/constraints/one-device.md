@@ -1,5 +1,5 @@
 # One device
-Relevance: The bridge, its store, pairing, moving the device, or anything that reads the bridge's databases: images/bridge.Dockerfile, images/bridge-start.sh, service/src/store.ts, service/src/seed.ts, scripts/move-device.ts, the task's deployment settings
+Relevance: The bridge, its store, pairing, moving the device, or anything that reads the bridge's databases: images/bridge.Dockerfile, images/bridge-start.sh, images/bridge.patch, service/src/store.ts, service/src/seed.ts, scripts/move-device.ts, the task's deployment settings
 Decision: One linked WhatsApp device, run by one bridge at a time; it is paired on a laptop, moved to the volume once, and read only by tagalong.
 
 Why: Two bridges on one device fight over its keys and WhatsApp logs
@@ -11,6 +11,10 @@ in the cloud cannot show well.
 - The bridge is verygoodplugins/whatsapp-mcp's Go bridge, pinned by
   commit. It keeps the device in store/whatsapp.db and the chats in
   store/messages.db, under /data/bridge.
+- The bridge carries one patch on that commit, images/bridge.patch. It
+  sends a webhook for every media message, not only pictures, so a voice
+  note can reply to an answer. Drop it once the pinned commit does the
+  same.
 - The bridge in the task does not start until store/whatsapp.db is
   there. It never shows a QR code.
 - The device is paired on a laptop. scripts/move-device.ts uploads it,
@@ -31,4 +35,5 @@ in the cloud cannot show well.
 - Write to the bridge's databases.
 - Copy the store anywhere else: it is the device's login.
 
-History: Set when the repo was made, October 2026.
+History: Set when the repo was made, October 2026. The bridge carries a
+patch that forwards every media message since 29 October 2026 (#29).

@@ -225,11 +225,15 @@ async function turn(
     except: payload.messageId,
     label,
   };
+  const media = payload.mediaType ?? "";
   // Labelled once the lines before it are, so labels run in order.
   const ask: Ask = {
     label: "",
     from: deps.people.nameOf(payload.sender),
-    text: deps.people.readable(payload.content).trim(),
+    // A voice note with no text reads as its type, as in the conversation.
+    text:
+      deps.people.readable(payload.content).trim() ||
+      (media === "" ? "" : `[${media}]`),
     quoted: quotedOf(payload, deps),
     files: await files(payload, group, claude.name, deps),
   };

@@ -85,7 +85,7 @@ app() {
   aws ecr get-login-password | docker login --username AWS --password-stdin "${bridge_uri%%/*}"
 
   local bridge_image app_image
-  bridge_image=$(image "$bridge_uri" "$(hash_of images/bridge.Dockerfile images/bridge-start.sh)" images/bridge.Dockerfile)
+  bridge_image=$(image "$bridge_uri" "$(hash_of images/bridge.Dockerfile images/bridge-start.sh images/bridge.patch)" images/bridge.Dockerfile)
   app_image=$(image "$app_uri" "$(hash_of images/tagalong.Dockerfile .dockerignore package.json package-lock.json service)" images/tagalong.Dockerfile)
 
   # The default VPC's first two zones, by zone id, so the volume's mount

@@ -441,6 +441,43 @@ describe("asking a Claude", () => {
     );
   });
 
+  it("takes a voice note that replies to an answer as a request to the Claude that wrote it, and one that replies to nothing as none", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    t.bridge.media.set("v1", {
+      filename: "audio_1.ogg",
+      bytes: Buffer.from("ogg bytes"),
+    });
+    t.aws.speech.set("ogg bytes", "the CI broke again");
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("Three options.")]);
+    await says(t, "r1", MEMBER, "@brainstorm ideas?");
+    await poll(t);
+    await says(t, "v1", MEMBER, "", {
+      mediaType: "audio",
+      quotedIsFromMe: true,
+      quotedMessageId: "sent-1",
+      quotedContent: "*brainstorm:* Three options.",
+    });
+    expect(followUps(t)[0]?.args[2]).toBe(`session_${SESSION}`);
+    const input = followUps(t)[0]?.options.input ?? "";
+    expect(input).toContain(
+      'Ollie asks you, @brainstorm, replying to @brainstorm: "Three options.":\n[audio]\n',
+    );
+    expect(input).toMatch(
+      /- audio_1\.ogg \(audio\/ogg, 1 KB\): \S+\n {2}Transcript, by speech recognition, so it may have errors: "the CI broke again"\n/u,
+    );
+    expect(reactions(t)).toContainEqual(["v1", "👀"]);
+
+    t.bridge.media.set("v2", {
+      filename: "audio_2.ogg",
+      bytes: Buffer.from("more ogg"),
+    });
+    await says(t, "v2", MEMBER, "", { mediaType: "audio" });
+    expect(followUps(t)).toHaveLength(1);
+    expect(launches(t)).toHaveLength(1);
+    expect(reactions(t).filter(([id]) => id === "v2")).toEqual([]);
+  });
+
   it("transcribes only voice notes", async () => {
     const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
     t.bridge.media.set("p1", { filename: "a.png", bytes: Buffer.from("png") });
