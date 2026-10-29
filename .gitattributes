@@ -1,0 +1,2 @@
+# A patch keeps the whitespace of the lines it changes.
+images/bridge.patch -whitespace

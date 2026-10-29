@@ -43,6 +43,24 @@ describe("addressed", () => {
     expect(ask({ content: "and now?" }, "critic").claudes).toEqual([]);
   });
 
+  it("asks the Claude a voice note or other media with no text replies to, and nobody for one that replies to nothing", () => {
+    expect(
+      ask({ content: "", mediaType: "audio", quotedIsFromMe: true }, "podstow")
+        .claudes,
+    ).toEqual(["podstow"]);
+    expect(
+      ask(
+        { content: "", mediaType: "image", quotedIsFromMe: true },
+        "brainstorm",
+      ).claudes,
+    ).toEqual(["brainstorm"]);
+    expect(ask({ content: "", mediaType: "audio" })).toEqual({
+      claudes: [],
+      missing: [],
+      bare: false,
+    });
+  });
+
   it("notices a defined Claude that is not in the chat", () => {
     expect(ask({ content: "@critic have a look" })).toEqual({
       claudes: [],

@@ -45,6 +45,39 @@ describe("fitness: everything a build fetches is pinned (repo-and-delivery.md)",
   });
 });
 
+describe("fitness: an image's tag is a hash of the files it is built from (repo-and-delivery.md)", () => {
+  it("hashes, and lets into the build, every file a Dockerfile copies", () => {
+    const builds = [
+      ...readRepoFile("scripts/deploy.sh").matchAll(
+        /image "\$\w+" "\$\(hash_of ([^)]+)\)" (\S+)\)/gu,
+      ),
+    ].map(([, hashed = "", dockerfile = ""]) => ({
+      dockerfile,
+      hashed: hashed.split(/\s+/u),
+    }));
+    expect(builds.map((build) => build.dockerfile).sort()).toEqual(dockerfiles);
+    const letIn = readRepoFile(".dockerignore").split("\n");
+    for (const { dockerfile, hashed } of builds) {
+      expect(hashed, dockerfile).toContain(dockerfile);
+      const copied = [
+        ...readRepoFile(dockerfile).matchAll(
+          /^COPY (?!--from=)(?:--\S+ )*(.+) \S+$/gmu,
+        ),
+      ].flatMap(([, sources = ""]) => sources.split(/\s+/u));
+      expect(copied.length, dockerfile).toBeGreaterThan(0);
+      for (const source of copied) {
+        expect(
+          hashed.some(
+            (path) => source === path || source.startsWith(`${path}/`),
+          ),
+          `${dockerfile} copies ${source}`,
+        ).toBe(true);
+        expect(letIn, `${dockerfile} copies ${source}`).toContain(`!${source}`);
+      }
+    }
+  });
+});
+
 describe("fitness: only main deploys (repo-and-delivery.md)", () => {
   it("deploys on a push to main, after the gate", () => {
     const deploy = readWorkflow(".github/workflows/deploy.yml");

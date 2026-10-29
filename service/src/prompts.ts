@@ -37,6 +37,10 @@ export interface Lines {
   label: (message: { id: string; sender: string }) => string;
 }
 
+/** A message's text, or, for media with none, its type: "[audio]". */
+export const bodyOf = (content: string, mediaType: string): string =>
+  content.trim() || (mediaType === "" ? "" : `[${mediaType}]`);
+
 /**
  * The group's messages after `after` (ms), oldest first, at most `limit`:
  * from owners, members and the Claudes, never commands, and nobody else's.
@@ -68,9 +72,7 @@ export function conversation(
       )
         return [];
       if (COMMAND.test(row.content)) return [];
-      const body =
-        row.content.trim() ||
-        (row.mediaType === "" ? "" : `[${row.mediaType}]`);
+      const body = bodyOf(row.content, row.mediaType);
       return [{ row, who: lines.people.nameOf(row.sender), body }];
     });
   const shown = kept.slice(-limit);

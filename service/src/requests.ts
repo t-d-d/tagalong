@@ -22,6 +22,7 @@ import type { People } from "./people.ts";
 import {
   type Ask,
   answerBy,
+  bodyOf,
   conversation,
   firstPrompt,
   followUp,
@@ -229,7 +230,11 @@ async function turn(
   const ask: Ask = {
     label: "",
     from: deps.people.nameOf(payload.sender),
-    text: deps.people.readable(payload.content).trim(),
+    // A voice note with no text reads as its type, as in the conversation.
+    text: bodyOf(
+      deps.people.readable(payload.content),
+      payload.mediaType ?? "",
+    ),
     quoted: quotedOf(payload, deps),
     files: await files(payload, group, claude.name, deps),
   };

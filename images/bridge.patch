@@ -1,0 +1,39 @@
+diff --git a/whatsapp-bridge/main.go b/whatsapp-bridge/main.go
+index bfba094..9aea685 100644
+--- a/whatsapp-bridge/main.go
++++ b/whatsapp-bridge/main.go
+@@ -2120,13 +2120,15 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
+ 
+ 	// Send webhook for incoming messages.
+ 	// Forward self-messages when FORWARD_SELF=true.
+-	// Always forward image messages (even without a text caption) so the AI vision
+-	// pipeline can analyse the image content.
++	// Always forward media messages (even without a text caption), with their
++	// type, so a receiver hears of a voice note, video, document or sticker too.
++	// Only an image carries its bytes, so the AI vision pipeline can analyse it;
++	// other media can be fetched through /api/download.
+ 	hasText := content != ""
+-	hasImage := mediaType == "image"
++	hasMedia := mediaType != ""
+ 
+-	if shouldForward && (hasText || hasImage) {
+-		if hasImage {
++	if shouldForward && (hasText || hasMedia) {
++		if hasMedia {
+ 			SendWebhookWithMedia(
+ 				sender, content, chatJID, msg.Info.IsFromMe,
+ 				quotedMessageId, quotedSender, quotedContent, quotedIsFromMe, mentionedJIDs,
+diff --git a/whatsapp-bridge/webhook.go b/whatsapp-bridge/webhook.go
+index 82e82bb..64d988f 100644
+--- a/whatsapp-bridge/webhook.go
++++ b/whatsapp-bridge/webhook.go
+@@ -61,7 +61,8 @@ type WebhookPayload struct {
+ 	QuotedContent   string   `json:"quotedContent,omitempty"`
+ 	QuotedIsFromMe  *bool    `json:"quotedIsFromMe,omitempty"`
+ 	MentionedJIDs   []string `json:"mentionedJids,omitempty"`
+-	// Media fields - populated when the message contains an image attachment
++	// Media fields - populated when the message carries media. MimeType and
++	// MediaBase64 are only set for an image.
+ 	MessageID     string `json:"messageId,omitempty"`
+ 	MediaType     string `json:"mediaType,omitempty"`
+ 	MimeType      string `json:"mimeType,omitempty"`

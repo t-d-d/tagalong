@@ -26,7 +26,8 @@ export function addressed(
 ): Addressed {
   if (payload.eventType === "reaction" || payload.isFromMe) return NONE;
   const text = payload.content.trim();
-  if (text === "") return NONE;
+  // A voice note or other media with no text can still reply to an answer.
+  if (text === "" && (payload.mediaType ?? "") === "") return NONE;
   const named = [
     ...new Set(
       [...text.matchAll(/(?:^|[\s(])@([a-z][a-z0-9-]{1,23})\b/giu)].map(

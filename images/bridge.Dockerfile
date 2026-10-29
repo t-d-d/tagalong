@@ -12,6 +12,11 @@ RUN git init -q /src \
   && git -C /src checkout -q FETCH_HEAD \
   && test "$(git -C /src rev-parse HEAD)" = "$BRIDGE_COMMIT"
 
+# One patch on that commit (one-device.md): a webhook for every media message,
+# not only pictures, so a voice note that replies to an answer asks its Claude.
+COPY images/bridge.patch /tmp/bridge.patch
+RUN git -C /src apply /tmp/bridge.patch
+
 WORKDIR /src/whatsapp-bridge
 # go-sqlite3 needs cgo. go.sum pins every module.
 RUN CGO_ENABLED=1 go build -trimpath -ldflags "-s -w" -o /out/whatsapp-bridge .
