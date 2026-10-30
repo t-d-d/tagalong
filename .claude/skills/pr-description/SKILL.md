@@ -7,8 +7,11 @@ description: "Write or rewrite a pull request title and body that a reviewer can
 
 ## Who reads it
 
-The owner, who merges, and anyone reading this public repo afterwards.
-Neither reads the diff first. They want to know whether the change is
+Governor's PR review, the owner, and anyone reading this public repo
+afterwards. The review decides whether the pull request merges. It never
+reads the diff. It judges the body, the changed files and the issues
+closed against the `pr-review` checklist. The owner and later readers do
+not read the diff first either. They want to know whether the change is
 going the right way: is it more complicated than it needs to be, and has
 it drifted from what the issue, the PRD or a decision record said. Nothing
 already decided there is argued again here.
