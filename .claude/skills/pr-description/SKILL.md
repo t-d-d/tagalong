@@ -78,6 +78,14 @@ one line each.
 **Left for later.** One line per issue filed, with its number and why it
 waits. "None" when there is nothing.
 
+**A repair of a red deploy run.** Governor asks for one when a deploy run
+on main goes red after a merge. It closes no issue, so it has no
+`Closes #N` line and no *Verification* rows from an issue. *Outcome*
+links the run and names the merged pull request whose change broke it.
+*Drift* says the change goes no further than the repair. *Verification*
+has one row: the failed job the repair turns green. This is the exception
+in test 2 of the `pr-review` checklist.
+
 ## Not in the body
 
 - The story of the work. No "failing test first" or "the review found".

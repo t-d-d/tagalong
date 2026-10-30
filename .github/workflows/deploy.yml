@@ -78,8 +78,8 @@ jobs:
   # The deploy failed once its stack deploy had started, or its live check
   # failed, so put back the last build that passed. A failure before the
   # stack deploy changed nothing live, and a cancelled run starts no
-  # rollback. The run still ends failed, and the owner reverts the pull
-  # request.
+  # rollback. The run still ends failed, and governor asks the session of
+  # the merge it blames for a repair. The owner reverts where none comes.
   find-live-ok:
     needs: deploy
     if: ${{ !cancelled() && needs.deploy.result == 'failure' && needs.deploy.outputs.stack == 'started' }}

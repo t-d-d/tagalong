@@ -17,6 +17,10 @@
   "workflows": {
     "ci": ".github/workflows/deploy.yml"
   },
+  "prompts": {
+    "ciBreaker": "Read the failed jobs' logs and find the cause. If the cause is in your change, push the fix on a new branch from the default branch with a new PR: PR #{pr} is merged and its branch is done. The repair closes no issue, and you open none for it. Its body links the run, names PR #{pr} as the change that broke it, and says the change goes no further than the repair (test 2 of the pr-review checklist). If the cause is not in your change, or only the owner can fix it, comment on PR #{pr} with what you found instead.",
+    "ciTriage": "Read the failed jobs' logs and find the cause. If a merge caused it, push the fix on a new branch from the default branch with a new PR. The repair closes no issue, and you open none for it. Its body links the run, names the merged PR whose change broke it, and says the change goes no further than the repair (test 2 of the pr-review checklist). Then comment on that PR with what broke and a link to your fix. If no merge caused it, or only the owner can fix it, raise an issue saying what broke and what the owner must do."
+  },
   "review": {
     "checklist": { "file": ".claude/skills/pr-review/SKILL.md" },
     "tickets": {
