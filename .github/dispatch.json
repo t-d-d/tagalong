@@ -11,7 +11,11 @@
     "prMessages": true,
     "subscribeMessages": true,
     "prReview": true,
-    "conflicts": true
+    "conflicts": true,
+    "ciMessages": true
+  },
+  "workflows": {
+    "ci": ".github/workflows/deploy.yml"
   },
   "review": {
     "checklist": { "file": ".claude/skills/pr-review/SKILL.md" },

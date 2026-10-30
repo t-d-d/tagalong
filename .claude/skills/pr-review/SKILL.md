@@ -30,9 +30,13 @@ order.
    nobody watching.
 
 2. **It closes at least one issue, says what the change buys, and that
-   is what the issues it closes asked for.** A pull request that closes no
-   issue fails. Every change here starts from an issue, and `mode: afk` on
-   that issue is the owner's consent to merge it unattended.
+   is what the issues it closes asked for.** Every change here starts from
+   an issue, and `mode: afk` on that issue is the owner's consent to merge
+   it unattended. One exception: a pull request that repairs a red run of
+   the deploy workflow on main may close no issue. Its body links the run,
+   names the merged pull request whose change broke it, and says the
+   change goes no further than the repair. Any other pull request that
+   closes no issue fails.
 
 3. **It says what the change costs, and nothing in the cost is the
    owner's to decide.** It fails if the body or the changed files show
