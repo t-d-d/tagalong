@@ -9,6 +9,133 @@
     "pickup": true,
     "summons": true,
     "prMessages": true,
-    "subscribeMessages": true
+    "subscribeMessages": true,
+    "prReview": true,
+    "conflicts": true,
+    "ciMessages": true
+  },
+  "workflows": {
+    "ci": ".github/workflows/deploy.yml"
+  },
+  "prompts": {
+    "ciBreaker": "Read the failed jobs' logs and find the cause. If the cause is in your change, push the fix on a new branch from the default branch with a new PR: PR #{pr} is merged and its branch is done. The repair closes no issue, and you open none for it. Its body links the run, names PR #{pr} as the change that broke it, and says the change goes no further than the repair (test 2 of the pr-review checklist). If the cause is not in your change, or only the owner can fix it, comment on PR #{pr} with what you found instead.",
+    "ciTriage": "Read the failed jobs' logs and find the cause. If a merge caused it, push the fix on a new branch from the default branch with a new PR. The repair closes no issue, and you open none for it. Its body links the run, names the merged PR whose change broke it, and says the change goes no further than the repair (test 2 of the pr-review checklist). Then comment on that PR with what broke and a link to your fix. If no merge caused it, or only the owner can fix it, raise an issue saying what broke and what the owner must do."
+  },
+  "review": {
+    "checklist": { "file": ".claude/skills/pr-review/SKILL.md" },
+    "tickets": {
+      "require": [{ "labels": ["mode: afk"] }]
+    },
+    "humanOnly": [
+      {
+        "glob": "docs/constraints/**",
+        "reason": "the rules in force, whose meaning changes only through an issue the owner agreed to"
+      },
+      {
+        "glob": "/PRD.md",
+        "reason": "what version 1 does and leaves out, which binds every session"
+      },
+      {
+        "glob": "/CLAUDE.md",
+        "reason": "the instructions every session follows"
+      },
+      {
+        "glob": ".claude/**",
+        "reason": "the skills, hooks and settings every session runs, this review's checklist among them"
+      },
+      {
+        "glob": ".github/**",
+        "reason": "the gate, the deploy, and governor's settings for this repo, this list among them"
+      },
+      {
+        "glob": "infra/**",
+        "reason": "the stacks: what runs in AWS, its permissions and the deploy role"
+      },
+      {
+        "glob": "images/**",
+        "reason": "the images: base image digests, the bridge's pinned commit and its patch"
+      },
+      {
+        "glob": "scripts/deploy.sh",
+        "reason": "the deploy and its rollback to live-ok"
+      },
+      {
+        "glob": "/package.json",
+        "reason": "the dependencies and the gate command"
+      },
+      {
+        "glob": "/package-lock.json",
+        "reason": "the dependencies"
+      },
+      {
+        "glob": "/.npmrc",
+        "reason": "how npm installs: it runs no package's install script"
+      },
+      {
+        "glob": "/.node-version",
+        "reason": "the Node version the gate runs on"
+      },
+      {
+        "glob": "/eslint.config.js",
+        "reason": "the lint rules (docs/constraints/types-and-lint.md)"
+      },
+      {
+        "glob": "tsconfig*.json",
+        "reason": "the compiler options (docs/constraints/types-and-lint.md)"
+      },
+      {
+        "glob": "/vitest.config.ts",
+        "reason": "which tests run in which tier (docs/constraints/test-tiers.md)"
+      },
+      {
+        "glob": "fitness/**",
+        "reason": "the fitness functions that hold the constraints"
+      },
+      {
+        "glob": "test/offline.ts",
+        "reason": "the guard that keeps the gate offline (docs/constraints/test-tiers.md)"
+      },
+      {
+        "glob": "test/loopback.ts",
+        "reason": "which hosts the offline guard lets a test reach (docs/constraints/test-tiers.md)"
+      },
+      {
+        "glob": "test/tiers.ts",
+        "reason": "the tiers vitest.config.ts runs and which file names each one takes (docs/constraints/test-tiers.md)"
+      },
+      {
+        "glob": "test/repo.ts",
+        "reason": "how the fitness functions list and read the repo's files"
+      },
+      {
+        "glob": "test/stack.ts",
+        "reason": "how the fitness functions read the stacks"
+      },
+      {
+        "glob": "service/src/access.ts",
+        "reason": "who may ask a Claude (docs/constraints/who-can-use-it.md)"
+      },
+      {
+        "glob": "service/src/groups.ts",
+        "reason": "who may ask a Claude: which Claudes are open to everyone in a chat, and its members (docs/constraints/who-can-use-it.md)"
+      },
+      {
+        "glob": "service/src/people.ts",
+        "reason": "who may ask a Claude: how a person is matched to an owner or a member, by number or LID (docs/constraints/who-can-use-it.md)"
+      },
+      {
+        "glob": "/.dockerignore",
+        "reason": "the images: what they copy, and the app image's tag"
+      },
+      {
+        "glob": "/.prettierignore",
+        "reason": "what the gate's format check leaves out"
+      },
+      {
+        "glob": "/LICENSE",
+        "reason": "the licence"
+      }
+    ],
+    "merge": true
   }
 }

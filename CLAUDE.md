@@ -42,12 +42,13 @@ tagalong puts Claude in WhatsApp groups: a linked WhatsApp device and a service 
 - Run the `pre-push` skill before every push. It ends by raising the pull request.
 - The pull request body follows the `pr-description` skill.
 - Nothing deploys except a green merge to main. Never deploy by hand.
-- The owner merges. Do not merge your own pull request.
+- Governor's PR review merges a pull request that passes the `pr-review` checklist. One that fails waits for your edit or for the owner. One that changes a path on the human-only list in `.github/dispatch.json` waits for the owner. Do not merge your own pull request.
 
 ## Issues
 
 - Given an issue number, run the `fetch-ticket` skill first.
 - An issue is picked up as soon as it is labelled `mode: afk`, and goes from its text to a pull request without stopping to ask.
+- The review merges only a pull request whose issues carry `mode: afk` and `claimed`. The one exception is a repair of a red deploy run on main, which closes no issue (test 2 of the `pr-review` checklist). Pickup adds `claimed`. A session that starts an issue any other way adds `claimed` itself. Only the owner adds `mode: afk`.
 - Anything only the owner can do is not yours: a Parameter Store value, the device, the Claude login, an AWS or GitHub setting. Say what is needed and stop.
 - When your pull request has merged or closed, or you are done and have none, make the last line of your reply `Signing off.` or `Signing off: <reason>`. That archives the session. Do not sign off while the owner is working with you.
 
