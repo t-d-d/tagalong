@@ -2,12 +2,12 @@
 
 tagalong puts Claude in WhatsApp groups: a linked WhatsApp device and a service beside it that starts Claude Code cloud sessions for `@claude` requests and posts their answers back.
 
-- [PRD.md](PRD.md) says what version 1 does and what it leaves out.
+- [docs/issue-workflow.md](docs/issue-workflow.md) says how tickets and PRDs are labelled, and when one is ready.
 - [docs/constraints/](docs/constraints/README.md) holds the rules in force. Decisions and their reasons live in issues.
 
 ## Scope
 
-- The PRD's "Out of scope" list is binding. Do not build a roadmap item.
+- Build only what a ready ticket asks for. A new capability starts from a PRD, an issue labelled `type: prd`, that the owner has readied.
 - Work you find in passing becomes an issue. Do not fix it in the branch you are on.
 
 ## Before any code edit
@@ -46,10 +46,12 @@ tagalong puts Claude in WhatsApp groups: a linked WhatsApp device and a service 
 
 ## Issues
 
+- Read [docs/issue-workflow.md](docs/issue-workflow.md) before filing, labelling or triaging an issue.
 - Given an issue number, run the `fetch-ticket` skill first.
-- An issue is picked up as soon as it is labelled `mode: afk`, and goes from its text to a pull request without stopping to ask.
-- The review merges only a pull request whose issues carry `mode: afk` and `claimed`. The one exception is a repair of a red deploy run on main, which closes no issue (test 2 of the `pr-review` checklist). Pickup adds `claimed`. A session that starts an issue any other way adds `claimed` itself. Only the owner adds `mode: afk`.
-- Anything only the owner can do is not yours: a Parameter Store value, the device, the Claude login, an AWS or GitHub setting. Say what is needed and stop.
+- Governor starts a session on an issue labelled `workflow: ready for development` and `mode: afk` once none of its blockers is open, and claims it with `workflow: under development`. The session goes from the issue's text to a pull request without stopping to ask. A session that starts an issue any other way claims it itself.
+- The review merges only a pull request whose issues are claimed and carry a `mode:` label. The one exception is a repair of a red deploy run on main, which closes no issue (test 2 of the `pr-review` checklist).
+- A session labels the issues it files: a type, a mode, and ready once the spec is complete. It readies an enhancement only under a PRD the owner readied, and never moves a PRD's own `workflow:` label.
+- Anything only the owner can do is not yours: a Parameter Store value, the device, the Claude login, an AWS or GitHub setting. Applying a label is not a setting. Say what is needed and stop.
 - When your pull request has merged or closed, or you are done and have none, make the last line of your reply `Signing off.` or `Signing off: <reason>`. That archives the session. Do not sign off while the owner is working with you.
 
 ## GitHub from a cloud session

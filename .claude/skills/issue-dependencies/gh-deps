@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# GitHub issue-dependency shim.
+#
+# GitHub's `blocked by` / `blocking` relationships are supported by the REST
+# API but the GitHub MCP server does not yet expose them. This script wraps
+# the API so skills can treat dependencies as first-class without every caller
+# needing to remember the endpoint shape.
+#
+# Writes are one-sided by API design: you can only POST/DELETE on
+# `.../dependencies/blocked_by`. The reverse `blocking` view is maintained
+# automatically by GitHub, so setting one direction is enough.
+#
+# Usage:
+#   gh-deps list-blockers <issue>              # direct blockers of <issue>
+#   gh-deps list-blocking <issue>              # direct issues blocked by <issue>
+#   gh-deps list-blockers-transitive <issue>   # upstream closure (BFS)
+#   gh-deps list-blocking-transitive <issue>   # downstream closure (BFS)
+#   gh-deps add-blocker <issue> <blocker>      # mark <issue> blocked by <blocker>
+#   gh-deps remove-blocker <issue> <blocker>   # unlink
+#
+# Output is newline-separated issue numbers; add `--json` for full payloads.
+#
+# Requires: gh, which a Claude cloud session has. Set GH_REPO for another repo.
+
+set -euo pipefail
+
+REPO="${GH_REPO:-t-d-d/tagalong}"
+API_VERSION="2026-03-10"
+JSON_OUTPUT=0
+if [[ "${1:-}" == "--json" ]]; then JSON_OUTPUT=1; shift; fi
+
+api() { gh api -H "X-GitHub-Api-Version: $API_VERSION" "$@"; }
+
+issue_id() { api "/repos/$REPO/issues/$1" --jq '.id'; }
+
+list_blockers()  { api "/repos/$REPO/issues/$1/dependencies/blocked_by" --paginate; }
+list_blocking()  { api "/repos/$REPO/issues/$1/dependencies/blocking"   --paginate; }
+
+emit() {
+  if [[ "$JSON_OUTPUT" == 1 ]]; then cat
+  else jq -r '.[] | .number'
+  fi
+}
+
+traverse() {
+  local direction="$1" start="$2"
+  local seen="" frontier="$start" next
+  seen="$start"
+  while [[ -n "$frontier" ]]; do
+    next=""
+    for n in $frontier; do
+      local fetched
+      fetched=$(api "/repos/$REPO/issues/$n/dependencies/$direction" --paginate --jq '.[].number' || true)
+      for m in $fetched; do
+        if ! grep -qx "$m" <<<"$seen"; then
+          seen="$seen"$'\n'"$m"
+          next="$next $m"
+        fi
+      done
+    done
+    frontier="$next"
+  done
+  # exclude the starting issue
+  grep -vx "$start" <<<"$seen" || true
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  list-blockers)             list_blockers "$1" | emit ;;
+  list-blocking)             list_blocking "$1" | emit ;;
+  list-blockers-transitive)  traverse blocked_by "$1" ;;
+  list-blocking-transitive)  traverse blocking   "$1" ;;
+  add-blocker)
+    bid=$(issue_id "$2")
+    api --method POST "/repos/$REPO/issues/$1/dependencies/blocked_by" -F issue_id="$bid" > /dev/null
+    echo "added: #$1 blocked by #$2"
+    ;;
+  remove-blocker)
+    bid=$(issue_id "$2")
+    api --method DELETE "/repos/$REPO/issues/$1/dependencies/blocked_by/$bid" > /dev/null
+    echo "removed: #$1 no longer blocked by #$2"
+    ;;
+  ""|-h|--help)
+    sed -n '2,25p' "$0"
+    ;;
+  *)
+    echo "unknown command: $cmd" >&2
+    exit 2
+    ;;
+esac

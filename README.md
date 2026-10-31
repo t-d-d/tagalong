@@ -39,7 +39,7 @@ Only owners can run commands. tagalong ignores anyone an owner has not allowed, 
 
 - [docs/bootstrap.md](docs/bootstrap.md): the accounts, the first deploy and moving the device, once.
 - [docs/setup.md](docs/setup.md): working on the code, the operator's commands, and what to do when something breaks.
-- [PRD.md](PRD.md): what version 1 does and leaves out.
+- [docs/issue-workflow.md](docs/issue-workflow.md): how work is ticketed, and how a PRD becomes tickets.
 
 It costs about $8 a month: the Spot task, its public IPv4 address, and a few cents of EFS, S3 and logs. The sessions use the Claude account's own plan.
 

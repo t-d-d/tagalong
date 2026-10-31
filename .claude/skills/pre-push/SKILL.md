@@ -51,7 +51,11 @@ Every finding ends one of three ways:
   or it is too big for a review fix. File it before pushing and link it
   under *Left for later*, saying that it is real and why it waits, so
   nobody reads it as declined. A finding that exists only in a pull
-  request body is lost at merge.
+  request body is lost at merge. Label it as
+  [issue-workflow.md](../../../docs/issue-workflow.md) says: a type, a
+  mode, and ready once its spec is complete. If it touches what your
+  branch touches, record it as blocked by your issue first (the
+  `issue-dependencies` skill), or governor may start it before your merge.
 
 If the review changed code, commit the fixes and run `npm run gate`
 again.
