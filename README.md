@@ -29,6 +29,7 @@ The owner types `@claude help` in a chat. tagalong answers with messages to copy
 - `@claude add podstow brainstorm` and `@claude remove brainstorm` say which Claudes are in this chat.
 - `@claude allow @Name podstow` and `@claude revoke @Name podstow` say who else may ask each Claude in this chat. `@claude allow everyone brainstorm` opens a read-only Claude to everyone here.
 - `@claude add brainstorm interjecting`, or later `@claude interject brainstorm on`, sets a Claude to interject in this chat. Once the chat has been quiet for two minutes, it is given what the people who may ask it said, and posts only when it has something to add. `@claude interject brainstorm off` turns it off. It is off unless an owner turns it on.
+- `@claude set interjecting read-only` keeps interjecting to read-only Claudes in every chat, and stops any read-write Claude that was interjecting. `@claude set interjecting all` lets any Claude interject again, but turns none back on.
 - A chat keeps talking to the version of a Claude it started with. `@claude update brainstorm` moves it to the current definition and repo, carrying its conversation over. `@claude fresh brainstorm` starts it over with only the last messages.
 - `@claude who` lists who is here, and `@claude stop` makes tagalong ignore the chat again.
 

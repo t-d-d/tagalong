@@ -11,6 +11,7 @@ import {
   CLAUDE,
   GROUP,
   MEMBER,
+  OTHER_GROUP,
   OWNER,
   STRANGER,
 } from "../../test/bridge-db.ts";
@@ -67,7 +68,8 @@ async function says(
   if (!content.startsWith("@claude "))
     spoken.push(content.replace(/^@\w+ /u, ""));
   t.clock.now += 1000;
-  t.db.message({ id, sender, content, at: t.clock.now });
+  const chat = typeof extra.chatJID === "string" ? extra.chatJID : GROUP;
+  t.db.message({ id, chat, sender, content, at: t.clock.now });
   await t.deliver({ messageId: id, sender, content, ...extra });
 }
 
@@ -353,6 +355,176 @@ describe("setting a Claude to interject (who-can-use-it.md)", () => {
     expect(t.groupsFile().groups?.[GROUP]?.claudes.podstow).toEqual({
       members: [MEMBER],
     });
+  });
+});
+
+/** podstow (read-write) interjecting here and in another chat, brainstorm (read-only) here. */
+const bothChats: GroupsFile = {
+  ...interjecting(["podstow"]),
+  groups: {
+    ...interjecting(["podstow"]).groups,
+    [OTHER_GROUP]: {
+      label: "Work",
+      claudes: { podstow: { members: [], interjecting: true } },
+    },
+  },
+};
+
+describe("keeping interjecting to read-only Claudes (who-can-use-it.md)", () => {
+  it("stops every read-write Claude interjecting, in every chat, and keeps the read-only ones", async () => {
+    const t = (h = await harness({ groups: bothChats }));
+    await says(t, "c0", OWNER, "@claude interject podstow on");
+    await says(t, "c1", OWNER, "@claude set interjecting read-only");
+    const file = t.groupsFile();
+    expect(file.interjecting).toBe("read-only");
+    expect(file.groups?.[GROUP]?.claudes.podstow).toEqual({
+      members: [MEMBER],
+    });
+    expect(file.groups?.[OTHER_GROUP]?.claudes.podstow).toEqual({
+      members: [],
+    });
+    expect(file.groups?.[GROUP]?.claudes.brainstorm).toEqual({
+      members: [MEMBER],
+      interjecting: true,
+    });
+    expect(t.stateFile()).toHaveProperty("interjecting", {});
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Only read-only Claudes may interject now. @podstow stopped interjecting.",
+    );
+
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "m1", MEMBER, "we could build a recipe app");
+    await quiet(t);
+    expect(launches(t)).toHaveLength(1);
+    expect(launches(t)[0]?.prompt).toContain('You are "brainstorm"');
+  });
+
+  it("refuses to set a read-write Claude to interject, and says why", async () => {
+    const t = (h = await harness());
+    await says(t, "c1", OWNER, "@claude set interjecting read-only");
+    await says(t, "c2", OWNER, "@claude interject podstow on");
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Couldn't do that: only read-only Claudes may interject, and @podstow can change a repo. `@claude set interjecting all` lets every Claude interject.",
+    );
+    await says(t, "c3", OWNER, "@claude add podstow interjecting", {
+      chatJID: OTHER_GROUP,
+    });
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Couldn't do that: only read-only Claudes may interject, and @podstow can change a repo. `@claude set interjecting all` lets every Claude interject.",
+    );
+    const file = t.groupsFile();
+    expect(file.groups?.[GROUP]?.claudes.podstow).toEqual({
+      members: [MEMBER],
+    });
+    expect(file.groups?.[OTHER_GROUP]).toBeUndefined();
+    expect(JSON.stringify(t.stateFile() ?? {})).not.toContain("podstow");
+
+    await says(t, "c4", OWNER, "@claude interject brainstorm on");
+    expect(t.groupsFile().groups?.[GROUP]?.claudes.brainstorm).toEqual({
+      members: [MEMBER],
+      interjecting: true,
+    });
+  });
+
+  it("turns no Claude back on when set back to all, and then lets a read-write Claude interject", async () => {
+    const t = (h = await harness({ groups: bothChats }));
+    await says(t, "c1", OWNER, "@claude set interjecting read-only");
+    await says(t, "c2", OWNER, "@claude set interjecting all");
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Any Claude may interject now. None was turned back on: `@claude interject <name> on` in a chat.",
+    );
+    const file = t.groupsFile();
+    expect(file.interjecting).toBeUndefined();
+    expect(file.groups?.[GROUP]?.claudes.podstow).toEqual({
+      members: [MEMBER],
+    });
+    expect(file.groups?.[OTHER_GROUP]?.claudes.podstow).toEqual({
+      members: [],
+    });
+
+    await says(t, "c3", OWNER, "@claude interject podstow on");
+    expect(t.groupsFile().groups?.[GROUP]?.claudes.podstow).toEqual({
+      members: [MEMBER],
+      interjecting: true,
+    });
+  });
+
+  it("stops a Claude interjecting when it is redefined as read-write", async () => {
+    const t = (h = await harness({ groups: bothChats }));
+    await says(t, "c1", OWNER, "@claude set interjecting read-only");
+    expect(t.groupsFile().groups?.[GROUP]?.claudes.brainstorm).toEqual({
+      members: [MEMBER],
+      interjecting: true,
+    });
+    await says(t, "c2", OWNER, "@claude define brainstorm read-write");
+    expect(t.groupsFile().groups?.[GROUP]?.claudes.brainstorm).toEqual({
+      members: [MEMBER],
+    });
+    expect(t.stateFile()).toHaveProperty("interjecting", {});
+    expect(t.bridge.sent.at(-1)?.message).toContain(
+      "@brainstorm stopped interjecting, since only read-only Claudes may.",
+    );
+  });
+
+  it("turns no Claude back on when set back to all from a file set by hand", async () => {
+    const t = (h = await harness({
+      groups: { ...bothChats, interjecting: "read-only" },
+    }));
+    await says(t, "c1", OWNER, "@claude set interjecting all");
+    const file = t.groupsFile();
+    expect(file.interjecting).toBeUndefined();
+    expect(file.groups?.[GROUP]?.claudes.podstow).toEqual({
+      members: [MEMBER],
+    });
+    expect(file.groups?.[OTHER_GROUP]?.claudes.podstow).toEqual({
+      members: [],
+    });
+  });
+
+  it("names only the redefined Claude as stopped", async () => {
+    const t = (h = await harness({
+      groups: { ...bothChats, interjecting: "read-only" },
+    }));
+    await says(t, "c1", OWNER, "@claude define brainstorm read-only");
+    expect(t.bridge.sent.at(-1)?.message).not.toContain("stopped interjecting");
+  });
+
+  it("takes the setting from an owner only, and asks which setting", async () => {
+    const t = (h = await harness({ groups: bothChats }));
+    await says(t, "c1", MEMBER, "@claude set interjecting read-only");
+    expect(t.groupsFile().interjecting).toBeUndefined();
+    expect(t.groupsFile().groups?.[GROUP]?.claudes.podstow).toEqual({
+      members: [MEMBER],
+      interjecting: true,
+    });
+    expect(t.bridge.sent).toEqual([]);
+
+    await says(t, "c2", OWNER, "@claude set interjecting");
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Couldn't do that: Which? `@claude set interjecting read-only` or `@claude set interjecting all`",
+    );
+    await says(t, "c3", OWNER, "@claude set colour blue");
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Couldn't do that: Which? `@claude set interjecting read-only` or `@claude set interjecting all`",
+    );
+  });
+
+  it("shows the setting in who, and offers it in help", async () => {
+    const t = (h = await harness());
+    await says(t, "c1", OWNER, "@claude who");
+    expect(t.bridge.sent.at(-1)?.message).toContain(
+      "Interjecting: any Claude an owner sets",
+    );
+    await says(t, "c2", OWNER, "@claude set interjecting read-only");
+    await says(t, "c3", OWNER, "@claude who");
+    expect(t.bridge.sent.at(-1)?.message).toContain(
+      "Interjecting: read-only Claudes only",
+    );
+    await says(t, "c4", OWNER, "@claude help");
+    expect(t.bridge.sent.map((sent) => sent.message)).toContain(
+      "@claude set interjecting all",
+    );
   });
 });
 

@@ -86,8 +86,16 @@ const jid = z
     "must be a chat JID, ending @g.us, @s.whatsapp.net or @lid",
   );
 
+/** Which Claudes may interject anywhere: any an owner sets, or read-only ones only. */
+export const INTERJECTING = ["all", "read-only"] as const;
+export type Interjecting = (typeof INTERJECTING)[number];
+export const isInterjecting = (word: string): word is Interjecting =>
+  (INTERJECTING as readonly string[]).includes(word);
+
 const storedSchema = z.object({
   owners: z.array(digits).optional(),
+  // Left out, any Claude may interject.
+  interjecting: z.enum(INTERJECTING).optional(),
   defaultEnvironment: envId.optional(),
   claudes: z.record(name, claudeSchema).optional(),
   groups: z.record(jid, z.union([groupSchema, legacyGroupSchema])).optional(),
@@ -135,6 +143,8 @@ export const openTo = (config: Config, group: Group, claude: string): boolean =>
 
 export interface Config {
   owners: string[];
+  /** Which Claudes may interject, in every chat. */
+  interjecting: Interjecting;
   defaultEnvironment: string | undefined;
   claudes: Map<string, Claude>;
   /** Groups with at least one Claude. Any other chat is ignored. */
@@ -195,6 +205,9 @@ export function parseFile(raw: unknown): GroupsFile {
   }
   return {
     ...(parsed.data.owners === undefined ? {} : { owners: parsed.data.owners }),
+    ...(parsed.data.interjecting === undefined
+      ? {}
+      : { interjecting: parsed.data.interjecting }),
     ...(parsed.data.defaultEnvironment === undefined
       ? {}
       : { defaultEnvironment: parsed.data.defaultEnvironment }),
@@ -216,6 +229,10 @@ export function toConfig(file: GroupsFile, extraOwners: string[]): Config {
       role: entry.role,
     });
   }
+  const interjecting = file.interjecting ?? "all";
+  // Kept to read-only Claudes, a read-write one never interjects, whatever a chat says.
+  const mayInterject = (claude: string) =>
+    interjecting === "all" || claudes.get(claude)?.access === "read-only";
   const groups = new Map<string, Group>();
   for (const [key, entry] of Object.entries(file.groups ?? {})) {
     const here = Object.entries(entry.claudes).filter(([claude]) =>
@@ -234,12 +251,16 @@ export function toConfig(file: GroupsFile, extraOwners: string[]): Config {
         .filter(([, askers]) => askers.everyone === true)
         .map(([claude]) => claude),
       interjecting: here
-        .filter(([, askers]) => askers.interjecting === true)
+        .filter(
+          ([claude, askers]) =>
+            askers.interjecting === true && mayInterject(claude),
+        )
         .map(([claude]) => claude),
     });
   }
   return {
     owners: [...new Set([...extraOwners, ...(file.owners ?? [])])],
+    interjecting,
     defaultEnvironment: file.defaultEnvironment,
     claudes,
     groups,
@@ -277,6 +298,47 @@ export function parseOwners(list: string): string[] {
     .filter((owner) => owner !== "");
   for (const owner of owners) digits.parse(owner);
   return owners;
+}
+
+/** Who may ask a Claude in a chat, with interjecting turned off. */
+export const withoutInterjecting = (
+  askers: GroupEntry["claudes"][string],
+): GroupEntry["claudes"][string] => ({
+  members: askers.members,
+  ...(askers.everyone === true ? { everyone: true } : {}),
+});
+
+/**
+ * The file with interjecting turned off for every read-write Claude, in every
+ * chat, when only read-only Claudes may interject. Returns the chats and
+ * Claudes it stopped, by threadKey's parts.
+ */
+export function withoutReadWriteInterjecting(file: GroupsFile): {
+  file: GroupsFile;
+  stopped: { chat: string; claude: string }[];
+} {
+  if (file.interjecting !== "read-only") return { file, stopped: [] };
+  const stopped: { chat: string; claude: string }[] = [];
+  const groups = Object.fromEntries(
+    Object.entries(file.groups ?? {}).map(([chat, entry]) => [
+      chat,
+      {
+        ...entry,
+        claudes: Object.fromEntries(
+          Object.entries(entry.claudes).map(([claude, askers]) => {
+            if (
+              askers.interjecting !== true ||
+              file.claudes?.[claude]?.access !== "read-write"
+            )
+              return [claude, askers];
+            stopped.push({ chat, claude });
+            return [claude, withoutInterjecting(askers)];
+          }),
+        ),
+      },
+    ]),
+  );
+  return { file: { ...file, groups }, stopped };
 }
 
 /** The file without one group. */
