@@ -441,6 +441,85 @@ describe("asking a Claude", () => {
     );
   });
 
+  it("asks the bridge again for a voice note it is still writing, and uploads the whole note", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    const whole = Buffer.from("ogg bytes, the whole note");
+    t.bridge.media.set("v1", {
+      filename: "audio_1.ogg",
+      bytes: whole,
+      writing: [Buffer.alloc(0), whole.subarray(0, 9)],
+    });
+    t.aws.speech.set(whole.toString(), "the CI broke again");
+    t.db.message({
+      id: "v1",
+      sender: MEMBER,
+      content: "",
+      at: NOW - 60_000,
+      mediaType: "audio",
+      fileLength: whole.length,
+    });
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow what did I say?");
+    const uploads = [...t.aws.objects.entries()].filter(([key]) =>
+      key.endsWith("/audio_1.ogg"),
+    );
+    expect(uploads.map(([, object]) => object.body)).toEqual([whole]);
+    expect(launches(t)[0]?.prompt).toContain(
+      'Transcript, by speech recognition, so it may have errors: "the CI broke again"',
+    );
+  });
+
+  it("takes a stored length of nothing as no length, and uploads the note", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    const whole = Buffer.from("ogg bytes, the whole note");
+    t.bridge.media.set("v1", { filename: "audio_1.ogg", bytes: whole });
+    t.db.message({
+      id: "v1",
+      sender: MEMBER,
+      content: "",
+      at: NOW - 60_000,
+      mediaType: "audio",
+      fileLength: 0,
+    });
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow what did I say?");
+    const uploads = [...t.aws.objects.values()].map((object) => object.body);
+    expect(uploads).toContainEqual(whole);
+    expect(launches(t)[0]?.prompt).toContain("audio_1.ogg");
+  });
+
+  it("never uploads a voice note the bridge does not finish writing", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    const whole = Buffer.from("ogg bytes, the whole note");
+    t.bridge.media.set("v1", {
+      filename: "audio_1.ogg",
+      bytes: whole,
+      writing: Array.from({ length: 20 }, () => whole.subarray(0, 9)),
+    });
+    t.db.message({
+      id: "v1",
+      sender: MEMBER,
+      content: "",
+      at: NOW - 60_000,
+      mediaType: "audio",
+      fileLength: whole.length,
+    });
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow what did I say?");
+    expect(t.aws.objects.size).toBe(0);
+    expect(launches(t)[0]?.prompt).not.toContain("audio_1.ogg");
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({
+        event: "attachment-skipped",
+        level: "warn",
+        why: "unfinished",
+      }),
+    );
+  });
+
   it("takes a voice note that replies to an answer as a request to the Claude that wrote it, and one that replies to nothing as none", async () => {
     const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
     t.bridge.media.set("v1", {

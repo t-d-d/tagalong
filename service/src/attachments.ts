@@ -16,6 +16,9 @@ export const LIMITS = {
   files: 5,
   windowMs: 10 * 60_000,
   linkSeconds: 3600,
+  /** How often to ask the bridge for a file it is still writing, and how long to wait between. */
+  wholeTries: 10,
+  wholeWaitMs: 200,
 } as const;
 
 const MEDIA = new Set(["image", "video", "audio", "document", "sticker"]);
@@ -125,6 +128,38 @@ async function transcribed(
   }
 }
 
+/**
+ * The file's bytes once the bridge has finished writing it. The bridge
+ * writes a download in place, and hands back a file that exists as whole,
+ * so a file whose size is not the length WhatsApp gave is asked for again.
+ * Undefined when it never comes whole. With no length to check, the bytes
+ * read; the bridge cannot download a file without one.
+ */
+async function wholeFile(
+  share: Share,
+  row: MessageRow,
+): Promise<
+  { filename: string; body: Buffer } | { tooLarge: number } | undefined
+> {
+  const { fileLength } = row;
+  if (fileLength !== undefined && fileLength > LIMITS.bytes)
+    return { tooLarge: fileLength };
+  for (let tries = 1; ; tries += 1) {
+    const file = await share.bridge.download(share.chat, row.id);
+    const size = statSync(file.path).size;
+    if (size > LIMITS.bytes) return { tooLarge: size };
+    if (fileLength === undefined || size === fileLength) {
+      // Checked again on the bytes read: a second download can truncate it between.
+      const body = readFileSync(file.path);
+      if (body.length > LIMITS.bytes) return { tooLarge: body.length };
+      if (fileLength === undefined || body.length === fileLength)
+        return { filename: file.filename, body };
+    }
+    if (tries >= LIMITS.wholeTries) return undefined;
+    await new Promise((done) => setTimeout(done, LIMITS.wholeWaitMs));
+  }
+}
+
 /** Upload each to the bucket and link it. A file that cannot be passed on is skipped and logged. */
 export async function shareMedia(
   rows: MessageRow[],
@@ -133,20 +168,22 @@ export async function shareMedia(
   const shared: Attachment[] = [];
   for (const row of rows) {
     try {
-      const file = await share.bridge.download(share.chat, row.id);
-      const bytes = statSync(file.path).size;
-      if (bytes > LIMITS.bytes) {
-        log.info("attachment-skipped", { why: "too-large", bytes });
+      const file = await wholeFile(share, row);
+      if (file === undefined) {
+        log.warn("attachment-skipped", { why: "unfinished" });
         continue;
       }
+      if ("tooLarge" in file) {
+        log.info("attachment-skipped", {
+          why: "too-large",
+          bytes: file.tooLarge,
+        });
+        continue;
+      }
+      const bytes = file.body.length;
       const name = safeName(file.filename);
       const key = `attachments/${randomUUID()}/${name}`;
-      await share.aws.putObject(
-        share.bucket,
-        key,
-        readFileSync(file.path),
-        typeOf(name),
-      );
+      await share.aws.putObject(share.bucket, key, file.body, typeOf(name));
       const transcript =
         row.mediaType === "audio" ? await transcribed(share, key) : undefined;
       shared.push({

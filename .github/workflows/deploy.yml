@@ -26,6 +26,7 @@ jobs:
       id-token: write
     outputs:
       stack: ${{ steps.stack.outputs.stack }}
+      passed-attempt: ${{ steps.passed.outputs.attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -48,13 +49,20 @@ jobs:
         run: scripts/deploy.sh app
       - name: Wait for the new task's heartbeat
         run: scripts/deploy.sh live
+      # mark-live-ok reads this to tell a pass in this attempt from one an
+      # earlier attempt left behind.
+      - name: Record the attempt that passed its live check
+        id: passed
+        run: echo "attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
   # live-ok names the last commit that passed its live check (repo-and-delivery.md).
   mark-live-ok:
     needs: deploy
-    # A re-run after a rollback checks the build the rollback put back, not
-    # this run's commit, so only the first attempt moves the tag.
-    if: ${{ success() && github.run_attempt == '1' }}
+    # Any attempt moves the tag once its own deploy job has deployed this
+    # run's commit and passed the live check. A job a re-run does not repeat
+    # keeps its earlier result, so a pass left by an earlier attempt, or a
+    # re-run of the rollback alone, leaves the tag where it is.
+    if: ${{ success() && needs.deploy.outputs.passed-attempt == github.run_attempt }}
     runs-on: ubuntu-24.04
     # A tag left behind only means a rollback goes one build further back.
     continue-on-error: true
