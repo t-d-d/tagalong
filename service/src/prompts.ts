@@ -118,6 +118,8 @@ export interface Ask {
   files: Attachment[];
   /** The session's upload link, up to the file's name, when this delivery gives it. */
   upload?: string;
+  /** The emoji, when the ask is a reaction on the Claude's answer, which `quoted` holds. */
+  reaction?: string;
 }
 
 /** How to send files back: one short curl per file, with the session's link (attachments.md). */
@@ -127,6 +129,8 @@ export function uploadSection(link: string | undefined): string {
 }
 
 const asks = (ask: Ask, claude: string): string => {
+  if (ask.reaction !== undefined)
+    return `[${ask.label}] ${ask.from} reacted ${ask.reaction} to your answer: "${(ask.quoted?.text ?? "").slice(0, 300)}"\nA reaction that only acknowledges, such as ❤️ for thanks, needs no reply: answer only ${PASS} then.\n${filesSection(ask.files)}${uploadSection(ask.upload)}`;
   const replying =
     ask.quoted === undefined
       ? ""

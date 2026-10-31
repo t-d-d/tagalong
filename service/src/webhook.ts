@@ -19,6 +19,9 @@ export const payloadSchema = z.looseObject({
   mentionedJids: z.array(z.string()).nullable().default([]),
   messageId: z.string().default(""),
   mediaType: z.string().optional(),
+  // A reaction's emoji, "" when one is taken off, and the message it is on.
+  reactionEmoji: z.string().optional(),
+  reactionToMessageId: z.string().optional(),
 });
 
 export type Payload = z.infer<typeof payloadSchema>;

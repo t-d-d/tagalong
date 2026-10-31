@@ -163,6 +163,23 @@ describe("prompts", () => {
     expect(followUp("podstow", "", ask)).not.toContain("curl");
   });
 
+  it("gives a reaction on its answer as an ask, with the answer quoted, and says an acknowledgement needs no reply", () => {
+    const text = followUp("podstow", "", {
+      ...ask,
+      label: "m42",
+      from: "Sam",
+      text: "",
+      reaction: "👍",
+      quoted: { who: "@podstow", text: "Shall I open the PR?" },
+    });
+    expect(text).toMatch(
+      /^\[m42\] Sam reacted 👍 to your answer: "Shall I open the PR\?"\n/u,
+    );
+    expect(text).toContain(
+      `A reaction that only acknowledges, such as ❤️ for thanks, needs no reply: answer only ${PASS} then.`,
+    );
+  });
+
   it("marks an answer with its Claude's name, and reads it back", () => {
     expect(answerText("brainstorm", "Go wide.")).toBe("*brainstorm:* Go wide.");
     expect(answerText("", "Old style.")).toBe("Old style.");
