@@ -37,8 +37,9 @@ The body opens with one `Closes #N` line for each issue the pull request
 closes, one issue per line. GitHub needs a closing word before every
 number, so `Closes #40, #41` closes only #40. These lines are the only
 place a closing word sits next to an issue number. GitHub matches close,
-fix or resolve plus `#N` anywhere in the body and reads no negation, so
-"does not fix #N" closes it. Write "#N is not addressed here".
+fix or resolve in any form, such as closes, fixed or resolves, plus `#N`
+anywhere in the body and reads no negation, so "does not fix #N" closes
+it. Write "#N is not addressed here".
 
 After the `Closes #N` lines, if there are any, the body has five sections,
 each a `##` heading, in this order: *Outcome*, *Adds / removes*, *Drift*,
