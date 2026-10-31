@@ -18,8 +18,11 @@ const deliverySchema = z.object({
   // The WhatsApp message an answer to it replies to.
   ask: quoteSchema.nullable().default(null),
   at: z.number(),
-  // Whether a result has listed it, or it was given up on.
+  // Whether its turn is over: a result listed it, the session went idle
+  // after its turn began, or the session ended.
   answered: z.boolean().default(false),
+  // Whether the session did anything after its user event: its turn began.
+  started: z.boolean().default(false),
   // A delivery nobody asked for, to an interjecting Claude: nobody waits on it.
   interjecting: z.boolean().default(false),
 });
@@ -56,8 +59,6 @@ const sessionSchema = z.preprocess(
     cursor: z.string().nullable().default(null),
     // Whether tagalong still reads the session.
     waiting: z.boolean(),
-    // When it last had a delivery or a result.
-    since: z.number(),
     nudged: z.boolean().default(false),
     deliveries: z.array(deliverySchema).default([]),
     // None for a session from before links (#59) until its next delivery,
@@ -66,8 +67,8 @@ const sessionSchema = z.preprocess(
     // Whether the session was told that only text in <whatsapp> tags is
     // posted (#92); false for one started before, told with its next delivery.
     tags: z.boolean().default(false),
-    // An interjecting Claude's idle session: the reads in a row that found
-    // nothing, and when it is read next (relay.ts).
+    // A session not running: the reads in a row that found nothing, and
+    // when it is read next (relay.ts).
     idle: z.number().default(0),
     readAt: z.number().default(0),
   }),

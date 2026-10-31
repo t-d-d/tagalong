@@ -84,7 +84,6 @@ describe("state.json on disk", () => {
       claude: "podstow",
       cursor: "4",
       waiting: true,
-      since: 1,
       nudged: false,
       deliveries: [
         {
@@ -93,6 +92,7 @@ describe("state.json on disk", () => {
           ask: null,
           at: 1,
           answered: false,
+          started: false,
           interjecting: false,
         },
       ],
@@ -140,6 +140,7 @@ describe("state.json on disk", () => {
         ask: { id: "r1", sender: OWNER, content: "hi" },
         at: 1,
         answered: false,
+        started: false,
         interjecting: false,
       },
     ]);
@@ -181,6 +182,7 @@ describe("state.json on disk", () => {
         ask: null,
         at: 1,
         answered: true,
+        started: false,
         interjecting: false,
       },
     ]);

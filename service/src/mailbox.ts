@@ -56,6 +56,7 @@ export const deliveryOf = (
   ask,
   at,
   answered: false,
+  started: false,
   interjecting,
 });
 
@@ -89,7 +90,7 @@ export function answering(
   return legacy.length > 0 ? legacy : null;
 }
 
-/** A session is busy while a delivery has no result that lists it. */
+/** A session is busy while a delivery's turn is open (relay.ts). */
 export const busy = (session: SessionState): boolean =>
   session.deliveries.some((delivery) => !delivery.answered);
 

@@ -21,7 +21,6 @@ export const events = [
   "session-relayed",
   "session-unclosed-tag",
   "session-waiting-approval",
-  "session-gave-up",
   "session-poll-failed",
   "session-gone",
   "interject-capped",
