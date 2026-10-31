@@ -34,8 +34,8 @@ image() {
   if aws ecr describe-images --repository-name "$repo" --image-ids "imageTag=$tag" > /dev/null 2>&1; then
     echo "$repo:$tag is already pushed" >&2
   else
-    docker build --platform linux/arm64 --file "$dockerfile" --tag "$uri:$tag" . >&2 || { echo "Building $uri:$tag failed." >&2; return 1; }
-    docker push "$uri:$tag" >&2 || { echo "Pushing $uri:$tag failed." >&2; return 1; }
+    docker build --platform linux/arm64 --file "$dockerfile" --tag "$uri:$tag" . >&2 || { echo "Building $repo:$tag failed." | tee -a "$summary" >&2; return 1; }
+    docker push "$uri:$tag" >&2 || { echo "Pushing $repo:$tag failed." | tee -a "$summary" >&2; return 1; }
   fi
   echo "$uri:$tag"
 }

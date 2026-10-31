@@ -27,12 +27,12 @@ describe("fitness: a failed deploy says why (repo-and-delivery.md)", () => {
     );
   });
 
-  it("says which image failed to build or push", () => {
+  it("says which image failed to build or push, in the log and the run's summary", () => {
     expect(script).toMatch(
-      /docker build [^\n]*\|\| \{ echo "[^"]*\$uri:\$tag[^"]*" >&2; return 1; \}/u,
+      /docker build [^\n]*\|\| \{ echo "[^"]*\$repo:\$tag[^"]*" \| tee -a "\$summary" >&2; return 1; \}/u,
     );
     expect(script).toMatch(
-      /docker push [^\n]*\|\| \{ echo "[^"]*\$uri:\$tag[^"]*" >&2; return 1; \}/u,
+      /docker push [^\n]*\|\| \{ echo "[^"]*\$repo:\$tag[^"]*" \| tee -a "\$summary" >&2; return 1; \}/u,
     );
   });
 });
