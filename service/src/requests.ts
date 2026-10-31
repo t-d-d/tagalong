@@ -28,11 +28,12 @@ import {
   firstPrompt,
   followUp,
 } from "./prompts.ts";
-import { type Upload, uploadFor } from "./outgoing.ts";
+import { OUTGOING, keepLink, newLinkId } from "./outgoing.ts";
 import { lookAway } from "./relay.ts";
 import { sessionFor } from "./replies.ts";
 import type { Serial } from "./run.ts";
 import {
+  type Link,
   type SessionState,
   type StateStore,
   eyesKey,
@@ -124,16 +125,46 @@ async function files(
   });
 }
 
-/** A folder and form for the turn to upload files to send back; none without a bucket, or if it cannot be made. */
-async function uploadOf(deps: RequestDeps): Promise<Upload | undefined> {
+/**
+ * A session's upload link, made if it has none, kept working for the next
+ * OUTGOING.linkSeconds (outgoing.ts). Null without a bucket or a link to
+ * give, or when its marker cannot be written.
+ */
+async function keptLink(
+  link: Link | null,
+  deps: RequestDeps,
+): Promise<Link | null> {
   const bucket = deps.env.ATTACHMENTS_BUCKET;
-  if (bucket === undefined || deps.aws === undefined) return undefined;
+  if (
+    bucket === undefined ||
+    deps.aws === undefined ||
+    deps.env.UPLOAD_LINK === undefined
+  )
+    return null;
+  const kept = link ?? { id: newLinkId(), given: 0, sent: [] };
   try {
-    return await uploadFor(deps.aws, bucket);
+    await keepLink(deps.aws, bucket, kept.id);
+    return kept;
   } catch (error) {
     log.warn("file-skipped", { why: "no-upload", ...errorFields(error) });
-    return undefined;
+    return null;
   }
+}
+
+/** The ask with the session's link, if the session has not been given it for a while. */
+function withLink(
+  ask: Ask,
+  link: Link | null,
+  now: number,
+  deps: RequestDeps,
+): Ask {
+  if (
+    link === null ||
+    deps.env.UPLOAD_LINK === undefined ||
+    now - link.given <= OUTGOING.linkSeconds * 1000
+  )
+    return ask;
+  return { ...ask, upload: `${deps.env.UPLOAD_LINK}${link.id}/` };
 }
 
 /** What the request quotes, as the Claude will read it. */
@@ -202,8 +233,8 @@ export async function handleRequest(
 }
 
 /**
- * An interjecting Claude's turn: what the people who may ask it said up to `at`
- * (ms), with no request, so nobody waits on it (who-can-use-it.md).
+ * An interjecting Claude's turn: what the people who may ask it said up to
+ * `at` (ms), with no request, so nobody waits on it (who-can-use-it.md).
  */
 export const interjectingTurn = (
   chat: string,
@@ -310,11 +341,22 @@ async function turn(
   const labelAsk = () => {
     if (ask !== undefined && request !== null) ask.label = label(request);
   };
-  const upload = ask === undefined ? undefined : await uploadOf(deps);
-  if (ask !== undefined && upload !== undefined) ask.upload = upload;
-  const folder = upload?.folder ?? null;
-  const delivered = (session: SessionState, id: string, version: string) => {
+  // An interjecting turn has no ask to give the upload link with.
+  const linkFor = async (link: Link | null) =>
+    ask === undefined ? null : await keptLink(link, deps);
+  const tell = (kept: Link | null) =>
+    ask === undefined ? undefined : withLink(ask, kept, now, deps);
+  const delivered = (
+    session: SessionState,
+    id: string,
+    version: string,
+    link: { kept: Link | null; given: boolean },
+  ) => {
     Object.assign(session, { waiting: true, since: now, nudged: false });
+    if (link.kept !== null) {
+      session.link = link.kept;
+      if (link.given) link.kept.given = now;
+    }
     deps.state.state.threads[key] = {
       session: id,
       heard: at,
@@ -329,9 +371,11 @@ async function turn(
     // Everything said since this Claude's last message, not only the last few.
     const said = conversation(lines, thread.heard, deps.env.HISTORY * 3);
     labelAsk();
-    const text = followUp(claude.name, said, ask);
+    const kept = await linkFor(existing.link);
+    const told = tell(kept);
+    const text = followUp(claude.name, said, told);
     // Noted before it goes, so its user event is known however soon it is read.
-    const delivery = deliveryOf(text, request, folder, now, interjecting);
+    const delivery = deliveryOf(text, request, now, interjecting);
     const drop = () => {
       existing.deliveries = existing.deliveries.filter(
         (each) => each !== delivery,
@@ -352,7 +396,10 @@ async function turn(
       deps.sending.delete(id);
     }
     if (sent === "sent") {
-      delivered(existing, id, thread.version);
+      delivered(existing, id, thread.version, {
+        kept,
+        given: told?.upload !== undefined,
+      });
       log.info("session-followup", {
         session: id,
         group: group.label,
@@ -382,13 +429,23 @@ async function turn(
       ? conversation(lines, 0, deps.env.HISTORY)
       : conversation(lines, thread.heard, deps.env.HISTORY * 3);
   labelAsk();
+  // A session that carries on a conversation takes over its link, which the
+  // carried dialogue shows; either way the first prompt gives it.
+  const before =
+    thread.carry === null ? undefined : deps.state.state.sessions[thread.carry];
+  const kept = await linkFor(
+    before?.link === undefined || before.link === null
+      ? null
+      : { ...before.link, given: 0 },
+  );
+  const told = tell(kept);
   const prompt = firstPrompt({
     claude,
     chatName: deps.store.chatName(chat) ?? group.label,
     others: group.claudes.filter((other) => other !== claude.name),
     carried,
     conversation: said,
-    ask,
+    ask: told,
   });
   const name =
     ask === undefined
@@ -403,10 +460,18 @@ async function turn(
     since: now,
     nudged: false,
     lastText: "",
-    deliveries: [deliveryOf(prompt, request, folder, now, interjecting)],
+    deliveries: [deliveryOf(prompt, request, now, interjecting)],
+    link: null,
   };
   deps.state.state.sessions[id] = session;
-  delivered(session, id, versionOf(claude));
+  // Only one session reads a folder, so each file goes once, though the old
+  // session may still answer after an update.
+  if (before !== undefined && kept !== null && before.link?.id === kept.id)
+    before.link = null;
+  delivered(session, id, versionOf(claude), {
+    kept,
+    given: told?.upload !== undefined,
+  });
   log.info("session-started", {
     session: id,
     group: group.label,

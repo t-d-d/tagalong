@@ -51,7 +51,6 @@ const keyOf = (text: string): string =>
 export const deliveryOf = (
   text: string,
   ask: Quote | null,
-  folder: string | null,
   at: number,
   interjecting = false,
 ): Delivery => ({
@@ -60,8 +59,6 @@ export const deliveryOf = (
   ask,
   at,
   answered: false,
-  folder,
-  sent: [],
   interjecting,
 });
 

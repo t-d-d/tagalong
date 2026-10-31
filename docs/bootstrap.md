@@ -40,7 +40,7 @@ It signs in under a throwaway folder, stores the login as the SecureString `/tag
 
 ## 4. The first deploy
 
-In the Actions tab, re-run the failed deploy run on main. It builds both images, makes the stacks `tagalong-images` and `tagalong-app`, and waits for the task's first heartbeat. The task starts without a device, so its heartbeat says `waiting-for-device` and the no-heartbeat alarm is on until step 5.
+In the Actions tab, re-run the failed deploy run on main. It builds the three images, makes the stacks `tagalong-images` and `tagalong-app`, and waits for the task's first heartbeat. The task starts without a device, so its heartbeat says `waiting-for-device` and the no-heartbeat alarm is on until step 5.
 
 Confirm the alert email: AWS sends a link from `no-reply@sns.amazonaws.com`. No alarm reaches anyone until it is clicked, and it lasts three days.
 

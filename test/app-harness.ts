@@ -95,7 +95,7 @@ export async function harness(
     },
     { environment_id: "env_fake2", name: "spare", kind: "anthropic_cloud" },
   );
-  const aws = fakeAws();
+  const aws = fakeAws(() => clock.now);
   const env = serviceEnv(db.store, {
     BRIDGE_URL: bridge.url,
     CLAUDE_API_BASE: api.url,

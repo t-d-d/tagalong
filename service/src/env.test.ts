@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cliEnv, readEnv } from "./env.ts";
+import { cliEnv, readEnv, readLinkEnv } from "./env.ts";
 
 describe("readEnv", () => {
   it("gives the container's defaults", () => {
@@ -21,6 +21,26 @@ describe("readEnv", () => {
     expect(env.LOGIN_PARAMETER).toBeUndefined();
     expect(env.POLL_MS).toBe(500);
     expect(env.DRY_RUN).toBe(true);
+  });
+
+  it("takes an upload link that ends where the session's id goes", () => {
+    const link = "https://abc.execute-api.example.test/up/";
+    expect(readEnv({ HOME: "/h", UPLOAD_LINK: link }).UPLOAD_LINK).toBe(link);
+    expect(
+      readEnv({ HOME: "/h", UPLOAD_LINK: "" }).UPLOAD_LINK,
+    ).toBeUndefined();
+    expect(() =>
+      readEnv({ HOME: "/h", UPLOAD_LINK: link.slice(0, -1) }),
+    ).toThrow();
+    expect(() => readEnv({ HOME: "/h", UPLOAD_LINK: "not a link/" })).toThrow();
+  });
+
+  it("gives the upload link's Lambda its bucket, and nothing without one", () => {
+    expect(readLinkEnv({ ATTACHMENTS_BUCKET: "files" })).toEqual({
+      ATTACHMENTS_BUCKET: "files",
+      AWS_REGION: undefined,
+    });
+    expect(() => readLinkEnv({})).toThrow();
   });
 
   it("refuses what it cannot use", () => {

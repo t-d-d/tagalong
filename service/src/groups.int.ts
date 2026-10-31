@@ -94,11 +94,10 @@ describe("state.json on disk", () => {
           ask: null,
           at: 1,
           answered: false,
-          folder: null,
-          sent: [],
           interjecting: false,
         },
       ],
+      link: { id: "Zk3q9xT0aB4mN7pR2sV5wY8c", given: 1, sent: ["k1"] },
     };
     state.state.sentMedia.push(
       ...Array.from({ length: 600 }, (_, index) => `m${String(index)}`),
@@ -107,6 +106,7 @@ describe("state.json on disk", () => {
     const again = new StateStore(path);
     expect(again.state.sessions.abc12345?.cursor).toBe("4");
     expect(again.state.sessions.abc12345?.deliveries[0]?.uuid).toBe("u1");
+    expect(again.state.sessions.abc12345?.link?.sent).toEqual(["k1"]);
     expect(again.state.sentMedia).toHaveLength(500);
     expect(again.state.sentMedia.at(-1)).toBe("m599");
   });
@@ -137,10 +137,49 @@ describe("state.json on disk", () => {
         ask: { id: "r1", sender: OWNER, content: "hi" },
         at: 1,
         answered: false,
-        folder: null,
-        sent: [],
         interjecting: false,
       },
     ]);
+  });
+
+  it("reads a session saved before links, whose deliveries had upload folders (#59)", () => {
+    const path = join(folder(), "state.json");
+    writeFileSync(
+      path,
+      JSON.stringify({
+        sessions: {
+          abc12345: {
+            chat: GROUP,
+            claude: "podstow",
+            cursor: "4",
+            waiting: true,
+            since: 1,
+            deliveries: [
+              {
+                uuid: "u1",
+                key: "k",
+                at: 1,
+                answered: true,
+                folder: "outgoing/old/",
+                sent: ["outgoing/old/a.png"],
+              },
+            ],
+          },
+        },
+      }),
+    );
+    const session = new StateStore(path).state.sessions.abc12345;
+    expect(session?.deliveries).toEqual([
+      {
+        uuid: "u1",
+        key: "k",
+        ask: null,
+        at: 1,
+        answered: true,
+        interjecting: false,
+      },
+    ]);
+    // It gets a link with its next delivery.
+    expect(session?.link).toBeNull();
   });
 });

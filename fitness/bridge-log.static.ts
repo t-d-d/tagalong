@@ -37,10 +37,36 @@ function readMasks(): Substitution[] {
     });
 }
 
-function readKeep(): RegExp {
+function readKeepSource(): string {
   const keep = /^keep='([^']+)'$/mu.exec(script)?.[1];
   if (keep === undefined) throw new Error("No keep pattern in the script.");
-  return new RegExp(keep, "u");
+  return keep;
+}
+
+function readKeep(): RegExp {
+  return new RegExp(readKeepSource(), "u");
+}
+
+// The alternatives of a pattern that sit outside every group and bracket.
+function topLevelAlternatives(pattern: string): string[] {
+  const entries: string[] = [];
+  let depth = 0;
+  let inBracket = false;
+  let start = 0;
+  for (let i = 0; i < pattern.length; i++) {
+    const char = pattern[i];
+    if (char === "\\") i++;
+    else if (inBracket) inBracket = char !== "]";
+    else if (char === "[") inBracket = true;
+    else if (char === "(") depth++;
+    else if (char === ")") depth--;
+    else if (char === "|" && depth === 0) {
+      entries.push(pattern.slice(start, i));
+      start = i + 1;
+    }
+  }
+  entries.push(pattern.slice(start));
+  return entries;
 }
 
 const masks = readMasks();
@@ -149,6 +175,104 @@ describe("fitness: the bridge's lines carry no number, id or name (logging.md)",
       ),
     ).toBe(false);
   });
+
+  it("ties every entry in the keep list to the start of a line", () => {
+    expect(
+      topLevelAlternatives(readKeepSource()).filter(
+        (entry) => !entry.startsWith("^"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps the bridge's own lines about the connection", () => {
+    // whatsmeow's logger colours INFO, WARN and ERROR lines.
+    const info = (text: string): string =>
+      `12:00:00.000\u001b[36m [Client INFO] ${text}\u001b[0m`;
+    const own = [
+      info("Starting WhatsApp client..."),
+      info("Connection attempt 1/3..."),
+      info("✓ Successfully connected to WhatsApp servers"),
+      info("🔄 Attempting to reconnect..."),
+      info("✓ Reconnected successfully"),
+      info("Already connected, skipping reconnection"),
+      info("Got 515 code, reconnecting..."),
+      info("Got 503 stream error, refreshing CAT before reconnecting..."),
+      info(
+        "Got 401/not-authorized connect failure, refreshing CAT before reconnecting...",
+      ),
+      "12:00:00.000\u001b[33m [Client WARN] ⚠️  Device logged out, please scan QR code to log in again\u001b[0m",
+      "12:00:00.000\u001b[31m [Client ERROR] ❌ Connection failure: 401\u001b[0m",
+      "12:00:00.000\u001b[33m [Client/Socket WARN] Frame websocket read error\u001b[0m",
+      "12:00:00.000\u001b[31m [Database ERROR] Failed to upgrade database\u001b[0m",
+      "Starting REST API server on 127.0.0.1:8080...",
+      "REST API server error: listen tcp: address already in use",
+      "✓ Connected to WhatsApp! Type 'help' for commands.",
+      "Disconnecting...",
+      "Scan this QR code with your WhatsApp app:",
+      "QR code refreshed (#2) - scan this one instead:",
+      "Waiting for QR code scan...",
+      "panic: runtime error: index out of range",
+    ];
+    expect(own.filter((line) => !kept(line))).toEqual([]);
+  });
+
+  // The words the keep list matched anywhere in a line before #53.
+  const keepWords = [
+    "Starting WhatsApp client",
+    "Starting REST API server",
+    "REST API server error",
+    "connected to WhatsApp",
+    "Connected to WhatsApp",
+    "Device logged out",
+    "Disconnected from WhatsApp",
+    "Connection failure",
+    "Stream error",
+    "Stream replaced",
+    "Connection attempt",
+    "Failed to connect",
+    "Failed to establish",
+    "Failed to resolve media roots",
+    "reconnect",
+    "Reconnect",
+    "QR code",
+    "Disconnecting",
+    "panic:",
+    "[Client WARN]",
+    "[Client ERROR]",
+    "Warning: failed to persist",
+    "Error sending webhook",
+    "⚠ Could not",
+  ];
+
+  it.each(keepWords)("drops a message line that contains %s", (word) => {
+    expect(
+      kept(mask(`[2026-10-31 12:00:00] ← ${number}: before ${word} after`)),
+    ).toBe(false);
+  });
+
+  it.each(keepWords)("drops a history sync line that contains %s", (word) => {
+    expect(
+      kept(
+        mask(
+          `12:00:00.000 [Client INFO] Stored message: [2026-10-31] ${number} -> ${group}@g.us: before ${word} after`,
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      kept(
+        mask(
+          `12:00:00.000 [Client INFO] Message content: before ${word} after, Media Type: `,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it.each(keepWords)(
+    "drops a later line of a message that contains %s",
+    (word) => {
+      expect(kept(mask(`before ${word} after`))).toBe(false);
+    },
+  );
 
   it("drops the later lines of a message that runs over several lines", () => {
     expect(kept(mask("Warning: Ann is bringing the cake"))).toBe(false);

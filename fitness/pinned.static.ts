@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { readRepoFile, readWorkflow, workflowPaths } from "../test/repo.ts";
 
-const dockerfiles = ["images/bridge.Dockerfile", "images/tagalong.Dockerfile"];
+const dockerfiles = [
+  "images/bridge.Dockerfile",
+  "images/tagalong.Dockerfile",
+  "images/upload-link.Dockerfile",
+];
 
 describe("fitness: everything a build fetches is pinned (repo-and-delivery.md)", () => {
   it("names every base image by digest", () => {

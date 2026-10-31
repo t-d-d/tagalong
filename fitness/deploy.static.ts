@@ -40,6 +40,34 @@ describe("fitness: a failed deploy says why (repo-and-delivery.md)", () => {
       /docker push [^\n]*\|\| \{ echo "[^"]*\$repo:\$tag[^"]*" \| tee -a "\$summary" >&2; return 1; \}/u,
     );
   });
+
+  // The image() function, from its name to its closing brace.
+  const image = /^image\(\) \{\n[\s\S]*?^\}$/mu.exec(script)?.[0] ?? "";
+
+  it("builds an image only when ECR says it is not there, and stops on any other lookup failure (#46)", () => {
+    expect(image).toMatch(
+      /if lookup=\$\(aws ecr describe-images [^\n]*2>&1 > \/dev\/null\); then/u,
+    );
+    expect(image).toMatch(
+      /elif [^\n]*ImageNotFoundException[^\n]*; then\n\s*docker build /u,
+    );
+    expect(image).toMatch(
+      /else\n[\s\S]*?echo "Looking up \$repo:\$tag in ECR failed[^"]*" \| tee -a "\$summary" >&2\n\s*return 1\n\s*fi/u,
+    );
+  });
+
+  // The run's log is public, and the lookup's message can name the account.
+  it("logs only the failed lookup's error class, whatever its spelling (#46)", () => {
+    expect(image).not.toMatch(/(?:echo|printf|tee)[^\n]*\$\{?lookup\b/u);
+    const pattern = /pattern='([^']*)'/u.exec(image)?.[1] ?? "(?!)";
+    const classOf = (message: string) =>
+      new RegExp(pattern, "u").exec(message)?.[1];
+    const tail = " when calling the DescribeImages operation: a message";
+    expect(classOf(`An error occurred (AccessDeniedException)${tail}`)).toBe(
+      "AccessDeniedException",
+    );
+    expect(classOf(`An error occurred (403)${tail}`)).toBe("403");
+  });
 });
 
 describe("fitness: a deploy pulls its base images logged in to ECR Public (repo-and-delivery.md)", () => {

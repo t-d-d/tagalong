@@ -16,7 +16,7 @@ import {
   messageFor,
   readAnswer,
 } from "./mailbox.ts";
-import { OUTGOING, sendUploads } from "./outgoing.ts";
+import { sendUploads } from "./outgoing.ts";
 import { answerText } from "./prompts.ts";
 import { remember } from "./replies.ts";
 import {
@@ -40,7 +40,7 @@ export interface RelayDeps {
   sending: Set<string>;
   /** Requests, by eyesKey, still being delivered to their Claudes: their 👀 stays. */
   asking: Set<string>;
-  /** Where a turn's uploads are, and where the bridge sends files from; none without a bucket. */
+  /** Where a session's uploads are, and where the bridge sends files from; none without a bucket. */
   files?: { aws: Aws; bucket: string; outboxDir: string };
 }
 
@@ -56,10 +56,6 @@ const latestAsk = (deliveries: Delivery[]): Quote | undefined =>
 
 /** How many answered deliveries a session keeps. */
 const KEPT = 20;
-
-/** Whether a delivery's upload form still works (outgoing.ts). */
-const formWorks = (delivery: Delivery, now: number): boolean =>
-  now - delivery.at < OUTGOING.linkSeconds * 1000;
 
 /** Look at one session; post what each turn that ended says. */
 export async function check(
@@ -282,20 +278,12 @@ async function say(
     }
     log.info("session-relayed", { session: id, chars: message.length });
   }
-  if (deps.files === undefined) return;
-  // What was uploaded in this turn, to the form of any delivery answered by
-  // now. A delivery still waiting may be uploading for its own turn.
-  const now = deps.now();
-  const boxes = session.deliveries.flatMap((delivery) =>
-    delivery.answered && delivery.folder !== null && formWorks(delivery, now)
-      ? [{ folder: delivery.folder, sent: delivery.sent }]
-      : [],
-  );
-  if (boxes.length > 0)
-    await sendUploads(session.chat, boxes, {
-      ...deps.files,
-      bridge: deps.bridge,
-    });
+  if (deps.files === undefined || session.link === null) return;
+  // What the session uploaded with its link since its last answer was posted.
+  await sendUploads(session.chat, session.link, {
+    ...deps.files,
+    bridge: deps.bridge,
+  });
 }
 
 let polling = false;
