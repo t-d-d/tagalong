@@ -99,6 +99,14 @@ export function repliedTo(
   return quoted === undefined ? undefined : answerBy(quoted);
 }
 
+/** Files picked for one delivery, and how to hand back those passed on if it never reaches the session; the caller saves. */
+interface Given {
+  files: Attachment[];
+  release: () => void;
+}
+
+const none = (): Given => ({ files: [], release: () => undefined });
+
 /** Media given to `claude` once each, as links (attachments.md); undefined when files are not shared. */
 function givenTo(claude: string, deps: RequestDeps) {
   const bucket = deps.env.ATTACHMENTS_BUCKET;
@@ -108,10 +116,38 @@ function givenTo(claude: string, deps: RequestDeps) {
   const given = new Set(deps.state.state.sentMedia);
   return {
     sent: { has: (id: string) => given.has(key(id)) },
-    share: async (chat: string, rows: MessageRow[]): Promise<Attachment[]> => {
-      if (rows.length === 0) return [];
-      deps.state.state.sentMedia.push(...rows.map((row) => key(row.id)));
-      return shareMedia(rows, { bridge: deps.bridge, aws, bucket, chat });
+    share: async (chat: string, rows: MessageRow[]): Promise<Given> => {
+      // A request's own message or the one it replies to can have been given before.
+      const fresh = rows.filter((row) => !given.has(key(row.id)));
+      if (rows.length === 0) return none();
+      // Counted now; any that are not passed on are taken off again below.
+      deps.state.state.sentMedia.push(...fresh.map((row) => key(row.id)));
+      const shared = await shareMedia(rows, {
+        bridge: deps.bridge,
+        aws,
+        bucket,
+        chat,
+      });
+      const forget = (ids: Set<string>) => {
+        const gone = new Set(
+          fresh.filter((row) => ids.has(row.id)).map((row) => key(row.id)),
+        );
+        if (gone.size === 0) return;
+        deps.state.state.sentMedia = deps.state.state.sentMedia.filter(
+          (each) => !gone.has(each),
+        );
+      };
+      // One the bridge never handed over whole, or that failed, was not given.
+      const kept = new Set([...shared.passed, ...shared.tooLarge]);
+      forget(new Set(fresh.map((row) => row.id).filter((id) => !kept.has(id))));
+      // One too large stays counted: it is never offered again.
+      const passed = new Set(shared.passed);
+      return {
+        files: shared.files,
+        release: () => {
+          forget(passed);
+        },
+      };
     },
   };
 }
@@ -120,9 +156,9 @@ async function files(
   payload: Payload,
   claude: string,
   deps: RequestDeps,
-): Promise<Attachment[]> {
+): Promise<Given> {
   const given = givenTo(claude, deps);
-  if (given === undefined) return [];
+  if (given === undefined) return none();
   const rows = pickMedia({
     store: deps.store,
     chat: payload.chatJID,
@@ -141,9 +177,9 @@ async function heardFiles(
   after: number,
   upTo: number,
   deps: RequestDeps,
-): Promise<Attachment[]> {
+): Promise<Given> {
   const given = givenTo(claude, deps);
-  if (given === undefined) return [];
+  if (given === undefined) return none();
   const rows = heardMedia(
     deps.store
       .since(chat, after, 200)
@@ -283,12 +319,51 @@ export const interjectingTurn = (
   woke = false,
 ): Promise<void> => turn(chat, claude, group, deps, undefined, at, woke);
 
+/** What a turn holds of the files it took: each is handed back unless the turn reached a session. */
+interface Hold {
+  take: (given: Given) => Attachment[];
+  reached: () => void;
+}
+
 /** One Claude's turn: into its running session, or a new one. With nothing asked, an interjecting one. */
 async function turn(
   chat: string,
   claude: Claude,
   group: Group,
   deps: RequestDeps,
+  asked: { payload: Payload; request: Request } | undefined,
+  heardUpTo?: number,
+  woke = false,
+): Promise<void> {
+  const taken: Given[] = [];
+  const done = { reached: false };
+  const hold: Hold = {
+    take: (given) => {
+      // Only a file passed on has anything to hand back.
+      if (given.files.length > 0) taken.push(given);
+      return given.files;
+    },
+    reached: () => {
+      done.reached = true;
+    },
+  };
+  try {
+    await deliver(chat, claude, group, deps, hold, asked, heardUpTo, woke);
+  } finally {
+    // A file that never reached the Claude is offered again (#83).
+    if (!done.reached && taken.length > 0) {
+      for (const given of taken) given.release();
+      deps.state.save();
+    }
+  }
+}
+
+async function deliver(
+  chat: string,
+  claude: Claude,
+  group: Group,
+  deps: RequestDeps,
+  hold: Hold,
   asked: { payload: Payload; request: Request } | undefined,
   heardUpTo?: number,
   woke = false,
@@ -380,19 +455,21 @@ async function turn(
                     request.content.replace(ANSWER, ""),
                   ),
                 },
-          files: await files(payload, claude.name, deps),
+          files: hold.take(await files(payload, claude.name, deps)),
         };
   if (ask !== undefined && reaction !== undefined) ask.reaction = reaction;
   // Nobody asked an interjecting Claude, so it is given what people sent
   // since it last heard, as a request would be (attachments.md).
   const heard =
     ask === undefined
-      ? await heardFiles(
-          chat,
-          claude.name,
-          Math.max(thread.heard, deps.state.state.interjecting[key] ?? 0),
-          at,
-          deps,
+      ? hold.take(
+          await heardFiles(
+            chat,
+            claude.name,
+            Math.max(thread.heard, deps.state.state.interjecting[key] ?? 0),
+            at,
+            deps,
+          ),
         )
       : [];
   const fileCount = ask?.files.length ?? heard.length;
@@ -410,6 +487,7 @@ async function turn(
     version: string,
     link: { kept: Link | null; given: boolean },
   ) => {
+    hold.reached();
     // Read every POLL_MS until it answers, then from a minute again.
     Object.assign(session, {
       waiting: true,

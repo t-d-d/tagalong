@@ -182,12 +182,27 @@ async function wholeFile(
   }
 }
 
-/** Upload each to the bucket and link it. A file that cannot be passed on is skipped and logged. */
+/** What shareMedia made of the rows it was given. */
+export interface Shared {
+  files: Attachment[];
+  /** The ids of the rows passed on as `files`. */
+  passed: string[];
+  /** The ids of the rows too large ever to pass on. */
+  tooLarge: string[];
+}
+
+/**
+ * Upload each to the bucket and link it. A file that cannot be passed on is
+ * skipped and logged; one the bridge never hands over whole, or whose upload
+ * fails, is in neither `passed` nor `tooLarge`, so it can be tried again.
+ */
 export async function shareMedia(
   rows: MessageRow[],
   share: Share,
-): Promise<Attachment[]> {
+): Promise<Shared> {
   const shared: Attachment[] = [];
+  const passed: string[] = [];
+  const tooLarge: string[] = [];
   for (const row of rows) {
     try {
       const file = await wholeFile(share, row);
@@ -200,6 +215,7 @@ export async function shareMedia(
           why: "too-large",
           bytes: file.tooLarge,
         });
+        tooLarge.push(row.id);
         continue;
       }
       const bytes = file.body.length;
@@ -215,6 +231,7 @@ export async function shareMedia(
         url: await share.aws.presign(share.bucket, key, LIMITS.linkSeconds),
         ...(transcript === undefined ? {} : { transcript }),
       });
+      passed.push(row.id);
     } catch (error) {
       log.warn("attachment-skipped", { why: "failed", ...errorFields(error) });
     }
@@ -224,5 +241,5 @@ export async function shareMedia(
       count: shared.length,
       bytes: shared.reduce((sum, file) => sum + file.bytes, 0),
     });
-  return shared;
+  return { files: shared, passed, tooLarge };
 }

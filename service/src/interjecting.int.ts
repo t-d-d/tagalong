@@ -294,6 +294,27 @@ describe("an interjecting Claude (who-can-use-it.md)", () => {
     );
   });
 
+  it("is given again a voice note whose delivery never reached a session (#83)", async () => {
+    const t = (h = await harness({
+      groups: interjecting(),
+      env: { ATTACHMENTS_BUCKET: "files" },
+    }));
+    t.bridge.media.set("v1", {
+      filename: "audio_1.ogg",
+      bytes: Buffer.from("ogg bytes"),
+    });
+    await says(t, "v1", MEMBER, "", { mediaType: "audio" });
+    await quiet(t);
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({ event: "interject-failed" }),
+    );
+
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await quiet(t);
+    expect(launches(t).at(-1)?.prompt).toContain("audio_1.ogg");
+  });
+
   it("hears everyone in the chat, and is started only by the people who may ask it", async () => {
     const t = (h = await harness({ groups: interjecting() }));
     t.fake.launches.push(SESSION);
