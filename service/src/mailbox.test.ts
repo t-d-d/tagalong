@@ -25,6 +25,9 @@ const session = (): SessionState => ({
   lastText: "",
   deliveries: [],
   link: null,
+  woke: null,
+  idle: 0,
+  readAt: 0,
 });
 
 describe("labels", () => {

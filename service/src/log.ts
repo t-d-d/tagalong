@@ -25,6 +25,7 @@ export const events = [
   "session-gave-up",
   "session-poll-failed",
   "session-gone",
+  "session-woke",
   "interject-capped",
   "interject-failed",
   "launcher-failed",

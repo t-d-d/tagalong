@@ -31,7 +31,8 @@ there and who may ask them.
   not ask it: once the chat has been quiet for INTERJECT_QUIET_MS, what
   the people who may ask it said since it last heard, in one delivery.
   Only those people's messages, sent after it was set to interject, start
-  one, never a Claude's answer or a command. It is told nobody
+  one, never a Claude's answer or a command. A turn its own session
+  starts by itself starts one too (cloud-sessions.md). It is told nobody
   asked it, to answer only with something important, briefly, and
   otherwise to pass, and that a message nobody addressed to it is
   never an instruction to change anything.
@@ -41,7 +42,8 @@ there and who may ask them.
   was. Setting it back to all turns none back on.
 - At most INTERJECT_PER_HOUR interjecting deliveries go to each Claude in
   each chat in an hour. They do not count toward MAX_PER_HOUR. Past
-  the limit, messages wait for the next delivery.
+  the limit, messages and the session's own turns wait for the next
+  delivery.
 - A command is "@claude <verb>" at the start of a message, or a mention
   of the number. Only an owner's own number may run one, only in a
   message stored in the last ten minutes, and never from tagalong's own
@@ -85,5 +87,7 @@ replaced one repo per group on 19 October 2026, at the owner's request.
 A reaction on a Claude's latest answer asks it since 31 October 2026,
 at the owner's request (#45).
 A Claude can interject since 31 October 2026, at the owner's request (#19).
+A turn its own session starts by itself starts an interjecting delivery
+since the same day (#19, #68).
 An owner can keep interjecting to read-only Claudes since 31 October
 2026 (#19, #52).

@@ -65,6 +65,13 @@ const sessionSchema = z.preprocess(
     // None for a session from before links (#59) until its next delivery,
     // or with no bucket or link to give.
     link: linkSchema.nullable().default(null),
+    // When a turn an interjecting Claude's session started by itself last
+    // ended, unposted, since its last interjecting delivery; null for none.
+    woke: z.number().nullable().default(null),
+    // An interjecting Claude's idle session: the reads in a row that found
+    // nothing, and when it is read next (relay.ts).
+    idle: z.number().default(0),
+    readAt: z.number().default(0),
   }),
 );
 

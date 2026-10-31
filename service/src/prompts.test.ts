@@ -66,6 +66,9 @@ describe("prompts", () => {
     });
     expect(prompt).toContain("Write it for a phone");
     expect(prompt).toContain("even a turn you start yourself");
+    expect(prompt).toContain(
+      "While you are set to interject here, such a turn is not posted",
+    );
     expect(prompt).toContain("A direct ask always gets an answer.");
     expect(prompt).toContain("Use emojis where they replace words.");
     expect(prompt).toContain(

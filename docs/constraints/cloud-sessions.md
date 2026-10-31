@@ -39,14 +39,15 @@ result, so nothing has to be scraped or posted back by the session.
   it. An older answer with a session link in it still works.
 - Answers are read from /v1/code/sessions/cse_<id>/events, after the
   last sequence number read, from a session's first delivery until it
-  has had no delivery and no result for GIVE_UP_MS. tagalong notes each
+  has had no delivery and no result for GIVE_UP_MS. An interjecting
+  Claude's running session is the exception, below. tagalong notes each
   delivery's uuid from the user event that carries its text.
 - A result event ends a turn. It is posted after the Claude's name in
   bold, without the session's link, unless every message its
   user_message_uuids lists came from elsewhere, such as Claude Desktop.
   A result that lists no messages, from a turn the session started by
-  itself, is posted. A line the session ended with its own link is
-  dropped.
+  itself, is posted, except from an interjecting Claude's running
+  session. A line the session ended with its own link is dropped.
 - A result that is only the pass word, PASS, posts nothing. A result
   that starts with a label replies to that line, without the label.
   Otherwise it replies to the latest ask among the deliveries it lists,
@@ -62,6 +63,22 @@ result, so nothing has to be scraped or posted back by the session.
   👀, no approval notice, and no notice when its turn fails or it is
   given up on, since nobody waits on it. While a session is busy,
   interjecting waits; what was said goes in with the next delivery.
+- An interjecting Claude's running session is read with no time limit.
+  While a delivery waits, it is read every POLL_MS. Once none does, the
+  gap between reads goes 1, 2, 5, 10 and then 30 minutes, and stays at
+  30; a delivery or a turn that ends starts it again at 1 minute. Its
+  status is checked when a read finds nothing new, and an archived or
+  failed session is not read again once nothing is left to read. Update, fresh, or turning interjecting off puts
+  it back on GIVE_UP_MS, counted from its last delivery or result.
+- A turn an interjecting Claude's running session starts by itself is
+  not posted. It is activity, kept in state.json, as a person's message
+  is. Once the chat and the session have both been quiet for
+  INTERJECT_QUIET_MS, one interjecting delivery goes in: what people
+  said since the Claude last heard, or a line saying nothing new was
+  said, and that what the session did was not posted. Its answer is a
+  chip-in. The result of an interjecting delivery lists it, so it is
+  never activity. A turn read before interjecting was last turned on
+  is dropped.
 - tagalong reacts 👀 to a request as it delivers it, and takes the 👀
   off once no delivery that carries the request still waits. A Claude's
   own reaction on the request replaces the 👀 and is left alone.
@@ -98,4 +115,6 @@ posted. That replaced reading to the latest event before a follow-up
 (#10). The 👀 comes off an answered request since the same day (#24).
 The 👀 for a reaction goes on the answer it is on since 31 October
 2026 (#45). Interjecting deliveries carry no request and get no notices
-since the same day (#19).
+since the same day (#19). An interjecting Claude's running session is
+read until it ends, and a turn it starts by itself is not posted but
+asked about, since the same day (#19, #68).

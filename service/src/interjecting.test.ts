@@ -60,4 +60,20 @@ describe("interjectDue", () => {
       interjectDue({ ...base, rows: [row("m1", T)], hour: [1, 2, 3, 4] }),
     ).toBe("capped");
   });
+
+  it("is due once the session woke by itself and both have been quiet", () => {
+    expect(interjectDue({ ...base, rows: [], woke: T })).toBe("due");
+  });
+
+  it("waits while the session's own turn is recent, though the chat is quiet", () => {
+    expect(
+      interjectDue({ ...base, rows: [row("m1", T)], woke: T + 150_000 }),
+    ).toBe("talking");
+  });
+
+  it("counts a wake toward the hourly limit", () => {
+    expect(
+      interjectDue({ ...base, rows: [], woke: T, hour: [1, 2, 3, 4] }),
+    ).toBe("capped");
+  });
 });
