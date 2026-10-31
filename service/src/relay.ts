@@ -1,25 +1,24 @@
-// Reading a Claude's session and posting what it says to its chat
+// Reading a Claude's session and posting what it tags for its chat
 // (cloud-sessions.md). A session is read from its first delivery until it has
-// had no delivery and no result for GIVE_UP_MS. Every result is posted unless
-// it answers only messages given from elsewhere, such as Claude Desktop.
+// had no delivery and no result for GIVE_UP_MS. Only text inside <whatsapp>
+// tags is posted, from any message the Claude writes, whatever started its
+// turn. A result posts nothing: it answers the deliveries it lists.
 //
 // An interjecting Claude's session is read until it ends, less often the
-// longer it is idle. A turn it starts by itself is posted at once only when
-// it answers a line it was given; otherwise the next interjecting delivery
-// asks the Claude whether the chat should hear of it.
+// longer it is idle.
 import type { Aws } from "./aws.ts";
 import type { Bridge, Quote } from "./bridge.ts";
-import { type ClaudeApi, textOf } from "./claude-api.ts";
+import { type ClaudeApi, type Payload, textOf } from "./claude-api.ts";
 import { sessionLink, toWhatsApp } from "./format.ts";
 import type { GroupsStore } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
 import {
-  type Reading,
+  type Post,
   answering,
   busy,
+  forChat,
   heard,
   messageFor,
-  readAnswer,
 } from "./mailbox.ts";
 import { sendUploads } from "./outgoing.ts";
 import { answerText } from "./prompts.ts";
@@ -46,10 +45,6 @@ export interface RelayDeps {
   sending: Set<string>;
   /** Requests, by eyesKey, still being delivered to their Claudes: their 👀 stays. */
   asking: Set<string>;
-  /** Interjecting deliveries and turns posted at once in the last hour, by threadKey (interjecting.ts). */
-  interjected: Map<string, number[]>;
-  /** INTERJECT_PER_HOUR. */
-  interjectPerHour: number;
   /** Where a session's uploads are, and where the bridge sends files from; none without a bucket. */
   files?: { aws: Aws; bucket: string; outboxDir: string };
 }
@@ -63,63 +58,6 @@ const asksOf = (deliveries: Delivery[]): Quote[] =>
 /** The ask an answer to these deliveries replies to: the latest they carry. */
 const latestAsk = (deliveries: Delivery[]): Quote | undefined =>
   deliveries.findLast((delivery) => delivery.ask !== null)?.ask ?? undefined;
-
-const HOUR = 3_600_000;
-
-/** When an interjecting Claude spoke in its chat in the last hour, the older times dropped. */
-export function lastHour(
-  interjected: Map<string, number[]>,
-  key: string,
-  now: number,
-): number[] {
-  const hour = (interjected.get(key) ?? []).filter((at) => now - at < HOUR);
-  interjected.set(key, hour);
-  return hour;
-}
-
-/**
- * Whether an interjecting Claude may speak once more in its chat this hour,
- * counted if it may (who-can-use-it.md).
- */
-function spend(
-  interjected: Map<string, number[]>,
-  key: string,
-  now: number,
-  perHour: number,
-): boolean {
-  const hour = lastHour(interjected, key, now);
-  if (hour.length >= perHour) return false;
-  hour.push(now);
-  return true;
-}
-
-/**
- * Whether a turn an interjecting Claude's session started by itself answers a
- * line it was given, and is posted at once: a pass always, otherwise while
- * the hourly limit allows.
- */
-function answersLine(
-  session: SessionState,
-  text: string,
-  deps: RelayDeps,
-): boolean {
-  const { label, kind } = readAnswer(text);
-  if (
-    label === undefined ||
-    !session.given.includes(label) ||
-    messageFor(deps.state.state, session.chat, label) === undefined
-  )
-    return false;
-  return (
-    kind === "pass" ||
-    spend(
-      deps.interjected,
-      threadKey(session.chat, session.claude),
-      deps.now(),
-      deps.interjectPerHour,
-    )
-  );
-}
 
 /** How many answered deliveries a session keeps. */
 const KEPT = 20;
@@ -149,7 +87,7 @@ function interjecting(
   );
 }
 
-/** Look at one session; post what each turn that ended says. */
+/** Look at one session; post what it tagged for the chat, and end each turn that ended. */
 export async function check(
   id: string,
   session: SessionState,
@@ -158,68 +96,22 @@ export async function check(
   const own = interjecting(id, session, deps);
   const { events, cursor } = await deps.api.eventsAfter(id, session.cursor);
   session.cursor = cursor;
-  const ended: { text: string; uuids: string[]; failed: boolean }[] = [];
-  let lastText = session.lastText;
+  let ended = 0;
   for (const event of events) {
     const text = textOf(event);
     if (event.type === "user" && event.uuid !== undefined && text !== "")
       heard(session, event.uuid, text);
-    if (event.type === "assistant" && text !== "") lastText = text;
+    if (event.type === "assistant" && text !== "")
+      await postTagged(id, session, text, deps);
     if (event.type === "result") {
-      const failed =
-        event.is_error === true ||
-        (event.subtype !== undefined && event.subtype !== "success");
-      ended.push({
-        text: failed
-          ? `⚠️ The session stopped with an error (${event.subtype ?? "error"}).`
-          : text || lastText,
-        uuids: event.user_message_uuids ?? [],
-        failed,
-      });
-      lastText = "";
+      ended += 1;
+      await end(id, session, event, deps);
     }
   }
-  session.lastText = lastText;
-  for (const turn of ended) {
-    const answers = answering(session, turn.uuids);
-    // Nobody waits on an interjecting delivery, so its failure is not told.
-    if (
-      answers !== null &&
-      turn.failed &&
-      answers.length > 0 &&
-      answers.every((delivery) => delivery.interjecting)
-    ) {
-      for (const delivery of answers) delivery.answered = true;
-      continue;
-    }
-    // A turn an interjecting Claude's session started by itself is posted at
-    // once when it answers a line. Any other is not posted: the Claude is
-    // asked about it once things are quiet.
-    if (own && answers !== null && answers.length === 0) {
-      if (!turn.failed && answersLine(session, turn.text, deps)) {
-        await post(id, session, turn.text, [], deps);
-        continue;
-      }
-      session.woke = deps.now();
-      log.info("session-woke", { session: id });
-      continue;
-    }
-    if (answers !== null) {
-      await post(id, session, turn.text, answers, deps);
-      continue;
-    }
-    // Suspect while a delivery of ours has not been seen in the session:
-    // the result may be its answer, under a uuid tagalong failed to read.
-    const unseen = session.deliveries.filter(
-      (delivery) => !delivery.answered && delivery.uuid === null,
-    ).length;
-    if (unseen > 0) log.warn("session-elsewhere", { session: id, unseen });
-    else log.info("session-elsewhere", { session: id });
-  }
-  if (ended.length > 0) session.since = deps.now();
+  if (ended > 0) session.since = deps.now();
   else if (busy(session)) await waitOn(id, session, deps);
   const now = deps.now();
-  if (own) await schedule(id, session, events.length, ended.length, deps);
+  if (own) await schedule(id, session, events.length, ended, deps);
   else if (!busy(session) && now - session.since > deps.giveUpMs)
     session.waiting = false;
   // Every delivery still waiting is kept, and the latest answered ones, so
@@ -229,6 +121,48 @@ export async function check(
   session.deliveries = session.deliveries.filter(
     (delivery) => !old.has(delivery),
   );
+}
+
+/**
+ * A result ends a turn. The deliveries it lists are answered and their 👀
+ * comes off. Its text repeats the Claude's last message, so it posts
+ * nothing; a failed turn that took a request gets tagalong's notice.
+ */
+async function end(
+  id: string,
+  session: SessionState,
+  event: Payload,
+  deps: RelayDeps,
+): Promise<void> {
+  const answers = answering(session, event.user_message_uuids ?? []) ?? [];
+  for (const delivery of answers) delivery.answered = true;
+  const failed =
+    event.is_error === true ||
+    (event.subtype !== undefined && event.subtype !== "success");
+  // Nobody waits on an interjecting delivery, so its failure is not told.
+  const asked = answers.filter((delivery) => !delivery.interjecting);
+  if (failed && asked.length > 0)
+    await notice(
+      id,
+      session,
+      `⚠️ The session stopped with an error (${event.subtype ?? "error"}).`,
+      asked,
+      deps,
+    );
+  await lookAway(session.chat, asksOf(answers), deps);
+}
+
+/** tagalong's own word on these deliveries, under the Claude's name, as a reply to the latest ask. */
+async function notice(
+  id: string,
+  session: SessionState,
+  text: string,
+  deliveries: Delivery[],
+  deps: RelayDeps,
+): Promise<void> {
+  const message = answerText(session.claude, text);
+  await deps.bridge.send(session.chat, message, latestAsk(deliveries));
+  remember(deps.state.state, deps.store, session.chat, message, id);
 }
 
 /**
@@ -278,9 +212,9 @@ async function waitOn(
   // An archived or failed session takes no more turns.
   const ended = status === "archived" || status === "failed";
   // The turn may have ended, with its result, since its events were read:
-  // that result is the answer, read on the next look.
+  // that result answers it, read on the next look.
   if (
-    (ended || (status === "idle" && session.lastText !== "")) &&
+    (ended || status === "idle") &&
     (await deps.api.eventsAfter(id, session.cursor)).events.length > 0
   )
     return;
@@ -296,24 +230,17 @@ async function waitOn(
       ),
       latestAsk(waiting),
     );
-  } else if ((ended || status === "idle") && session.lastText !== "") {
-    // The turn ended with no result event: its last words.
-    const words = session.lastText;
-    session.lastText = "";
-    session.since = deps.now();
-    await post(id, session, words, waiting, deps);
-    return;
-  } else if (ended && asked.length === 0) {
-    for (const delivery of waiting) delivery.answered = true;
-    return;
   } else if (ended) {
-    await post(
-      id,
-      session,
-      `⚠️ The session ${status === "failed" ? "failed" : "was archived"} without a reply.`,
-      waiting,
-      deps,
-    );
+    for (const delivery of waiting) delivery.answered = true;
+    if (asked.length > 0)
+      await notice(
+        id,
+        session,
+        `⚠️ The session ${status === "failed" ? "failed" : "was archived"} without a reply.`,
+        asked,
+        deps,
+      );
+    await lookAway(session.chat, asksOf(waiting), deps);
     return;
   }
   const overdue = waiting.filter(
@@ -365,52 +292,47 @@ export async function lookAway(
   }
 }
 
-/** Post a turn's answer to `answers`, then take the 👀 off what it answered. */
-async function post(
+/** Post what one message from the Claude tagged for the chat, each pair in turn. */
+async function postTagged(
   id: string,
   session: SessionState,
   text: string,
-  answers: Delivery[],
   deps: RelayDeps,
 ): Promise<void> {
-  for (const delivery of answers) delivery.answered = true;
-  const reading = readAnswer(text);
-  if (reading.kind === "pass") log.info("session-passed", { session: id });
-  else await say(id, session, reading, answers, deps);
-  // An answer that could not be posted leaves the 👀: it has none in the chat.
-  await lookAway(session.chat, asksOf(answers), deps);
+  const { posts, unclosed } = forChat(text);
+  for (const each of posts) await say(id, session, each, deps);
+  if (unclosed) log.warn("session-unclosed-tag", { session: id });
 }
 
 /**
- * A reaction for one emoji, otherwise a message. It goes on the line a label
- * at its start names, or else the latest ask it answers; with neither it
- * stands alone. Then the files uploaded with it.
+ * One tagged message: a reaction on the line it replies to for one emoji,
+ * otherwise a message, a reply to that line while the chat knows it. Then
+ * the files uploaded with it.
  */
 async function say(
   id: string,
   session: SessionState,
-  reading: Reading,
-  answers: Delivery[],
+  post: Post,
   deps: RelayDeps,
 ): Promise<void> {
   const line =
-    reading.label === undefined
+    post.reply === undefined
       ? undefined
-      : messageFor(deps.state.state, session.chat, reading.label);
+      : messageFor(deps.state.state, session.chat, post.reply);
   const target =
     line === undefined
-      ? latestAsk(answers)
+      ? undefined
       : {
           ...line,
           content: deps.store.message(session.chat, line.id)?.content ?? "",
         };
-  if (reading.kind === "reaction" && target !== undefined) {
-    await deps.bridge.react(session.chat, target, reading.text);
+  if (post.kind === "reaction" && target !== undefined) {
+    await deps.bridge.react(session.chat, target, post.text);
     // It replaces tagalong's 👀, if the message had one.
     unsee(deps.state.state, session.chat, target.id);
     log.info("session-relayed", { session: id, reaction: true });
   } else {
-    const words = toWhatsApp(reading.text);
+    const words = toWhatsApp(post.text);
     const message = words === "" ? "" : answerText(session.claude, words);
     if (message !== "") {
       await deps.bridge.send(session.chat, message, target);
@@ -419,7 +341,7 @@ async function say(
     log.info("session-relayed", { session: id, chars: message.length });
   }
   if (deps.files === undefined || session.link === null) return;
-  // What the session uploaded with its link since its last answer was posted.
+  // What the session uploaded with its link since its last message was posted.
   await sendUploads(session.chat, session.link, {
     ...deps.files,
     bridge: deps.bridge,

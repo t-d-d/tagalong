@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  PASS,
   answering,
   busy,
   deliveryOf,
-  give,
   heard,
   labelFor,
+  forChat,
   messageFor,
-  readAnswer,
 } from "./mailbox.ts";
 import { type SessionState, emptyState } from "./state.ts";
 
@@ -23,11 +21,8 @@ const session = (): SessionState => ({
   waiting: true,
   since: 0,
   nudged: false,
-  lastText: "",
   deliveries: [],
   link: null,
-  woke: null,
-  given: [],
   idle: 0,
   readAt: 0,
 });
@@ -52,18 +47,6 @@ describe("labels", () => {
       id: "x599",
       sender: "1",
     });
-  });
-});
-
-describe("labels given to a session", () => {
-  it("notes each line's label in what it is given, the latest kept", () => {
-    const one = session();
-    give(one, ["m1", "m2"]);
-    give(one, ["m1", "m3"]);
-    expect(one.given).toEqual(["m2", "m1", "m3"]);
-    for (let each = 4; each < 600; each += 1) give(one, [`m${String(each)}`]);
-    expect(one.given).toHaveLength(500);
-    expect(one.given.at(-1)).toBe("m599");
   });
 });
 
@@ -97,41 +80,55 @@ describe("deliveries", () => {
   });
 });
 
-describe("reading an answer", () => {
-  it("reads a label at the start, and leaves it out", () => {
-    expect(readAnswer("Done.")).toEqual({
-      kind: "message",
-      label: undefined,
-      text: "Done.",
-    });
-    expect(readAnswer("[m41] Friday works.\n")).toEqual({
-      kind: "message",
-      label: "m41",
-      text: "Friday works.",
+describe("reading what a Claude tags for the chat", () => {
+  it("reads each pair in the order written, with its reply and its line breaks", () => {
+    expect(
+      forChat(
+        'Deployed.\n<whatsapp reply="m45">Deployed. The fix is live.</whatsapp>\nthen\n<whatsapp>Heads up,\nmain is red.</whatsapp>',
+      ),
+    ).toEqual({
+      posts: [
+        { kind: "message", reply: "m45", text: "Deployed. The fix is live." },
+        { kind: "message", reply: undefined, text: "Heads up,\nmain is red." },
+      ],
+      unclosed: false,
     });
   });
 
-  it("reads the pass word, alone or after a label", () => {
-    expect(readAnswer(PASS).kind).toBe("pass");
-    expect(readAnswer(` [m3] ${PASS}\n`).kind).toBe("pass");
-    expect(readAnswer("").kind).toBe("pass");
-    expect(readAnswer(`${PASS}.`).kind).toBe("pass");
-    expect(readAnswer(`${PASS} on that, it's fine.`).kind).toBe("message");
+  it("reads nothing outside tags, nor in empty tags", () => {
+    expect(forChat("Done, and PASS.")).toEqual({ posts: [], unclosed: false });
+    expect(
+      forChat('<whatsapp> </whatsapp><whatsapp reply="m2"></whatsapp>'),
+    ).toEqual({
+      posts: [],
+      unclosed: false,
+    });
   });
 
-  it("reads one emoji as a reaction, and anything more as a message", () => {
+  it("posts nothing from an unclosed tag, and says it was there", () => {
+    expect(forChat("<whatsapp>Half of it")).toEqual({
+      posts: [],
+      unclosed: true,
+    });
+    expect(
+      forChat('<whatsapp>One.</whatsapp> and <whatsapp reply="m3">two'),
+    ).toEqual({
+      posts: [{ kind: "message", reply: undefined, text: "One." }],
+      unclosed: true,
+    });
+  });
+
+  it("reads one emoji with a reply as a reaction, and anything else as a message", () => {
     for (const emoji of ["👍", "👍🏽", "❤️", "🇬🇧", "👨‍👩‍👧", "1️⃣"])
-      expect(readAnswer(emoji)).toEqual({
-        kind: "reaction",
-        label: undefined,
-        text: emoji,
-      });
-    expect(readAnswer("[m4] 🎉")).toEqual({
-      kind: "reaction",
-      label: "m4",
-      text: "🎉",
-    });
+      expect(forChat(`<whatsapp reply="m4">${emoji}</whatsapp>`).posts).toEqual(
+        [{ kind: "reaction", reply: "m4", text: emoji }],
+      );
+    expect(forChat("<whatsapp>🎉</whatsapp>").posts).toEqual([
+      { kind: "message", reply: undefined, text: "🎉" },
+    ]);
     for (const text of ["👍 done", "👍👍", "1", "ok", ":)"])
-      expect(readAnswer(text).kind).toBe("message");
+      expect(
+        forChat(`<whatsapp reply="m4">${text}</whatsapp>`).posts[0]?.kind,
+      ).toBe("message");
   });
 });
