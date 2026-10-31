@@ -294,10 +294,24 @@ const help = async (
   for (const template of templates) await deps.bridge.send(chat, template);
 };
 
-/** A Claude set to listen hears only what is said from now on. */
+/**
+ * Only what is said once a Claude is set to listen starts a delivery. Setting
+ * it again keeps the first time, so nothing waiting is skipped.
+ */
 function listenFrom(deps: CommandDeps, chat: string, names: string[]): void {
   for (const name of names)
-    deps.state.state.listening[threadKey(chat, name)] = deps.now();
+    deps.state.state.listening[threadKey(chat, name)] ??= deps.now();
+  deps.state.save();
+}
+
+/** Forget when these Claudes started listening here. */
+function stopListening(deps: CommandDeps, chat: string, names: string[]): void {
+  const gone = new Set(names.map((name) => threadKey(chat, name)));
+  deps.state.state.listening = Object.fromEntries(
+    Object.entries(deps.state.state.listening).filter(
+      ([key]) => !gone.has(key),
+    ),
+  );
   deps.state.save();
 }
 
@@ -428,6 +442,11 @@ export async function runCommand(
           throw new CommandError(
             `${names.length === 0 ? "Which Claude?" : `No Claude called ${unknown.join(", ")}.`} ${catalogue(deps.groups.config, deps.api)}`,
           );
+        // Listening is never turned on for several Claudes at once (who-can-use-it.md).
+        if (listening && names.length > 1)
+          throw new CommandError(
+            `Set one Claude at a time to listen: \`@claude add ${names[0] ?? ""} listening\``,
+          );
         // A one-to-one chat's name is a person's, so it is never a label (logging.md).
         const label = isGroupChat(chat)
           ? (deps.store.chatName(chat) ?? group?.label ?? chat)
@@ -484,6 +503,7 @@ export async function runCommand(
                 },
               };
         });
+        stopListening(deps, chat, names);
         const updated = config.groups.get(chat);
         await reply(
           updated === undefined
@@ -566,6 +586,7 @@ export async function runCommand(
           };
         });
         if (on) listenFrom(deps, chat, [name]);
+        else stopListening(deps, chat, [name]);
         await reply(
           on
             ? `@${name} is listening here now, and chips in when it has something to add.`
@@ -579,6 +600,7 @@ export async function runCommand(
           return;
         }
         deps.groups.update((file) => withoutGroup(file, chat));
+        stopListening(deps, chat, group?.claudes ?? []);
         await reply(
           "Stopped, and forgot who could ask here. I'll ignore this group until a Claude is added again.",
         );

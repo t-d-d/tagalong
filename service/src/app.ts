@@ -250,9 +250,15 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
             },
           }),
     });
-  // In turn with direct asks, so the two never deliver into one session at once.
+  // In turn with direct asks, so the two never deliver into one session at
+  // once. A look still waiting or running is not queued again.
+  let listening: Promise<void> | undefined;
   const listenOnce = () =>
-    requests.run(() => listen({ ...requestDeps, listened, capped }));
+    (listening ??= requests
+      .run(() => listen({ ...requestDeps, listened, capped }))
+      .finally(() => {
+        listening = undefined;
+      }));
   const keepFresh = () => cli.run(() => login.keepFresh());
 
   async function start(): Promise<Server> {

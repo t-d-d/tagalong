@@ -69,7 +69,7 @@ export async function check(
 ): Promise<void> {
   const { events, cursor } = await deps.api.eventsAfter(id, session.cursor);
   session.cursor = cursor;
-  const ended: { text: string; uuids: string[] }[] = [];
+  const ended: { text: string; uuids: string[]; failed: boolean }[] = [];
   let lastText = session.lastText;
   for (const event of events) {
     const text = textOf(event);
@@ -85,6 +85,7 @@ export async function check(
           ? `⚠️ The session stopped with an error (${event.subtype ?? "error"}).`
           : text || lastText,
         uuids: event.user_message_uuids ?? [],
+        failed,
       });
       lastText = "";
     }
@@ -92,6 +93,16 @@ export async function check(
   session.lastText = lastText;
   for (const turn of ended) {
     const answers = answering(session, turn.uuids);
+    // Nobody waits on a listening delivery, so its failure is not told.
+    if (
+      answers !== null &&
+      turn.failed &&
+      answers.length > 0 &&
+      answers.every((delivery) => delivery.listening)
+    ) {
+      for (const delivery of answers) delivery.answered = true;
+      continue;
+    }
     if (answers !== null) {
       await post(id, session, turn.text, answers, deps);
       continue;

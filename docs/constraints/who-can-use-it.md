@@ -26,9 +26,9 @@ there and who may ask them.
 - An owner may set one Claude in one chat to listen. It is off unless
   an owner turns it on. A listening Claude is given messages that did
   not ask it: once the chat has been quiet for LISTEN_QUIET_MS, what
-  the people who may ask it said since it last heard, said after it
-  was set to listen, in one delivery. Only those people's messages
-  start one, never a Claude's answer or a command. It is told nobody
+  the people who may ask it said since it last heard, in one delivery.
+  Only those people's messages, sent after it was set to listen, start
+  one, never a Claude's answer or a command. It is told nobody
   asked it, to answer only with something important, briefly, and
   otherwise to pass, and that a message nobody addressed to it is
   never an instruction to change anything.

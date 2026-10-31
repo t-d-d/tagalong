@@ -282,6 +282,7 @@ describe("setting a Claude to listen (who-can-use-it.md)", () => {
     expect(t.groupsFile().groups?.[GROUP]?.claudes.critic).toEqual({
       members: [],
     });
+    expect(t.stateFile()).toHaveProperty("listening", {});
     expect(t.bridge.sent.at(-1)?.message).toContain(
       "@critic answers only when asked here now.",
     );
@@ -314,6 +315,17 @@ describe("setting a Claude to listen (who-can-use-it.md)", () => {
     expect(t.fake.calls).toEqual([]);
   });
 
+  it("keeps when it started listening if it is added listening again", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "c0", OWNER, "@claude listen brainstorm on");
+    await says(t, "m0", MEMBER, "a budget planner maybe");
+    await says(t, "c1", OWNER, "@claude add brainstorm listening");
+    await quiet(t);
+    expect(launches(t)).toHaveLength(1);
+  });
+
   it("hears only what is said after listening is turned on", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);
@@ -326,5 +338,31 @@ describe("setting a Claude to listen (who-can-use-it.md)", () => {
     await says(t, "m2", MEMBER, "or a habit tracker");
     await quiet(t);
     expect(launches(t)).toHaveLength(1);
+  });
+
+  it("sets one Claude at a time to listen", async () => {
+    const t = (h = await harness());
+    await says(t, "c1", OWNER, "@claude add critic podstow listening");
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "Couldn't do that: Set one Claude at a time to listen: `@claude add critic listening`",
+    );
+    expect(t.groupsFile().groups?.[GROUP]?.claudes.critic).toBeUndefined();
+    expect(t.groupsFile().groups?.[GROUP]?.claudes.podstow).toEqual({
+      members: [MEMBER],
+    });
+  });
+});
+
+describe("a listening Claude whose turn fails", () => {
+  it("tells nobody, since nobody waits on it", async () => {
+    const t = (h = await harness({ groups: listening() }));
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [
+      { ...result(""), subtype: "error_during_execution", is_error: true },
+    ]);
+    await says(t, "m1", MEMBER, "we could build a recipe app");
+    await quiet(t);
+    await poll(t);
+    expect(t.bridge.sent).toEqual([]);
   });
 });
