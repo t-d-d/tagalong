@@ -40,9 +40,10 @@ image() {
     docker build --platform linux/arm64 --file "$dockerfile" --tag "$uri:$tag" . >&2 || { echo "Building $repo:$tag failed." | tee -a "$summary" >&2; return 1; }
     docker push "$uri:$tag" >&2 || { echo "Pushing $repo:$tag failed." | tee -a "$summary" >&2; return 1; }
   else
-    # The error's class only. Its message can name the account, and the
-    # run's log is public.
-    local class=unknown pattern='An error occurred \(([A-Za-z]+)\)'
+    # The error's class only, a name or, when the service sent none, an
+    # HTTP status. Its message can name the account, and the run's log is
+    # public.
+    local class=unknown pattern='An error occurred \(([A-Za-z0-9]+)\)'
     if [[ $lookup =~ $pattern ]]; then class=${BASH_REMATCH[1]}; fi
     echo "Looking up $repo:$tag in ECR failed ($class)." | tee -a "$summary" >&2
     return 1
