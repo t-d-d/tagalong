@@ -42,26 +42,38 @@ result, so nothing has to be scraped or posted back by the session.
   has had no delivery and no result for GIVE_UP_MS. An interjecting
   Claude's running session is the exception, below. tagalong notes each
   delivery's uuid from the user event that carries its text.
-- A result event ends a turn. It is posted after the Claude's name in
-  bold, without the session's link, unless every message its
-  user_message_uuids lists came from elsewhere, such as Claude Desktop.
-  A result that lists no messages, from a turn the session started by
-  itself, is posted, except from an interjecting Claude's running
-  session. A line the session ended with its own link is dropped.
-- A result that is only the pass word, PASS, posts nothing. A result
-  that starts with a label replies to that line, without the label.
-  Otherwise it replies to the latest ask among the deliveries it lists,
-  and with neither it is a plain message. A result that is only one
-  emoji, with or without a label, goes as a reaction on the message it
-  would have replied to, or as a message when there is none.
+- tagalong posts only text inside <whatsapp> tags, from any message the
+  Claude writes, in any turn, whatever started it: a delivery, the
+  session itself, governor, or someone in the Claude app. Text outside
+  the tags is never posted, and there is no pass word.
+  A session started before these rules is told them once, with its
+  next delivery.
+- Each pair is one WhatsApp message, posted when tagalong reads it, in
+  the order written, with its line breaks kept. One message from the
+  Claude can hold several pairs. A pair opens and closes within one
+  message. An unclosed tag posts nothing, and is logged with no text.
+  Empty tags post nothing.
+- With reply="m45", the message replies to line m45 while the chat
+  still knows that label, and is otherwise a plain message. Without
+  reply, it is a plain message. With reply and text that is only one
+  emoji, it goes on that line as a reaction.
+- A message is posted after the Claude's name in bold, through
+  toWhatsApp, so a line the session ended with its own link is dropped,
+  and it is remembered for replies. The session's uploads are sent
+  after it.
+- A result event ends a turn. The deliveries its user_message_uuids
+  lists are answered. Its text repeats the Claude's last message, so a
+  result posts nothing. A turn that ends with no result posts nothing
+  either: its deliveries wait until they are answered or given up on.
+- tagalong posts tagged text from a Claude that is not interjecting just
+  as from one that is. The brief is the only guard.
 - A session is busy while a delivery has no result that lists it. A
   busy session waiting for an approval is mentioned once, with its
   link, the one place to approve it. A delivery with no result after
   GIVE_UP_MS is given up on, and the chat is told.
-- An interjecting delivery (who-can-use-it.md) carries no request. Its
-  answer is a plain message unless it starts with a label. It gets no
-  👀, no approval notice, and no notice when its turn fails or it is
-  given up on, since nobody waits on it. While a session is busy,
+- An interjecting delivery (who-can-use-it.md) carries no request. It
+  gets no 👀, no approval notice, and no notice when its turn fails or
+  it is given up on, since nobody waits on it. While a session is busy,
   interjecting waits; what was said goes in with the next delivery.
 - An interjecting Claude's running session is read with no time limit.
   While a delivery waits, it is read every POLL_MS. Once none does, the
@@ -70,26 +82,17 @@ result, so nothing has to be scraped or posted back by the session.
   status is checked when a read finds nothing new, and an archived or
   failed session is not read again once nothing is left to read. Update, fresh, or turning interjecting off puts
   it back on GIVE_UP_MS, counted from its last delivery or result.
-- A turn an interjecting Claude's running session starts by itself is
-  posted at once when its result starts with the label of a line the
-  session was given: as a reply to that line, a reaction for one emoji,
-  nothing for the pass word. Such a turn is not activity, and counts
-  toward INTERJECT_PER_HOUR; over the limit it is handled as any other.
-  Any other such turn is not posted. It is activity, kept in state.json,
-  as a person's message is. Once the chat and the session have both been quiet for
-  INTERJECT_QUIET_MS, one interjecting delivery goes in: what people
-  said since the Claude last heard, or a line saying nothing new was
-  said, and that what the session did was not posted. Its answer is a
-  chip-in. The result of an interjecting delivery lists it, so it is
-  never activity. A turn read before interjecting was last turned on
-  is dropped.
+- A turn an interjecting Claude's running session starts by itself
+  posts what it tags, as any turn does. It never starts an interjecting
+  delivery, and does not count toward INTERJECT_PER_HOUR.
 - tagalong reacts 👀 to a request as it delivers it, and takes the 👀
   off once no delivery that carries the request still waits. A Claude's
-  own reaction on the request replaces the 👀 and is left alone.
+  own reaction on the request replaces the 👀 and is left alone. A turn
+  that took a request and fails gets tagalong's notice.
 - A reaction cannot be quoted or reacted to, so for a request that is a
   reaction on a Claude's answer, the answer stands in for the request:
-  the 👀 or ⏳ goes on it, and the Claude's answer replies to it or
-  reacts on it.
+  the 👀 or ⏳ goes on it, and its label stands for the answer, so the
+  Claude replies to it or reacts on it.
 - Those endpoints are not documented, so every answer goes through a
   schema, and the CLI's version is pinned in the image.
 - Environments are named by their names from /v1/environment_providers,
@@ -111,6 +114,10 @@ result, so nothing has to be scraped or posted back by the session.
   running would lose its answer.
 - Stop reading a session at a turn's result: a session that works in
   the background answers in a later turn it starts by itself.
+- Decide what to post by what started a turn: only the Claude knows
+  whether a message from governor or the Claude app calls for a word in
+  the chat.
+- Post a result's text: it repeats the Claude's last message.
 
 History: Set when the repo was made, October 2026, following podstow's
 dispatcher. Each session is a mailbox since 27 October 2026, at the
@@ -123,4 +130,6 @@ since the same day (#19). An interjecting Claude's running session is
 read until it ends, and a turn it starts by itself is not posted but
 asked about, since the same day (#19, #68). One that answers a line it
 was given is posted at once since the same day, at the owner's request
-(#80).
+(#80). Only text a Claude tags for WhatsApp is posted, whatever started
+its turn, and there is no pass word, since the same day, at the owner's
+request (#92).

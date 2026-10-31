@@ -2,6 +2,8 @@
 // (cloud-sessions.md). A test adds sessions and their events. Each message
 // delivered to a session lands as a user event with a uuid, and a result
 // lists the user messages since the one before, as the CLI's results do.
+// ASK in an event stands for the label of the latest ask the session was
+// given before it, as a Claude would read it from the delivery.
 import { z } from "zod";
 import { type Served, serve } from "./serve.ts";
 
@@ -27,6 +29,13 @@ export interface FakeClaudeApi {
   close(): Promise<void>;
 }
 
+/** Stands for the label of the latest ask a session was given, such as m3. */
+export const ASK = "{ask}";
+
+/** Text a Claude tags for the chat, replying to the latest ask, or to `reply`; "" for a plain message. */
+export const tagged = (text: string, reply = ASK): string =>
+  `<whatsapp${reply === "" ? "" : ` reply="${reply}"`}>${text}</whatsapp>`;
+
 export const result = (text: string) => ({
   type: "result",
   subtype: "success",
@@ -37,6 +46,11 @@ export const assistant = (text: string) => ({
   type: "assistant",
   message: { content: [{ type: "text", text }] },
 });
+/** A turn that tags `text` for the chat, and its result, which repeats it. */
+export const answer = (text: string, reply = ASK) => [
+  assistant(tagged(text, reply)),
+  result(tagged(text, reply)),
+];
 /** A message given in the session from elsewhere, such as Claude Desktop. */
 export const user = (text: string, uuid: string) => ({
   type: "user",
@@ -50,19 +64,43 @@ export const selfStarted = (text: string) => ({
   origin: { kind: "task-notification" },
 });
 
+/** A turn the session started by itself that tags `text` for the chat, as a plain message unless `reply` names a line. */
+export const selfAnswer = (text: string, reply = "") => [
+  assistant(tagged(text, reply)),
+  selfStarted(tagged(text, reply)),
+];
+
 const eventShape = z.looseObject({
   type: z.string().optional(),
   uuid: z.string().optional(),
 });
+const userShape = z.looseObject({
+  message: z.looseObject({ content: z.string() }),
+});
 
-/** Each result without its own list gets the user messages since the one before. */
+/** The label of the last ask in a delivery, or of none. */
+const askIn = (text: string): string | undefined =>
+  [...text.matchAll(/^\[(m\d+)\] [^\n]* (?:asks you|reacted)/gmu)].at(-1)?.[1];
+
+/**
+ * Each result without its own list gets the user messages since the one
+ * before, and ASK in any event the label of the latest ask before it.
+ */
 function listed(events: unknown[]): unknown[] {
   let since: string[] = [];
-  return events.map((payload) => {
+  let ask = ASK;
+  return events.map((original) => {
+    const payload: unknown = JSON.parse(
+      JSON.stringify(original).replaceAll(ASK, ask),
+    );
     const event = eventShape.safeParse(payload);
     if (!event.success) return payload;
-    if (event.data.type === "user" && event.data.uuid !== undefined)
+    if (event.data.type === "user" && event.data.uuid !== undefined) {
       since.push(event.data.uuid);
+      const text = userShape.safeParse(payload);
+      ask =
+        (text.success ? askIn(text.data.message.content) : undefined) ?? ask;
+    }
     if (event.data.type !== "result") return payload;
     const filled =
       "user_message_uuids" in event.data

@@ -1,13 +1,10 @@
 // A Claude's session as a mailbox (cloud-sessions.md): tagalong delivers
 // messages into it when it decides to, whether or not the session is
-// working, and posts whatever comes out. A delivery is known in the session
-// by its text, and a result by the messages it lists.
+// working, and posts what the Claude tags for the chat. A delivery is known
+// in the session by its text, and a result by the messages it lists.
 import { createHash } from "node:crypto";
 import type { Quote } from "./bridge.ts";
 import type { Delivery, SessionState, State } from "./state.ts";
-
-/** What a Claude answers when a turn has nothing new for the chat. Never posted. */
-export const PASS = "PASS";
 
 /** How many line labels a chat keeps, the oldest forgotten first. */
 const LABELS = 500;
@@ -30,16 +27,6 @@ export function labelFor(
   if (all.length > LABELS)
     labels.messages = Object.fromEntries(all.slice(-LABELS));
   return label;
-}
-
-/** Note the labels of the lines a session was just given, the latest kept. */
-export function give(session: SessionState, given: Iterable<string>): void {
-  const labels = new Set(session.given);
-  for (const label of given) {
-    labels.delete(label);
-    labels.add(label);
-  }
-  session.given = [...labels].slice(-LABELS);
 }
 
 /** The message a label stands for in a chat, if the chat still knows it. */
@@ -106,30 +93,47 @@ export function answering(
 export const busy = (session: SessionState): boolean =>
   session.deliveries.some((delivery) => !delivery.answered);
 
-const LABEL = /^\s*\[(m\d+)\]\s*/u;
+const OPEN = /<whatsapp(?:\s+reply\s*=\s*"\[?(m\d+)\]?")?\s*>/gu;
+const CLOSE = "</whatsapp>";
 const EMOJI =
   /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}{2}|[#*0-9]️?⃣)/u;
 const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
 
-export interface Reading {
-  /** A message to post, a reaction to put on one, or nothing. */
-  kind: "message" | "reaction" | "pass";
-  /** The line it answers, from a label at its start. */
-  label: string | undefined;
+export interface Post {
+  /** A message to post, or a reaction to put on the line it replies to. */
+  kind: "message" | "reaction";
+  /** The label of the line it replies to, such as m45. */
+  reply: string | undefined;
   text: string;
 }
 
-/** What a turn's result asks tagalong to do. */
-export function readAnswer(answer: string): Reading {
-  const match = LABEL.exec(answer);
-  const label = match?.[1];
-  const text = answer.slice(match?.[0].length ?? 0).trim();
-  if (text === "" || text === PASS || text === `${PASS}.`)
-    return { kind: "pass", label, text: "" };
-  const one = [...graphemes.segment(text)].length === 1;
-  return {
-    kind: one && EMOJI.test(text) ? "reaction" : "message",
-    label,
-    text,
-  };
+/**
+ * What one message from a Claude asks tagalong to post: the text of each
+ * <whatsapp> pair, in order, and whether a tag was left open. Nothing
+ * outside the tags, and no empty pair (cloud-sessions.md).
+ */
+export function forChat(message: string): { posts: Post[]; unclosed: boolean } {
+  const posts: Post[] = [];
+  OPEN.lastIndex = 0;
+  for (
+    let open = OPEN.exec(message);
+    open !== null;
+    open = OPEN.exec(message)
+  ) {
+    const start = open.index + open[0].length;
+    const end = message.indexOf(CLOSE, start);
+    if (end === -1) return { posts, unclosed: true };
+    OPEN.lastIndex = end + CLOSE.length;
+    const text = message.slice(start, end).trim();
+    if (text === "") continue;
+    const reply = open[1];
+    const one = [...graphemes.segment(text)].length === 1;
+    posts.push({
+      kind:
+        reply !== undefined && one && EMOJI.test(text) ? "reaction" : "message",
+      reply,
+      text,
+    });
+  }
+  return { posts, unclosed: false };
 }

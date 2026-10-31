@@ -23,7 +23,7 @@ import {
   versionOf,
 } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
-import { deliveryOf, give, labelFor } from "./mailbox.ts";
+import { deliveryOf, labelFor } from "./mailbox.ts";
 import type { People } from "./people.ts";
 import {
   ANSWER,
@@ -316,8 +316,7 @@ export const interjectingTurn = (
   group: Group,
   at: number,
   deps: RequestDeps,
-  woke = false,
-): Promise<void> => turn(chat, claude, group, deps, undefined, at, woke);
+): Promise<void> => turn(chat, claude, group, deps, undefined, at);
 
 /** What a turn holds of the files it took: each is handed back unless the turn reached a session. */
 interface Hold {
@@ -333,7 +332,6 @@ async function turn(
   deps: RequestDeps,
   asked: { payload: Payload; request: Request } | undefined,
   heardUpTo?: number,
-  woke = false,
 ): Promise<void> {
   const taken: Given[] = [];
   const done = { reached: false };
@@ -348,7 +346,7 @@ async function turn(
     },
   };
   try {
-    await deliver(chat, claude, group, deps, hold, asked, heardUpTo, woke);
+    await deliver(chat, claude, group, deps, hold, asked, heardUpTo);
   } finally {
     // A file that never reached the Claude is offered again (#83).
     if (!done.reached && taken.length > 0) {
@@ -366,7 +364,6 @@ async function deliver(
   hold: Hold,
   asked: { payload: Payload; request: Request } | undefined,
   heardUpTo?: number,
-  woke = false,
 ): Promise<void> {
   const now = deps.now();
   const interjecting = asked === undefined;
@@ -414,13 +411,8 @@ async function deliver(
   // Checked before its files are taken, so they wait for the session that
   // starts once it is defined again.
   if (existing === undefined && (await environmentGone())) return;
-  // The labels of the lines the session is shown, noted once it has them.
-  const shown = new Set<string>();
-  const label = (message: { id: string; sender: string }) => {
-    const each = labelFor(deps.state.state, chat, message);
-    shown.add(each);
-    return each;
-  };
+  const label = (message: { id: string; sender: string }) =>
+    labelFor(deps.state.state, chat, message);
   const lines = {
     store: deps.store,
     people: deps.people,
@@ -496,9 +488,6 @@ async function deliver(
       idle: 0,
       readAt: 0,
     });
-    // An interjecting delivery hears of what the session did up to now.
-    if (interjecting && session.woke !== null && session.woke <= now)
-      session.woke = null;
     if (link.kept !== null) {
       session.link = link.kept;
       if (link.given) link.kept.given = now;
@@ -519,7 +508,7 @@ async function deliver(
     labelAsk();
     const kept = await linkFor(existing.link);
     const told = tell(kept);
-    const text = followUp(claude.name, said, told, woke, heard);
+    const text = followUp(claude.name, said, told, heard, !existing.tags);
     // Noted before it goes, so its user event is known however soon it is read.
     const delivery = deliveryOf(text, request, now, interjecting);
     const drop = () => {
@@ -542,7 +531,7 @@ async function deliver(
       deps.sending.delete(id);
     }
     if (sent === "sent") {
-      give(existing, shown);
+      existing.tags = true;
       delivered(existing, id, thread.version, {
         kept,
         given: told?.upload !== undefined,
@@ -553,7 +542,6 @@ async function deliver(
         claude: claude.name,
         files: fileCount,
         interjecting,
-        woke,
       });
       return;
     }
@@ -570,7 +558,6 @@ async function deliver(
 
   // A new session: after an update or a gone one, with the old session's
   // dialogue and everything said since; otherwise the last messages here.
-  shown.clear();
   const carried =
     thread.carry === null ? "" : await dialogueOf(thread.carry, deps.api);
   const said =
@@ -609,16 +596,12 @@ async function deliver(
     waiting: true,
     since: now,
     nudged: false,
-    lastText: "",
     deliveries: [deliveryOf(prompt, request, now, interjecting)],
     link: null,
-    woke: null,
-    given: [],
+    tags: true,
     idle: 0,
     readAt: 0,
   };
-  // A carried dialogue shows the old session's lines too.
-  give(session, [...(before?.given ?? []), ...shown]);
   deps.state.state.sessions[id] = session;
   // Only one session reads a folder, so each file goes once, though the old
   // session may still answer after an update.

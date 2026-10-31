@@ -253,8 +253,6 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       store,
       giveUpMs: env.GIVE_UP_MS,
       now,
-      interjected,
-      interjectPerHour: env.INTERJECT_PER_HOUR,
       sending,
       asking,
       ...(env.ATTACHMENTS_BUCKET === undefined || aws === undefined

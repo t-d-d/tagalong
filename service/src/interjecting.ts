@@ -1,22 +1,16 @@
 // A Claude an owner set to interject in a chat (who-can-use-it.md). Once one
 // of the people who may ask it has spoken and the chat has been quiet for
 // INTERJECT_QUIET_MS, it is given what everyone said since it last heard,
-// with no request, and posts only when it has something to add.
-//
-// Its session waking by itself starts one too (cloud-sessions.md): what that
-// turn said is not posted, and the Claude is asked whether the chat should hear.
-// A turn that answers a line is posted at once instead (relay.ts), and counts
-// toward the same hourly limit.
+// with no request, and posts only when it has something to add. Nothing its
+// session does by itself starts one.
 //
 // Nothing waits in memory: what is waiting is read from the bridge's store,
-// after the time the Claude last heard, and a wake from state.json, so a
-// restart loses no delivery. Only the hourly count is in memory, like
-// MAX_PER_HOUR's.
+// after the time the Claude last heard, so a restart loses no delivery. Only
+// the hourly count is in memory, like MAX_PER_HOUR's.
 import { allowed } from "./access.ts";
 import { COMMAND } from "./commands.ts";
 import { errorFields, log } from "./log.ts";
 import { busy } from "./mailbox.ts";
-import { lastHour } from "./relay.ts";
 import { type RequestDeps, interjectingTurn } from "./requests.ts";
 import { threadKey } from "./state.ts";
 import { type MessageRow, timeOf } from "./store.ts";
@@ -31,14 +25,25 @@ export interface DueInput {
   perHour: number;
   /** Whether someone may ask this Claude here. */
   mayAsk: (sender: string) => boolean;
-  /** When a turn its session started by itself, not yet delivered on, ended. */
-  woke?: number | undefined;
+}
+
+const HOUR = 3_600_000;
+
+/** When interjecting deliveries went to a Claude in its chat in the last hour, the older times dropped. */
+function lastHour(
+  interjected: Map<string, number[]>,
+  key: string,
+  now: number,
+): number[] {
+  const hour = (interjected.get(key) ?? []).filter((at) => now - at < HOUR);
+  interjected.set(key, hour);
+  return hour;
 }
 
 /**
- * Whether an interjecting delivery is due. A person who may ask the Claude
- * starts one, or a turn its session started by itself: never a Claude's
- * answer, nor a command. It waits until the chat and the session are quiet.
+ * Whether an interjecting delivery is due. Only a person who may ask the
+ * Claude starts one: never a Claude's answer, a command, or its session's
+ * own turn. It waits until the chat has been quiet.
  */
 export function interjectDue(
   input: DueInput,
@@ -47,12 +52,9 @@ export function interjectDue(
     (row) =>
       !row.isFromMe && !COMMAND.test(row.content) && input.mayAsk(row.sender),
   );
-  if (!starts && input.woke === undefined) return "nothing";
+  if (!starts) return "nothing";
   const last = input.rows.at(-1);
-  const latest = Math.max(
-    last === undefined ? 0 : timeOf(last.timestamp),
-    input.woke ?? 0,
-  );
+  const latest = last === undefined ? 0 : timeOf(last.timestamp);
   if (input.now - latest < input.quietMs) return "talking";
   return input.hour.length >= input.perHour ? "capped" : "due";
 }
@@ -83,9 +85,6 @@ export async function interject(deps: InterjectDeps): Promise<void> {
       const hour = lastHour(deps.interjected, key, now);
       const on = state.interjecting[key] ?? 0;
       const from = Math.max(thread?.heard ?? 0, on);
-      // What the session did before interjecting was last turned on is dropped.
-      const woke =
-        session?.woke == null || session.woke < on ? undefined : session.woke;
       const { rows } = deps.store.since(group.jid, from, 200);
       const due = interjectDue({
         rows,
@@ -94,7 +93,6 @@ export async function interject(deps: InterjectDeps): Promise<void> {
         hour,
         perHour: deps.env.INTERJECT_PER_HOUR,
         mayAsk: (sender) => allowed(config, group, name, deps.people, sender),
-        woke,
       });
       if (due === "capped" && !deps.capped.has(key)) {
         deps.capped.add(key);
@@ -111,14 +109,7 @@ export async function interject(deps: InterjectDeps): Promise<void> {
       const last = rows.at(-1);
       const at = last === undefined ? now : timeOf(last.timestamp);
       try {
-        await interjectingTurn(
-          group.jid,
-          claude,
-          group,
-          at,
-          deps,
-          woke !== undefined,
-        );
+        await interjectingTurn(group.jid, claude, group, at, deps);
       } catch (error) {
         log.warn("interject-failed", {
           group: group.label,

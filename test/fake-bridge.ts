@@ -32,6 +32,8 @@ export interface FakeBridge {
   sent: z.infer<typeof sendSchema>[];
   reactions: z.infer<typeof reactSchema>[];
   connected: boolean;
+  /** How many of the next messages sent the bridge refuses with a 500. */
+  refusing: number;
   /** The bytes of each file sent, by its path, read as the bridge sends it. */
   files: Map<string, Buffer>;
   /**
@@ -54,7 +56,7 @@ export async function fakeBridge(
   const reactions: FakeBridge["reactions"] = [];
   const media: FakeBridge["media"] = new Map();
   const files: FakeBridge["files"] = new Map();
-  const state = { connected: true };
+  const state = { connected: true, refusing: 0 };
   const served = await serve((request) => {
     if (request.headers.authorization !== `Bearer ${BRIDGE_TOKEN}`)
       return { status: 401, body: { success: false } };
@@ -65,6 +67,10 @@ export async function fakeBridge(
           : { status: 503, body: { status: "disconnected", connected: false } };
       case "/api/send": {
         const message = sendSchema.parse(request.body);
+        if (state.refusing > 0) {
+          state.refusing -= 1;
+          return { status: 500, body: { success: false } };
+        }
         sent.push(message);
         if (message.media_path !== undefined)
           files.set(message.media_path, readFileSync(message.media_path));
@@ -98,6 +104,12 @@ export async function fakeBridge(
     },
     set connected(value: boolean) {
       state.connected = value;
+    },
+    get refusing() {
+      return state.refusing;
+    },
+    set refusing(value: number) {
+      state.refusing = value;
     },
     media,
     files,
