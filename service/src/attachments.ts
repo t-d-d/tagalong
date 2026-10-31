@@ -23,6 +23,10 @@ export const LIMITS = {
 
 const MEDIA = new Set(["image", "video", "audio", "document", "sticker"]);
 
+/** Media a person sent who may ask the Claude, not the device's own. */
+const passable = (row: MessageRow, mayAsk: (sender: string) => boolean) =>
+  MEDIA.has(row.mediaType) && !row.isFromMe && mayAsk(row.sender);
+
 export interface Attachment {
   name: string;
   type: string;
@@ -54,9 +58,9 @@ export interface Pick {
 export function pickMedia(pick: Pick): MessageRow[] {
   const ok = (row: MessageRow | undefined): row is MessageRow =>
     row !== undefined &&
-    MEDIA.has(row.mediaType) &&
-    !row.isFromMe &&
-    allowed(pick.config, pick.group, pick.claude, pick.people, row.sender);
+    passable(row, (sender) =>
+      allowed(pick.config, pick.group, pick.claude, pick.people, sender),
+    );
   const own = pick.store.message(pick.chat, pick.messageId);
   const quoted = pick.store.message(pick.chat, pick.quotedMessageId);
   const recent = pick.store
@@ -69,6 +73,24 @@ export function pickMedia(pick: Pick): MessageRow[] {
   const rows = [quoted, ...recent, own].filter(ok);
   const unique = [...new Map(rows.map((row) => [row.id, row])).values()];
   return unique.slice(-LIMITS.files);
+}
+
+/**
+ * Which media an interjecting delivery carries: what the people who may ask
+ * the Claude sent in `rows`, the messages since it last heard, not yet given
+ * to it. The latest five, as for a request.
+ */
+export function heardMedia(
+  rows: MessageRow[],
+  heard: {
+    mayAsk: (sender: string) => boolean;
+    /** Media already given to this Claude. */
+    sent: { has(id: string): boolean };
+  },
+): MessageRow[] {
+  return rows
+    .filter((row) => passable(row, heard.mayAsk) && !heard.sent.has(row.id))
+    .slice(-LIMITS.files);
 }
 
 const TYPES: Record<string, string> = {

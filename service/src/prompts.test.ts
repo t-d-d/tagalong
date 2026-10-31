@@ -175,6 +175,41 @@ describe("prompts", () => {
     expect(first).not.toContain("asks you, @podstow");
   });
 
+  it("gives an interjecting Claude the files people sent since it last heard, with a voice note's transcript", () => {
+    const note = {
+      name: "audio_1.ogg",
+      type: "audio/ogg",
+      bytes: 1024,
+      url: "https://bucket.test/n?sig",
+      transcript: "the CI broke again",
+    };
+    const heard =
+      "\nFiles sent in the chat since you last heard from it, each a link that works for an hour. Download one with curl -fsSL -o <name> '<link>', then read it:\n" +
+      `- audio_1.ogg (audio/ogg, 1 KB): https://bucket.test/n?sig\n  Transcript, by speech recognition, so it may have errors: "the CI broke again"\n`;
+    const later = followUp(
+      "podstow",
+      "[m6] 10-18 18:00 Sam: [audio]",
+      undefined,
+      false,
+      [note],
+    );
+    expect(later).toContain("Nobody asked you");
+    expect(later).toContain(heard);
+    expect(
+      followUp("podstow", "[m6] 10-18 18:00 Sam: hm", undefined),
+    ).not.toContain("Files sent");
+    const first = firstPrompt({
+      claude: claude("read-only"),
+      chatName: "Side projects",
+      carried: "",
+      others: [],
+      conversation: "[m6] 10-18 18:00 Sam: [audio]",
+      ask: undefined,
+      files: [note],
+    });
+    expect(first).toContain(heard);
+  });
+
   it("gives a Claude one short command to send a file, with its session's link", () => {
     const link =
       "https://abc.execute-api.example.test/up/Zk3q9xT0aB4mN7pR2sV5wY8c/";
