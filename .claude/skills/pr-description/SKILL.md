@@ -34,8 +34,9 @@ ask whose link is not https", not "Fix link validation".
 A closing word stays out of the title wherever it would sit directly
 before an issue reference. The merge commit's message carries the title,
 and GitHub closes that issue when the commit reaches main. Write "Repair
-the retry path #30 reported", not "Fix #30 retry path". Closing words
-and issue references are the ones the *Body* section names.
+the retry path #30 reported", not "Fix #30 retry path" or "fix: #30
+retry path". Closing words and issue references are the ones the *Body*
+section names, and a colon after the closing word still counts.
 
 ## Body
 

@@ -97,8 +97,8 @@ order.
 ## The answer
 
 `pass`, or `fail` with the first failed test's number, one sentence saying
-what the body would need to say to meet it, and whether any edit to the
-body can make the pull request pass.
+what the title or body would need to say to meet it, and whether any edit
+to the title or body can make the pull request pass.
 
 ## By hand
 
