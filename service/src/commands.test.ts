@@ -47,6 +47,14 @@ describe("commandIn", () => {
     expect(COMMAND.test("@claude interject brainstorm off")).toBe(true);
   });
 
+  it("reads set as a verb", () => {
+    expect(commandIn("@claude set interjecting read-only", self)).toEqual({
+      verb: "set",
+      args: "interjecting read-only",
+    });
+    expect(commandIn("@claude settings", self)).toBeNull();
+  });
+
   it("ignores a verb addressed to someone else, or not at the start", () => {
     expect(commandIn("@447700900002 add podstow", self)).toBeNull();
     expect(commandIn("can you @claude add this", self)).toBeNull();

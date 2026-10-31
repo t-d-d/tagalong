@@ -1457,6 +1457,7 @@ describe("commands", () => {
         "",
         "Owners can ask them all: Thomas",
         "Others you can add: brainstorm, critic",
+        "Interjecting: any Claude an owner sets",
         "",
         "Only owners can ask @reviewer and @podstow until you allow someone: `@claude allow @Name reviewer`",
       ].join("\n"),
@@ -1524,7 +1525,7 @@ describe("commands", () => {
     await says(t, "c4", OWNER, "@claude undefine @podstow");
     expect(t.groupsFile().claudes?.podstow).toBeUndefined();
     expect(t.bridge.sent.at(-1)?.message).toBe(
-      "Undefined @podstow, and forgot its conversations.\n\nDefined Claudes:\n*@brainstorm*: o/kickoff, read-only, default environment\n*@critic*: o/critic, read-only, default environment",
+      "Undefined @podstow, and forgot its conversations.\n\nDefined Claudes:\n*@brainstorm*: o/kickoff, read-only, default environment\n*@critic*: o/critic, read-only, default environment\nInterjecting: any Claude an owner sets",
     );
 
     await says(t, "c5", OWNER, "@claude define podstow o/r read-write");
@@ -1702,6 +1703,7 @@ describe("commands", () => {
       "@claude allow @",
       "@claude revoke @",
       "@claude interject podstow on",
+      "@claude set interjecting read-only",
       "@claude update podstow",
       "@claude fresh podstow",
       "@claude who",

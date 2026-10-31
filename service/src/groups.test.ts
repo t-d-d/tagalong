@@ -84,6 +84,38 @@ describe("groups.json", () => {
     );
   });
 
+  it("keeps interjecting to read-only Claudes when the file says so, whatever a chat says", () => {
+    const file = {
+      claudes: {
+        podstow: { repo: "o/podstow", access: "read-write" as const },
+        brainstorm: { repo: "o/kickoff", access: "read-only" as const },
+      },
+      groups: {
+        [GROUP]: {
+          claudes: {
+            podstow: { members: [], interjecting: true },
+            brainstorm: { members: [], interjecting: true },
+          },
+        },
+      },
+    };
+    const all = toConfig(parseFile(file), []);
+    expect(all.interjecting).toBe("all");
+    expect(all.groups.get(GROUP)?.interjecting).toEqual([
+      "podstow",
+      "brainstorm",
+    ]);
+    const readOnly = toConfig(
+      parseFile({ ...file, interjecting: "read-only" }),
+      [],
+    );
+    expect(readOnly.interjecting).toBe("read-only");
+    expect(readOnly.groups.get(GROUP)?.interjecting).toEqual(["brainstorm"]);
+    expect(() => parseFile({ interjecting: "some" })).toThrow(
+      /"interjecting"/u,
+    );
+  });
+
   it("turns a group from before named Claudes into a Claude named after its repo", () => {
     const file = parseFile({
       groups: {

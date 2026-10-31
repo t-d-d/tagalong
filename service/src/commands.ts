@@ -18,8 +18,10 @@ import {
   type GroupsStore,
   claudeSchema,
   isAccess,
+  isInterjecting,
   isName,
   withoutGroup,
+  withoutReadWriteInterjecting,
 } from "./groups.ts";
 import { CommandError, errorFields, log } from "./log.ts";
 import { type People, userPart } from "./people.ts";
@@ -36,6 +38,7 @@ export const VERBS = [
   "allow",
   "revoke",
   "interject",
+  "set",
   "fresh",
   "update",
   "stop",
@@ -44,7 +47,7 @@ export type Verb = (typeof VERBS)[number];
 
 /** A message that is a command, whoever sent it: "@claude <verb> …" or a mention of the number. */
 export const COMMAND =
-  /^\s*@(claude|\d{6,})\b[\s,:]*(help|who|add|remove|define|undefine|allow|revoke|interject|fresh|update|stop)\b(.*)$/isu;
+  /^\s*@(claude|\d{6,})\b[\s,:]*(help|who|add|remove|define|undefine|allow|revoke|interject|set|fresh|update|stop)\b(.*)$/isu;
 export const FRESH_MS = 10 * 60_000;
 
 export interface Command {
@@ -138,6 +141,19 @@ const namesIn = (args: string, keywords: string[] = []): string[] => [
 /** The word that adds a Claude already interjecting: `@claude add brainstorm interjecting`. */
 const INTERJECTING = "interjecting";
 
+/** What `who` says of the catalogue-wide interjecting setting. */
+const interjectingLine = (config: Config): string =>
+  config.interjecting === "read-only"
+    ? "Interjecting: read-only Claudes only"
+    : "Interjecting: any Claude an owner sets";
+
+/** Why a Claude may not be set to interject, or undefined if it may. */
+function mayNotInterject(config: Config, name: string): string | undefined {
+  if (config.interjecting === "all") return undefined;
+  if (config.claudes.get(name)?.access !== "read-write") return undefined;
+  return `only read-only Claudes may interject, and @${name} can change a repo. \`@claude set interjecting all\` lets every Claude interject.`;
+}
+
 /** One line about a Claude: its repo, access, environment, ref and model. */
 export function line(claude: Claude, api: ClaudeApi): string {
   const extras = [
@@ -202,6 +218,7 @@ export function describe(
     "",
     `Owners can ask them all: ${owners.join(", ")}`,
     ...(others.length > 0 ? [`Others you can add: ${others.join(", ")}`] : []),
+    interjectingLine(config),
   ].join("\n");
 }
 
@@ -211,6 +228,7 @@ const catalogue = (config: Config, api: ClaudeApi): string =>
     : [
         "Defined Claudes:",
         ...[...config.claudes.values()].map((claude) => line(claude, api)),
+        interjectingLine(config),
       ].join("\n");
 
 /** The catalogue entry `define` asks for, on top of the current one. */
@@ -286,6 +304,7 @@ const help = async (
     "@claude allow @",
     "@claude revoke @",
     `@claude interject ${group?.claudes[0] ?? "podstow"} on`,
+    `@claude set interjecting ${config.interjecting === "all" ? "read-only" : "all"}`,
     `@claude update ${group?.claudes[0] ?? "podstow"}`,
     `@claude fresh ${group?.claudes[0] ?? "podstow"}`,
     "@claude who",
@@ -317,6 +336,25 @@ function stopInterjecting(
     ),
   );
   deps.state.save();
+}
+
+/**
+ * Stop every read-write Claude interjecting, in every chat, when only
+ * read-only Claudes may. Returns the names it stopped.
+ */
+function keepToReadOnly(
+  deps: CommandDeps,
+  mutate: (file: GroupsFile) => GroupsFile,
+): string[] {
+  let stopped: { chat: string; claude: string }[] = [];
+  deps.groups.update((file) => {
+    const kept = withoutReadWriteInterjecting(mutate(file));
+    stopped = kept.stopped;
+    return kept.file;
+  });
+  for (const { chat, claude } of stopped)
+    stopInterjecting(deps, chat, [claude]);
+  return [...new Set(stopped.map(({ claude }) => claude))];
 }
 
 /** A group chat's JID ends @g.us; anything else is a one-to-one chat. */
@@ -375,11 +413,11 @@ export async function runCommand(
           deps.groups.config.defaultEnvironment,
           deps.api,
         );
-        const config = deps.groups.update((file) => ({
+        const stopped = keepToReadOnly(deps, (file) => ({
           ...file,
           claudes: { ...file.claudes, [name]: entry },
         }));
-        const defined = config.claudes.get(name);
+        const defined = deps.groups.config.claudes.get(name);
         if (defined === undefined)
           throw new CommandError("the definition did not stick");
         // Running conversations keep the version they started on, until
@@ -387,7 +425,7 @@ export async function runCommand(
         await reply(
           current === undefined
             ? `Defined.\n${line(defined, deps.api)}\n\nAdd it to a group with \`@claude add ${name}\` there.`
-            : `Updated.\n${line(defined, deps.api)}\n\nChats already talking to @${name} keep the old version until \`@claude update ${name}\` there.`,
+            : `Updated.\n${line(defined, deps.api)}\n\nChats already talking to @${name} keep the old version until \`@claude update ${name}\` there.${stopped.length > 0 ? `\n\n@${name} stopped interjecting, since only read-only Claudes may.` : ""}`,
         );
         return;
       }
@@ -451,6 +489,10 @@ export async function runCommand(
           throw new CommandError(
             `Set one Claude at a time to interject: \`@claude add ${names[0] ?? ""} interjecting\``,
           );
+        const refused = interjecting
+          ? mayNotInterject(deps.groups.config, names[0] ?? "")
+          : undefined;
+        if (refused !== undefined) throw new CommandError(refused);
         // A one-to-one chat's name is a person's, so it is never a label (logging.md).
         const label = isGroupChat(chat)
           ? (deps.store.chatName(chat) ?? group?.label ?? chat)
@@ -567,6 +609,10 @@ export async function runCommand(
           );
         if (on === off)
           throw new CommandError(`On or off? \`@claude interject ${name} on\``);
+        const refused = on
+          ? mayNotInterject(deps.groups.config, name)
+          : undefined;
+        if (refused !== undefined) throw new CommandError(refused);
         deps.groups.update((file) => {
           const entry = entryOf(file, chat);
           const askers = entry?.claudes[name];
@@ -595,6 +641,32 @@ export async function runCommand(
           on
             ? `@${name} interjects here now: it chips in when it has something to add.`
             : `@${name} answers only when asked here now.`,
+        );
+        return;
+      }
+      case "set": {
+        const [setting, value] = tokens(command.args).map((word) =>
+          word.toLowerCase(),
+        );
+        if (
+          setting !== INTERJECTING ||
+          value === undefined ||
+          !isInterjecting(value)
+        )
+          throw new CommandError(
+            "Which? `@claude set interjecting read-only` or `@claude set interjecting all`",
+          );
+        // Setting it back to all turns nothing back on.
+        const stopped = keepToReadOnly(deps, (file) => {
+          if (value === "read-only") return { ...file, interjecting: value };
+          const rest = { ...file };
+          delete rest.interjecting;
+          return rest;
+        });
+        await reply(
+          value === "all"
+            ? "Any Claude may interject now. None was turned back on: `@claude interject <name> on` in a chat."
+            : `Only read-only Claudes may interject now.${stopped.length > 0 ? ` ${stopped.map((name) => `@${name}`).join(" and ")} stopped interjecting.` : ""}`,
         );
         return;
       }
