@@ -86,6 +86,10 @@ app() {
   bridge_uri=$(output tagalong-images BridgeRepositoryUri)
   app_uri=$(output tagalong-images AppRepositoryUri)
   aws ecr get-login-password | docker login --username AWS --password-stdin "${bridge_uri%%/*}"
+  # The base images come from ECR Public, which holds anonymous pulls to a
+  # lower limit, counted by address and shared by GitHub's runners (#33).
+  # Its login is issued only in us-east-1, whatever the stack's region.
+  aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
 
   local bridge_image app_image
   bridge_image=$(image "$bridge_uri" "$(hash_of images/bridge.Dockerfile images/bridge-start.sh images/bridge.patch)" images/bridge.Dockerfile)

@@ -32,6 +32,12 @@ describe("fitness: a failed deploy says why (repo-and-delivery.md)", () => {
     );
   });
 
+  it("logs in to ECR Public before the builds, so base image pulls are not held to the anonymous limit (#33)", () => {
+    expect(script).toMatch(
+      /aws ecr-public get-login-password --region us-east-1 \| docker login --username AWS --password-stdin public\.ecr\.aws\n(?:.*\n)*?\s*bridge_image=\$\(image /u,
+    );
+  });
+
   it("says which image failed to build or push, in the log and the run's summary", () => {
     expect(script).toMatch(
       /docker build [^\n]*\|\| \{ echo "[^"]*\$repo:\$tag[^"]*" \| tee -a "\$summary" >&2; return 1; \}/u,
