@@ -98,6 +98,9 @@ describe("state.json on disk", () => {
         },
       ],
       link: { id: "Zk3q9xT0aB4mN7pR2sV5wY8c", given: 1, sent: ["k1"] },
+      woke: 3,
+      idle: 2,
+      readAt: 4,
     };
     state.state.sentMedia.push(
       ...Array.from({ length: 600 }, (_, index) => `m${String(index)}`),
@@ -107,6 +110,8 @@ describe("state.json on disk", () => {
     expect(again.state.sessions.abc12345?.cursor).toBe("4");
     expect(again.state.sessions.abc12345?.deliveries[0]?.uuid).toBe("u1");
     expect(again.state.sessions.abc12345?.link?.sent).toEqual(["k1"]);
+    // A wake not yet delivered on survives a restart (cloud-sessions.md).
+    expect(again.state.sessions.abc12345?.woke).toBe(3);
     expect(again.state.sentMedia).toHaveLength(500);
     expect(again.state.sentMedia.at(-1)).toBe("m599");
   });

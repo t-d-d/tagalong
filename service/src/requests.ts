@@ -242,7 +242,8 @@ export const interjectingTurn = (
   group: Group,
   at: number,
   deps: RequestDeps,
-): Promise<void> => turn(chat, claude, group, deps, undefined, at);
+  woke = false,
+): Promise<void> => turn(chat, claude, group, deps, undefined, at, woke);
 
 /** One Claude's turn: into its running session, or a new one. With nothing asked, an interjecting one. */
 async function turn(
@@ -252,6 +253,7 @@ async function turn(
   deps: RequestDeps,
   asked: { payload: Payload; request: Request } | undefined,
   heardUpTo?: number,
+  woke = false,
 ): Promise<void> {
   const now = deps.now();
   const interjecting = asked === undefined;
@@ -352,7 +354,17 @@ async function turn(
     version: string,
     link: { kept: Link | null; given: boolean },
   ) => {
-    Object.assign(session, { waiting: true, since: now, nudged: false });
+    // Read every POLL_MS until it answers, then from a minute again.
+    Object.assign(session, {
+      waiting: true,
+      since: now,
+      nudged: false,
+      idle: 0,
+      readAt: 0,
+    });
+    // An interjecting delivery hears of what the session did up to now.
+    if (interjecting && session.woke !== null && session.woke <= now)
+      session.woke = null;
     if (link.kept !== null) {
       session.link = link.kept;
       if (link.given) link.kept.given = now;
@@ -373,7 +385,7 @@ async function turn(
     labelAsk();
     const kept = await linkFor(existing.link);
     const told = tell(kept);
-    const text = followUp(claude.name, said, told);
+    const text = followUp(claude.name, said, told, woke);
     // Noted before it goes, so its user event is known however soon it is read.
     const delivery = deliveryOf(text, request, now, interjecting);
     const drop = () => {
@@ -406,6 +418,7 @@ async function turn(
         claude: claude.name,
         files: ask?.files.length ?? 0,
         interjecting,
+        woke,
       });
       return;
     }
@@ -462,6 +475,9 @@ async function turn(
     lastText: "",
     deliveries: [deliveryOf(prompt, request, now, interjecting)],
     link: null,
+    woke: null,
+    idle: 0,
+    readAt: 0,
   };
   deps.state.state.sessions[id] = session;
   // Only one session reads a folder, so each file goes once, though the old

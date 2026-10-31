@@ -2,6 +2,10 @@
 // (cloud-sessions.md). A session is read from its first delivery until it has
 // had no delivery and no result for GIVE_UP_MS. Every result is posted unless
 // it answers only messages given from elsewhere, such as Claude Desktop.
+//
+// An interjecting Claude's session is read until it ends, less often the
+// longer it is idle, and a turn it starts by itself is not posted: the next
+// interjecting delivery asks the Claude whether the chat should hear of it.
 import type { Aws } from "./aws.ts";
 import type { Bridge, Quote } from "./bridge.ts";
 import { type ClaudeApi, textOf } from "./claude-api.ts";
@@ -24,6 +28,7 @@ import {
   type SessionState,
   type StateStore,
   eyesKey,
+  threadKey,
   unsee,
 } from "./state.ts";
 import type { WhatsAppStore } from "./store.ts";
@@ -57,12 +62,38 @@ const latestAsk = (deliveries: Delivery[]): Quote | undefined =>
 /** How many answered deliveries a session keeps. */
 const KEPT = 20;
 
+const MINUTE = 60_000;
+const GAPS = [1, 2, 5, 10, 30].map((minutes) => minutes * MINUTE);
+
+/** The wait before an idle interjecting session's next read, after `idle` reads that found nothing. */
+export const readGap = (idle: number): number =>
+  GAPS[Math.min(idle, GAPS.length - 1)] ?? 30 * MINUTE;
+
+/**
+ * Whether this is an interjecting Claude's running session in its chat, read
+ * until it ends. A session update or fresh replaced is not.
+ */
+function interjecting(
+  id: string,
+  session: SessionState,
+  deps: Pick<RelayDeps, "groups" | "state">,
+): boolean {
+  const group = deps.groups.config.groups.get(session.chat);
+  return (
+    group !== undefined &&
+    group.interjecting.includes(session.claude) &&
+    deps.state.state.threads[threadKey(session.chat, session.claude)]
+      ?.session === id
+  );
+}
+
 /** Look at one session; post what each turn that ended says. */
 export async function check(
   id: string,
   session: SessionState,
   deps: RelayDeps,
 ): Promise<void> {
+  const own = interjecting(id, session, deps);
   const { events, cursor } = await deps.api.eventsAfter(id, session.cursor);
   session.cursor = cursor;
   const ended: { text: string; uuids: string[]; failed: boolean }[] = [];
@@ -99,6 +130,13 @@ export async function check(
       for (const delivery of answers) delivery.answered = true;
       continue;
     }
+    // A turn an interjecting Claude's session started by itself is not
+    // posted: the Claude is asked about it once things are quiet.
+    if (own && answers !== null && answers.length === 0) {
+      session.woke = deps.now();
+      log.info("session-woke", { session: id });
+      continue;
+    }
     if (answers !== null) {
       await post(id, session, turn.text, answers, deps);
       continue;
@@ -114,7 +152,8 @@ export async function check(
   if (ended.length > 0) session.since = deps.now();
   else if (busy(session)) await waitOn(id, session, deps);
   const now = deps.now();
-  if (!busy(session) && now - session.since > deps.giveUpMs)
+  if (own) await schedule(id, session, events.length, ended.length, deps);
+  else if (!busy(session) && now - session.since > deps.giveUpMs)
     session.waiting = false;
   // Every delivery still waiting is kept, and the latest answered ones, so
   // a late answer to one given up on still finds it.
@@ -123,6 +162,40 @@ export async function check(
   session.deliveries = session.deliveries.filter(
     (delivery) => !old.has(delivery),
   );
+}
+
+/**
+ * An interjecting Claude's session after a read: read every POLL_MS while a
+ * delivery waits, and once none does, after a gap that grows while nothing
+ * happens. Its status is checked when idle, since an archived or failed
+ * session takes no more turns.
+ */
+async function schedule(
+  id: string,
+  session: SessionState,
+  read: number,
+  ended: number,
+  deps: RelayDeps,
+): Promise<void> {
+  if (busy(session)) {
+    session.idle = 0;
+    session.readAt = 0;
+    return;
+  }
+  if (read === 0) {
+    const { status } = await deps.api.record(id);
+    // Read once more, so a turn that ended since is not lost.
+    if (
+      (status === "archived" || status === "failed") &&
+      (await deps.api.eventsAfter(id, session.cursor)).events.length === 0
+    ) {
+      session.waiting = false;
+      return;
+    }
+  }
+  if (ended > 0) session.idle = 0;
+  session.readAt = deps.now() + readGap(session.idle);
+  session.idle += 1;
 }
 
 /** A busy session that ended no turn since the last look. */
@@ -301,6 +374,13 @@ export async function poll(deps: RelayDeps): Promise<void> {
         deps.sending.has(id) ||
         group === undefined ||
         (session.claude !== "" && !group.claudes.includes(session.claude))
+      )
+        continue;
+      // An idle interjecting session waits for its next read.
+      if (
+        !busy(session) &&
+        deps.now() < session.readAt &&
+        interjecting(id, session, deps)
       )
         continue;
       try {

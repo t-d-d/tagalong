@@ -3,9 +3,13 @@
 // may ask it said since it last heard, with no request, and posts only when
 // it has something to add.
 //
+// Its session waking by itself starts one too (cloud-sessions.md): what that
+// turn said is not posted, and the Claude is asked whether the chat should hear.
+//
 // Nothing waits in memory: what is waiting is read from the bridge's store,
-// after the time the Claude last heard, so a restart loses no delivery. Only
-// the hourly count is in memory, like MAX_PER_HOUR's.
+// after the time the Claude last heard, and a wake from state.json, so a
+// restart loses no delivery. Only the hourly count is in memory, like
+// MAX_PER_HOUR's.
 import { allowed } from "./access.ts";
 import { COMMAND } from "./commands.ts";
 import { errorFields, log } from "./log.ts";
@@ -26,11 +30,14 @@ export interface DueInput {
   perHour: number;
   /** Whether someone may ask this Claude here. */
   mayAsk: (sender: string) => boolean;
+  /** When a turn its session started by itself, not yet delivered on, ended. */
+  woke?: number | undefined;
 }
 
 /**
- * Whether an interjecting delivery is due. Only a person who may ask the Claude
- * starts one: never a Claude's answer, nor a command.
+ * Whether an interjecting delivery is due. A person who may ask the Claude
+ * starts one, or a turn its session started by itself: never a Claude's
+ * answer, nor a command. It waits until the chat and the session are quiet.
  */
 export function interjectDue(
   input: DueInput,
@@ -39,10 +46,13 @@ export function interjectDue(
     (row) =>
       !row.isFromMe && !COMMAND.test(row.content) && input.mayAsk(row.sender),
   );
-  if (!starts) return "nothing";
+  if (!starts && input.woke === undefined) return "nothing";
   const last = input.rows.at(-1);
-  if (last !== undefined && input.now - timeOf(last.timestamp) < input.quietMs)
-    return "talking";
+  const latest = Math.max(
+    last === undefined ? 0 : timeOf(last.timestamp),
+    input.woke ?? 0,
+  );
+  if (input.now - latest < input.quietMs) return "talking";
   return input.hour.length >= input.perHour ? "capped" : "due";
 }
 
@@ -73,7 +83,11 @@ export async function interject(deps: InterjectDeps): Promise<void> {
         (at) => now - at < HOUR,
       );
       deps.interjected.set(key, hour);
-      const from = Math.max(thread?.heard ?? 0, state.interjecting[key] ?? 0);
+      const on = state.interjecting[key] ?? 0;
+      const from = Math.max(thread?.heard ?? 0, on);
+      // What the session did before interjecting was last turned on is dropped.
+      const woke =
+        session?.woke == null || session.woke < on ? undefined : session.woke;
       const { rows } = deps.store.since(group.jid, from, 200);
       const due = interjectDue({
         rows,
@@ -82,6 +96,7 @@ export async function interject(deps: InterjectDeps): Promise<void> {
         hour,
         perHour: deps.env.INTERJECT_PER_HOUR,
         mayAsk: (sender) => allowed(config, group, name, deps.people, sender),
+        woke,
       });
       if (due === "capped" && !deps.capped.has(key)) {
         deps.capped.add(key);
@@ -98,7 +113,14 @@ export async function interject(deps: InterjectDeps): Promise<void> {
       const last = rows.at(-1);
       const at = last === undefined ? now : timeOf(last.timestamp);
       try {
-        await interjectingTurn(group.jid, claude, group, at, deps);
+        await interjectingTurn(
+          group.jid,
+          claude,
+          group,
+          at,
+          deps,
+          woke !== undefined,
+        );
       } catch (error) {
         log.warn("interject-failed", {
           group: group.label,

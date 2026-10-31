@@ -14,7 +14,8 @@ import {
   OWNER,
   STRANGER,
 } from "../../test/bridge-db.ts";
-import { result } from "../../test/fake-claude-api.ts";
+import { result, selfStarted } from "../../test/fake-claude-api.ts";
+import { z } from "zod";
 import type { GroupsFile } from "./groups.ts";
 
 const SESSION = "01SessionAaaaaaaaaaaaaaa";
@@ -367,5 +368,166 @@ describe("an interjecting Claude whose turn fails", () => {
     await quiet(t);
     await poll(t);
     expect(t.bridge.sent).toEqual([]);
+  });
+});
+
+const MINUTE = 60_000;
+
+/** brainstorm interjecting, its session answered and idle, read again in a minute. */
+async function answered(t: Harness) {
+  t.fake.launches.push(SESSION);
+  started(t, SESSION, [result("PASS")]);
+  await says(t, "m1", MEMBER, "we could build a recipe app");
+  await quiet(t);
+  await poll(t);
+  expect(t.bridge.sent).toEqual([]);
+}
+
+/** A turn the session starts by itself, and what it answers the next delivery. */
+function wakes(t: Harness, text: string, answer?: string) {
+  const session = t.api.sessions.get(SESSION);
+  session?.events.push(selfStarted(text));
+  if (answer !== undefined) session?.replies?.push([result(answer)]);
+}
+
+/** How many times the session's events have been read. */
+const reads = (t: Harness) =>
+  t.api.served.requests.filter(
+    (request) => request.path === `/v1/code/sessions/cse_${SESSION}/events`,
+  ).length;
+
+async function after(t: Harness, ms: number) {
+  t.clock.now += ms;
+  await t.app.pollOnce();
+}
+
+const sessionState = (t: Harness): unknown =>
+  z.object({ sessions: z.record(z.string(), z.unknown()) }).parse(t.stateFile())
+    .sessions[SESSION];
+
+describe("an interjecting Claude's own session (cloud-sessions.md)", () => {
+  it("does not post a turn its session starts by itself, and asks it once both are quiet", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    await answered(t);
+    wakes(t, "Merged and deployed the fix.", "The recipe fix is live.");
+    await after(t, MINUTE);
+    expect(t.bridge.sent).toEqual([]);
+
+    t.clock.now += QUIET - 5000;
+    await t.app.interjectOnce();
+    expect(followUps(t)).toEqual([]);
+
+    await quiet(t);
+    expect(followUps(t)).toHaveLength(1);
+    const input = followUps(t)[0]?.options.input ?? "";
+    expect(input).toContain("Nothing new was said in the chat");
+    expect(input).toContain("was not posted");
+    expect(input).toContain("Nobody asked you");
+    await poll(t);
+    expect(t.bridge.sent).toEqual([
+      { recipient: GROUP, message: "*brainstorm:* The recipe fix is live." },
+    ]);
+    expect(t.bridge.reactions).toEqual([]);
+
+    // Its answer is not activity, and nothing new happened in the chat.
+    await after(t, MINUTE);
+    await quiet(t);
+    await quiet(t);
+    expect(followUps(t)).toHaveLength(1);
+  });
+
+  it("carries what people said since, and a pass posts nothing", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    await answered(t);
+    wakes(t, "Fixed a failing check.", "PASS");
+    await after(t, MINUTE);
+    await says(t, "m2", MEMBER, "maybe add a shopping list");
+    await quiet(t);
+    expect(followUps(t)).toHaveLength(1);
+    const input = followUps(t)[0]?.options.input ?? "";
+    expect(input).toContain("Ollie: maybe add a shopping list");
+    expect(input).not.toContain("Nothing new was said");
+    expect(input).toContain("was not posted");
+    await poll(t);
+    expect(t.bridge.sent).toEqual([]);
+  });
+
+  it("counts toward INTERJECT_PER_HOUR, and the wake waits for the next delivery", async () => {
+    const t = (h = await harness({
+      groups: interjecting(),
+      env: { INTERJECT_PER_HOUR: "1" },
+    }));
+    await answered(t);
+    wakes(t, "Merged and deployed the fix.", "PASS");
+    await after(t, MINUTE);
+    await quiet(t);
+    expect(followUps(t)).toEqual([]);
+
+    t.clock.now += 3_600_000;
+    await t.app.interjectOnce();
+    expect(followUps(t)).toHaveLength(1);
+    expect(followUps(t)[0]?.options.input).toContain("was not posted");
+  });
+
+  it("is read with no time limit, backing off to every 30 minutes, and from 1 minute again after a turn", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    await answered(t);
+    for (const minutes of [1, 2, 5, 10, 30, 30, 30]) {
+      const before = reads(t);
+      await after(t, minutes * MINUTE - 1000);
+      expect(reads(t)).toBe(before);
+      await after(t, 1000);
+      expect(reads(t)).toBe(before + 1);
+    }
+    for (let each = 0; each < 10; each += 1) await after(t, 30 * MINUTE);
+    expect(t.clock.now).toBeGreaterThan(t.env.GIVE_UP_MS * 3);
+
+    wakes(t, "Merged and deployed the fix.", "The recipe fix is live.");
+    await after(t, 30 * MINUTE);
+    const woke = reads(t);
+    await after(t, MINUTE - 1000);
+    expect(reads(t)).toBe(woke);
+    await after(t, 1000);
+    expect(reads(t)).toBe(woke + 1);
+    await quiet(t);
+    expect(followUps(t)).toHaveLength(1);
+  });
+
+  it("stops being read once the idle session is archived", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    await answered(t);
+    const session = t.api.sessions.get(SESSION);
+    if (session !== undefined) session.status = "archived";
+    await after(t, MINUTE);
+    expect(sessionState(t)).toMatchObject({ waiting: false });
+    const before = reads(t);
+    for (let each = 0; each < 4; each += 1) await after(t, 30 * MINUTE);
+    expect(reads(t)).toBe(before);
+  });
+
+  it("goes back to GIVE_UP_MS, and posts a turn it starts by itself, once interjecting is off", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    await answered(t);
+    await says(t, "c1", OWNER, "@claude interject brainstorm off");
+    wakes(t, "The backfill finished.");
+    await poll(t);
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "*brainstorm:* The backfill finished.",
+    );
+
+    await after(t, t.env.GIVE_UP_MS + 1);
+    const before = reads(t);
+    await after(t, 30 * MINUTE);
+    expect(reads(t)).toBe(before);
+  });
+
+  it("goes back to GIVE_UP_MS once fresh replaces its session", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    await answered(t);
+    await says(t, "c1", OWNER, "@claude fresh brainstorm");
+    await after(t, t.env.GIVE_UP_MS + 1);
+    const before = reads(t);
+    await after(t, 30 * MINUTE);
+    expect(reads(t)).toBe(before);
   });
 });
