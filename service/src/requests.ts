@@ -98,7 +98,7 @@ export function repliedTo(
   return quoted === undefined ? undefined : answerBy(quoted);
 }
 
-/** Files picked for one delivery, and how to hand back those passed on if it never reaches the session. */
+/** Files picked for one delivery, and how to hand back those passed on if it never reaches the session; the caller saves. */
 interface Given {
   files: Attachment[];
   release: () => void;
@@ -119,7 +119,7 @@ function givenTo(claude: string, deps: RequestDeps) {
       // A request's own message or the one it replies to can have been given before.
       const fresh = rows.filter((row) => !given.has(key(row.id)));
       if (rows.length === 0) return none();
-      // Counted before the upload, so a turn alongside does not pick them too.
+      // Counted now; any that are not passed on are taken off again below.
       deps.state.state.sentMedia.push(...fresh.map((row) => key(row.id)));
       const shared = await shareMedia(rows, {
         bridge: deps.bridge,
@@ -138,13 +138,13 @@ function givenTo(claude: string, deps: RequestDeps) {
       };
       // One the bridge never handed over whole, or that failed, was not given.
       const kept = new Set([...shared.passed, ...shared.tooLarge]);
-      forget(new Set(rows.map((row) => row.id).filter((id) => !kept.has(id))));
+      forget(new Set(fresh.map((row) => row.id).filter((id) => !kept.has(id))));
+      // One too large stays counted: it is never offered again.
+      const passed = new Set(shared.passed);
       return {
         files: shared.files,
-        // One too large stays counted: it is never offered again.
         release: () => {
-          forget(new Set(shared.passed));
-          deps.state.save();
+          forget(passed);
         },
       };
     },
@@ -338,7 +338,8 @@ async function turn(
   const done = { reached: false };
   const hold: Hold = {
     take: (given) => {
-      taken.push(given);
+      // Only a file passed on has anything to hand back.
+      if (given.files.length > 0) taken.push(given);
       return given.files;
     },
     reached: () => {
@@ -349,7 +350,10 @@ async function turn(
     await deliver(chat, claude, group, deps, hold, asked, heardUpTo, woke);
   } finally {
     // A file that never reached the Claude is offered again (#83).
-    if (!done.reached) for (const given of taken) given.release();
+    if (!done.reached && taken.length > 0) {
+      for (const given of taken) given.release();
+      deps.state.save();
+    }
   }
 }
 
