@@ -52,12 +52,14 @@ export const deliveryOf = (
   text: string,
   ask: Quote | null,
   at: number,
+  interjecting = false,
 ): Delivery => ({
   uuid: null,
   key: keyOf(text),
   ask,
   at,
   answered: false,
+  interjecting,
 });
 
 /** Note the uuid of a user event in the session that is one of tagalong's deliveries. */

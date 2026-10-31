@@ -94,6 +94,7 @@ describe("state.json on disk", () => {
           ask: null,
           at: 1,
           answered: false,
+          interjecting: false,
         },
       ],
       link: { id: "Zk3q9xT0aB4mN7pR2sV5wY8c", given: 1, sent: ["k1"] },
@@ -136,6 +137,7 @@ describe("state.json on disk", () => {
         ask: { id: "r1", sender: OWNER, content: "hi" },
         at: 1,
         answered: false,
+        interjecting: false,
       },
     ]);
   });
@@ -168,7 +170,14 @@ describe("state.json on disk", () => {
     );
     const session = new StateStore(path).state.sessions.abc12345;
     expect(session?.deliveries).toEqual([
-      { uuid: "u1", key: "k", ask: null, at: 1, answered: true },
+      {
+        uuid: "u1",
+        key: "k",
+        ask: null,
+        at: 1,
+        answered: true,
+        interjecting: false,
+      },
     ]);
     // It gets a link with its next delivery.
     expect(session?.link).toBeNull();

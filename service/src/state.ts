@@ -20,6 +20,8 @@ const deliverySchema = z.object({
   at: z.number(),
   // Whether a result has listed it, or it was given up on.
   answered: z.boolean().default(false),
+  // A delivery nobody asked for, to an interjecting Claude: nobody waits on it.
+  interjecting: z.boolean().default(false),
 });
 
 // The session's upload link (outgoing.ts): its id, when the session was last
@@ -88,6 +90,9 @@ const stateSchema = z.object({
       }),
     )
     .default({}),
+  // When each interjecting Claude, by threadKey, was set to interject: it hears
+  // only what is said after.
+  interjecting: z.record(z.string(), z.number()).default({}),
   // Each Claude's running conversation in each group, by threadKey: its
   // session, and when the last message it has heard was sent.
   threads: z

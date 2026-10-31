@@ -58,10 +58,13 @@ export const claudeSchema = z.object({
 });
 
 // Each Claude in a chat, with the people who may ask it there, besides the
-// owners: named ones, or everyone in the chat (read-only Claudes only).
+// owners: named ones, or everyone in the chat (read-only Claudes only). A
+// interjecting Claude is given what they say without being asked; off unless
+// an owner turns it on.
 export const askersSchema = z.object({
   members: z.array(digits).default([]),
   everyone: z.boolean().optional(),
+  interjecting: z.boolean().optional(),
 });
 export const groupSchema = z.object({
   label: z.string().optional(),
@@ -117,6 +120,8 @@ export interface Group {
   members: Record<string, string[]>;
   /** The Claudes here that anyone in the chat may ask. */
   everyone: string[];
+  /** The Claudes here set to interject. */
+  interjecting: string[];
 }
 
 /** Who may ask `claude` in `group`, by name, besides the owners. */
@@ -227,6 +232,9 @@ export function toConfig(file: GroupsFile, extraOwners: string[]): Config {
       ),
       everyone: here
         .filter(([, askers]) => askers.everyone === true)
+        .map(([claude]) => claude),
+      interjecting: here
+        .filter(([, askers]) => askers.interjecting === true)
         .map(([claude]) => claude),
     });
   }

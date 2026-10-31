@@ -35,6 +35,7 @@ export const VERBS = [
   "undefine",
   "allow",
   "revoke",
+  "interject",
   "fresh",
   "update",
   "stop",
@@ -43,7 +44,7 @@ export type Verb = (typeof VERBS)[number];
 
 /** A message that is a command, whoever sent it: "@claude <verb> …" or a mention of the number. */
 export const COMMAND =
-  /^\s*@(claude|\d{6,})\b[\s,:]*(help|who|add|remove|define|undefine|allow|revoke|fresh|update|stop)\b(.*)$/isu;
+  /^\s*@(claude|\d{6,})\b[\s,:]*(help|who|add|remove|define|undefine|allow|revoke|interject|fresh|update|stop)\b(.*)$/isu;
 export const FRESH_MS = 10 * 60_000;
 
 export interface Command {
@@ -125,14 +126,17 @@ export const tokens = (args: string): string[] =>
       .match(/\w+="[^"]*"|"[^"]*"|\S+/gu) ?? []
   ).map((token) => token.replace(/"/gu, ""));
 
-/** Claude names in a command's words, with or without an @. */
-const namesIn = (args: string): string[] => [
+/** Claude names in a command's words, with or without an @, less its own `keywords`. */
+const namesIn = (args: string, keywords: string[] = []): string[] => [
   ...new Set(
     tokens(args)
       .map((word) => word.replace(/^@/u, "").toLowerCase())
-      .filter(isName),
+      .filter((word) => isName(word) && !keywords.includes(word)),
   ),
 ];
+
+/** The word that adds a Claude already interjecting: `@claude add brainstorm interjecting`. */
+const INTERJECTING = "interjecting";
 
 /** One line about a Claude: its repo, access, environment, ref and model. */
 export function line(claude: Claude, api: ClaudeApi): string {
@@ -181,6 +185,9 @@ export function describe(
     return [
       line(claude, api),
       `  Asked by: ${askers.join(", ")}`,
+      ...(group.interjecting.includes(name)
+        ? ["  Interjecting: chips in without being asked"]
+        : []),
       ...(older
         ? [`  Talking here on an older version: \`@claude update ${name}\``]
         : []),
@@ -278,6 +285,7 @@ const help = async (
     "@claude define critic owner/repo read-only",
     "@claude allow @",
     "@claude revoke @",
+    `@claude interject ${group?.claudes[0] ?? "podstow"} on`,
     `@claude update ${group?.claudes[0] ?? "podstow"}`,
     `@claude fresh ${group?.claudes[0] ?? "podstow"}`,
     "@claude who",
@@ -285,6 +293,31 @@ const help = async (
   ];
   for (const template of templates) await deps.bridge.send(chat, template);
 };
+
+/**
+ * Only what is said once a Claude is set to interject starts a delivery. Setting
+ * it again keeps the first time, so nothing waiting is skipped.
+ */
+function interjectFrom(deps: CommandDeps, chat: string, names: string[]): void {
+  for (const name of names)
+    deps.state.state.interjecting[threadKey(chat, name)] ??= deps.now();
+  deps.state.save();
+}
+
+/** Forget when these Claudes started interjecting here. */
+function stopInterjecting(
+  deps: CommandDeps,
+  chat: string,
+  names: string[],
+): void {
+  const gone = new Set(names.map((name) => threadKey(chat, name)));
+  deps.state.state.interjecting = Object.fromEntries(
+    Object.entries(deps.state.state.interjecting).filter(
+      ([key]) => !gone.has(key),
+    ),
+  );
+  deps.state.save();
+}
 
 /** A group chat's JID ends @g.us; anything else is a one-to-one chat. */
 export const isGroupChat = (chat: string): boolean => chat.endsWith("@g.us");
@@ -402,13 +435,21 @@ export async function runCommand(
         return;
       }
       case "add": {
-        const names = namesIn(command.args);
+        const names = namesIn(command.args, [INTERJECTING]);
+        const interjecting = tokens(command.args).some(
+          (word) => word.toLowerCase() === INTERJECTING,
+        );
         const unknown = names.filter(
           (name) => !deps.groups.config.claudes.has(name),
         );
         if (names.length === 0 || unknown.length > 0)
           throw new CommandError(
             `${names.length === 0 ? "Which Claude?" : `No Claude called ${unknown.join(", ")}.`} ${catalogue(deps.groups.config, deps.api)}`,
+          );
+        // Interjecting is never turned on for several Claudes at once (who-can-use-it.md).
+        if (interjecting && names.length > 1)
+          throw new CommandError(
+            `Set one Claude at a time to interject: \`@claude add ${names[0] ?? ""} interjecting\``,
           );
         // A one-to-one chat's name is a person's, so it is never a label (logging.md).
         const label = isGroupChat(chat)
@@ -418,7 +459,10 @@ export async function runCommand(
         const config = deps.groups.update((file) => {
           const entry = entryOf(file, chat);
           const claudes = { ...entry?.claudes };
-          for (const name of names) claudes[name] ??= { members: [] };
+          for (const name of names) {
+            const askers = claudes[name] ?? { members: [] };
+            claudes[name] = interjecting ? { ...askers, interjecting } : askers;
+          }
           return {
             ...file,
             groups: { ...file.groups, [chat]: { ...entry, label, claudes } },
@@ -427,6 +471,7 @@ export async function runCommand(
         const updated = config.groups.get(chat);
         if (updated === undefined)
           throw new CommandError("the change did not stick");
+        if (interjecting) interjectFrom(deps, chat, names);
         await reply(
           `${describe(updated, config, deps.people, deps.api, deps.state.state)}\n\nOnly owners can ask ${names.map((name) => `@${name}`).join(" and ")} until you allow someone: \`@claude allow @Name ${names[0] ?? ""}\``,
         );
@@ -462,6 +507,7 @@ export async function runCommand(
                 },
               };
         });
+        stopInterjecting(deps, chat, names);
         const updated = config.groups.get(chat);
         await reply(
           updated === undefined
@@ -505,12 +551,60 @@ export async function runCommand(
         );
         return;
       }
+      case "interject": {
+        const names = namesIn(command.args, ["on", "off"]);
+        const words = tokens(command.args).map((word) => word.toLowerCase());
+        const on = words.includes("on");
+        const off = words.includes("off");
+        const name = names[0];
+        if (name === undefined)
+          throw new CommandError(
+            "Which Claude? `@claude interject brainstorm on`",
+          );
+        if (!(group?.claudes.includes(name) ?? false))
+          throw new CommandError(
+            `@${name} isn't here. Add it first: \`@claude add ${name} interjecting\``,
+          );
+        if (on === off)
+          throw new CommandError(`On or off? \`@claude interject ${name} on\``);
+        deps.groups.update((file) => {
+          const entry = entryOf(file, chat);
+          const askers = entry?.claudes[name];
+          if (entry === undefined || askers === undefined) return file;
+          const rest = {
+            members: askers.members,
+            ...(askers.everyone === true ? { everyone: true } : {}),
+          };
+          return {
+            ...file,
+            groups: {
+              ...file.groups,
+              [chat]: {
+                ...entry,
+                claudes: {
+                  ...entry.claudes,
+                  [name]: on ? { ...rest, interjecting: true } : rest,
+                },
+              },
+            },
+          };
+        });
+        if (on) interjectFrom(deps, chat, [name]);
+        else stopInterjecting(deps, chat, [name]);
+        await reply(
+          on
+            ? `@${name} interjects here now: it chips in when it has something to add.`
+            : `@${name} answers only when asked here now.`,
+        );
+        return;
+      }
       case "stop":
         if (deps.groups.read().groups?.[chat] === undefined) {
           await reply("I'm not set up in this group.");
           return;
         }
         deps.groups.update((file) => withoutGroup(file, chat));
+        stopInterjecting(deps, chat, group?.claudes ?? []);
         await reply(
           "Stopped, and forgot who could ask here. I'll ignore this group until a Claude is added again.",
         );
@@ -573,7 +667,11 @@ export async function runCommand(
             const open = everyone
               ? command.verb === "allow"
               : askers.everyone === true;
-            next[name] = { members, ...(open ? { everyone: true } : {}) };
+            next[name] = {
+              members,
+              ...(open ? { everyone: true } : {}),
+              ...(askers.interjecting === true ? { interjecting: true } : {}),
+            };
           }
           return {
             ...file,

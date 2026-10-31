@@ -39,6 +39,14 @@ describe("commandIn", () => {
     });
   });
 
+  it("reads interject as a verb", () => {
+    expect(commandIn("@claude interject brainstorm on", self)).toEqual({
+      verb: "interject",
+      args: "brainstorm on",
+    });
+    expect(COMMAND.test("@claude interject brainstorm off")).toBe(true);
+  });
+
   it("ignores a verb addressed to someone else, or not at the start", () => {
     expect(commandIn("@447700900002 add podstow", self)).toBeNull();
     expect(commandIn("can you @claude add this", self)).toBeNull();

@@ -57,6 +57,11 @@ result, so nothing has to be scraped or posted back by the session.
   busy session waiting for an approval is mentioned once, with its
   link, the one place to approve it. A delivery with no result after
   GIVE_UP_MS is given up on, and the chat is told.
+- An interjecting delivery (who-can-use-it.md) carries no request. Its
+  answer is a plain message unless it starts with a label. It gets no
+  👀, no approval notice, and no notice when its turn fails or it is
+  given up on, since nobody waits on it. While a session is busy,
+  interjecting waits; what was said goes in with the next delivery.
 - tagalong reacts 👀 to a request as it delivers it, and takes the 👀
   off once no delivery that carries the request still waits. A Claude's
   own reaction on the request replaces the 👀 and is left alone.
@@ -92,4 +97,5 @@ owner's request (#17): deliveries go in at any time and every result is
 posted. That replaced reading to the latest event before a follow-up
 (#10). The 👀 comes off an answered request since the same day (#24).
 The 👀 for a reaction goes on the answer it is on since 31 October
-2026 (#45).
+2026 (#45). Interjecting deliveries carry no request and get no notices
+since the same day (#19).

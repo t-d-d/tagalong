@@ -30,7 +30,7 @@ describe("groups.json", () => {
             label: "Side projects",
             claudes: {
               podstow: { members: ["447700900002"] },
-              brainstorm: { everyone: true },
+              brainstorm: { everyone: true, interjecting: true },
               gone: {},
             },
           },
@@ -62,6 +62,8 @@ describe("groups.json", () => {
       "o/kickoff",
     ]);
     expect(openTo(config, group, "brainstorm")).toBe(true);
+    // Interjecting is off unless an owner turned it on.
+    expect(group.interjecting).toEqual(["brainstorm"]);
     expect(openTo(config, group, "podstow")).toBe(false);
     expect(config.groups.get(DIRECT)?.label).toBe("direct chat");
     // A chat whose Claudes were all removed is ignored.

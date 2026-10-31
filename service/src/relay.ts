@@ -65,7 +65,7 @@ export async function check(
 ): Promise<void> {
   const { events, cursor } = await deps.api.eventsAfter(id, session.cursor);
   session.cursor = cursor;
-  const ended: { text: string; uuids: string[] }[] = [];
+  const ended: { text: string; uuids: string[]; failed: boolean }[] = [];
   let lastText = session.lastText;
   for (const event of events) {
     const text = textOf(event);
@@ -81,6 +81,7 @@ export async function check(
           ? `⚠️ The session stopped with an error (${event.subtype ?? "error"}).`
           : text || lastText,
         uuids: event.user_message_uuids ?? [],
+        failed,
       });
       lastText = "";
     }
@@ -88,6 +89,16 @@ export async function check(
   session.lastText = lastText;
   for (const turn of ended) {
     const answers = answering(session, turn.uuids);
+    // Nobody waits on an interjecting delivery, so its failure is not told.
+    if (
+      answers !== null &&
+      turn.failed &&
+      answers.length > 0 &&
+      answers.every((delivery) => delivery.interjecting)
+    ) {
+      for (const delivery of answers) delivery.answered = true;
+      continue;
+    }
     if (answers !== null) {
       await post(id, session, turn.text, answers, deps);
       continue;
@@ -121,6 +132,8 @@ async function waitOn(
   deps: RelayDeps,
 ): Promise<void> {
   const waiting = session.deliveries.filter((delivery) => !delivery.answered);
+  // Nobody waits on an interjecting delivery, so it gets no notices.
+  const asked = waiting.filter((delivery) => !delivery.interjecting);
   const { status } = await deps.api.record(id);
   // An archived or failed session takes no more turns.
   const ended = status === "archived" || status === "failed";
@@ -132,7 +145,7 @@ async function waitOn(
   )
     return;
   if (ended) session.waiting = false;
-  if (status === "requires_action" && !session.nudged) {
+  if (status === "requires_action" && !session.nudged && asked.length > 0) {
     session.nudged = true;
     log.info("session-waiting-approval", { session: id });
     await deps.bridge.send(
@@ -150,6 +163,9 @@ async function waitOn(
     session.since = deps.now();
     await post(id, session, words, waiting, deps);
     return;
+  } else if (ended && asked.length === 0) {
+    for (const delivery of waiting) delivery.answered = true;
+    return;
   } else if (ended) {
     await post(
       id,
@@ -166,6 +182,7 @@ async function waitOn(
   if (overdue.length === 0) return;
   for (const delivery of overdue) delivery.answered = true;
   log.info("session-gave-up", { session: id });
+  if (overdue.every((delivery) => delivery.interjecting)) return;
   await deps.bridge.send(
     session.chat,
     answerText(

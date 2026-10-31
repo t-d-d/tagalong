@@ -223,7 +223,7 @@ export async function handleRequest(
   try {
     for (const claude of claudes) {
       recent.push(now);
-      await turn(payload, request, claude, group, deps);
+      await turn(payload.chatJID, claude, group, deps, { payload, request });
     }
   } finally {
     deps.asking.delete(eyes);
@@ -232,16 +232,39 @@ export async function handleRequest(
   await lookAway(payload.chatJID, [message], deps);
 }
 
-/** One Claude's turn: into its running session, or a new one. */
+/**
+ * An interjecting Claude's turn: what the people who may ask it said up to
+ * `at` (ms), with no request, so nobody waits on it (who-can-use-it.md).
+ */
+export const interjectingTurn = (
+  chat: string,
+  claude: Claude,
+  group: Group,
+  at: number,
+  deps: RequestDeps,
+): Promise<void> => turn(chat, claude, group, deps, undefined, at);
+
+/** One Claude's turn: into its running session, or a new one. With nothing asked, an interjecting one. */
 async function turn(
-  payload: Payload,
-  { reaction, ...request }: Request,
+  chat: string,
   claude: Claude,
   group: Group,
   deps: RequestDeps,
+  asked: { payload: Payload; request: Request } | undefined,
+  heardUpTo?: number,
 ): Promise<void> {
-  const chat = payload.chatJID;
   const now = deps.now();
+  const interjecting = asked === undefined;
+  const payload = asked?.payload;
+  const reaction = asked?.request.reaction;
+  const request: Quote | null =
+    asked === undefined
+      ? null
+      : {
+          id: asked.request.id,
+          sender: asked.request.sender,
+          content: asked.request.content,
+        };
   const key = threadKey(chat, claude.name);
   const thread = deps.state.state.threads[key] ?? {
     session: null,
@@ -249,8 +272,8 @@ async function turn(
     version: "",
     carry: null,
   };
-  const row = deps.store.message(chat, payload.messageId);
-  const at = row === undefined ? now : timeOf(row.timestamp);
+  const row = deps.store.message(chat, payload?.messageId);
+  const at = heardUpTo ?? (row === undefined ? now : timeOf(row.timestamp));
   // The CLI starts a session whose environment is not in the list in another
   // one, so a Claude whose environment is gone starts nothing (#22).
   const environmentGone = async (): Promise<boolean> => {
@@ -260,6 +283,8 @@ async function turn(
       group: group.label,
       claude: claude.name,
     });
+    // Nobody asked an interjecting Claude, so nobody is told.
+    if (request === null) return true;
     await deps.bridge.send(
       chat,
       `@${claude.name}'s environment is gone, so it can't start. An owner must define it again: \`@claude define ${claude.name} env=<name>\``,
@@ -282,29 +307,45 @@ async function turn(
     config: deps.groups.config,
     group,
     claude: claude.name,
-    except: request.id,
+    except: request?.id ?? "",
     label,
   };
   // Labelled once the lines before it are, so labels run in order.
-  const ask: Ask = {
-    label: "",
-    from: deps.people.nameOf(payload.sender),
-    // A voice note with no text reads as its type, as in the conversation.
-    text:
-      reaction === undefined
-        ? bodyOf(deps.people.readable(payload.content), payload.mediaType ?? "")
-        : "",
-    // A reaction quotes the answer it is on.
-    quoted:
-      reaction === undefined
-        ? quotedOf(payload, deps)
-        : {
-            who: `@${claude.name}`,
-            text: deps.people.readable(request.content.replace(ANSWER, "")),
-          },
-    files: await files(payload, group, claude.name, deps),
+  const ask: Ask | undefined =
+    payload === undefined || request === null
+      ? undefined
+      : {
+          label: "",
+          from: deps.people.nameOf(payload.sender),
+          // A voice note with no text reads as its type, as in the conversation.
+          text:
+            reaction === undefined
+              ? bodyOf(
+                  deps.people.readable(payload.content),
+                  payload.mediaType ?? "",
+                )
+              : "",
+          // A reaction quotes the answer it is on.
+          quoted:
+            reaction === undefined
+              ? quotedOf(payload, deps)
+              : {
+                  who: `@${claude.name}`,
+                  text: deps.people.readable(
+                    request.content.replace(ANSWER, ""),
+                  ),
+                },
+          files: await files(payload, group, claude.name, deps),
+        };
+  if (ask !== undefined && reaction !== undefined) ask.reaction = reaction;
+  const labelAsk = () => {
+    if (ask !== undefined && request !== null) ask.label = label(request);
   };
-  if (reaction !== undefined) ask.reaction = reaction;
+  // An interjecting turn has no ask to give the upload link with.
+  const linkFor = async (link: Link | null) =>
+    ask === undefined ? null : await keptLink(link, deps);
+  const tell = (kept: Link | null) =>
+    ask === undefined ? undefined : withLink(ask, kept, now, deps);
   const delivered = (
     session: SessionState,
     id: string,
@@ -329,12 +370,12 @@ async function turn(
     const id = thread.session;
     // Everything said since this Claude's last message, not only the last few.
     const said = conversation(lines, thread.heard, deps.env.HISTORY * 3);
-    ask.label = label(request);
-    const kept = await keptLink(existing.link, deps);
-    const told = withLink(ask, kept, now, deps);
+    labelAsk();
+    const kept = await linkFor(existing.link);
+    const told = tell(kept);
     const text = followUp(claude.name, said, told);
     // Noted before it goes, so its user event is known however soon it is read.
-    const delivery = deliveryOf(text, request, now);
+    const delivery = deliveryOf(text, request, now, interjecting);
     const drop = () => {
       existing.deliveries = existing.deliveries.filter(
         (each) => each !== delivery,
@@ -357,13 +398,14 @@ async function turn(
     if (sent === "sent") {
       delivered(existing, id, thread.version, {
         kept,
-        given: told.upload !== undefined,
+        given: told?.upload !== undefined,
       });
       log.info("session-followup", {
         session: id,
         group: group.label,
         claude: claude.name,
-        files: ask.files.length,
+        files: ask?.files.length ?? 0,
+        interjecting,
       });
       return;
     }
@@ -386,18 +428,17 @@ async function turn(
     carried === ""
       ? conversation(lines, 0, deps.env.HISTORY)
       : conversation(lines, thread.heard, deps.env.HISTORY * 3);
-  ask.label = label(request);
+  labelAsk();
   // A session that carries on a conversation takes over its link, which the
   // carried dialogue shows; either way the first prompt gives it.
   const before =
     thread.carry === null ? undefined : deps.state.state.sessions[thread.carry];
-  const kept = await keptLink(
+  const kept = await linkFor(
     before?.link === undefined || before.link === null
       ? null
       : { ...before.link, given: 0 },
-    deps,
   );
-  const told = withLink(ask, kept, now, deps);
+  const told = tell(kept);
   const prompt = firstPrompt({
     claude,
     chatName: deps.store.chatName(chat) ?? group.label,
@@ -406,7 +447,10 @@ async function turn(
     conversation: said,
     ask: told,
   });
-  const name = `WhatsApp ${claude.name}: ${oneLine((ask.reaction ?? ask.text).replace(/@[a-z][a-z0-9-]*\b/giu, "")).slice(0, 50)}`;
+  const name =
+    ask === undefined
+      ? `WhatsApp ${claude.name}: interjecting`
+      : `WhatsApp ${claude.name}: ${oneLine((ask.reaction ?? ask.text).replace(/@[a-z][a-z0-9-]*\b/giu, "")).slice(0, 50)}`;
   const id = await deps.cli.run(() => deps.cloud.start(claude, prompt, name));
   const session: SessionState = {
     chat,
@@ -416,7 +460,7 @@ async function turn(
     since: now,
     nudged: false,
     lastText: "",
-    deliveries: [deliveryOf(prompt, request, now)],
+    deliveries: [deliveryOf(prompt, request, now, interjecting)],
     link: null,
   };
   deps.state.state.sessions[id] = session;
@@ -426,7 +470,7 @@ async function turn(
     before.link = null;
   delivered(session, id, versionOf(claude), {
     kept,
-    given: told.upload !== undefined,
+    given: told?.upload !== undefined,
   });
   log.info("session-started", {
     session: id,
@@ -434,7 +478,8 @@ async function turn(
     claude: claude.name,
     access: claude.access,
     carried: carried !== "",
-    files: ask.files.length,
+    files: ask?.files.length ?? 0,
+    interjecting,
   });
   await verify(id, claude, deps.api);
 }
