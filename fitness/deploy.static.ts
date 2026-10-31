@@ -32,18 +32,28 @@ describe("fitness: a failed deploy says why (repo-and-delivery.md)", () => {
     );
   });
 
-  it("logs in to ECR Public before the builds, so base image pulls are not held to the anonymous limit (#33)", () => {
-    expect(script).toMatch(
-      /aws ecr-public get-login-password --region us-east-1 \| docker login --username AWS --password-stdin public\.ecr\.aws\n(?:.*\n)*?\s*bridge_image=\$\(image /u,
-    );
-  });
-
   it("says which image failed to build or push, in the log and the run's summary", () => {
     expect(script).toMatch(
       /docker build [^\n]*\|\| \{ echo "[^"]*\$repo:\$tag[^"]*" \| tee -a "\$summary" >&2; return 1; \}/u,
     );
     expect(script).toMatch(
       /docker push [^\n]*\|\| \{ echo "[^"]*\$repo:\$tag[^"]*" \| tee -a "\$summary" >&2; return 1; \}/u,
+    );
+  });
+});
+
+describe("fitness: a deploy pulls its base images logged in to ECR Public (repo-and-delivery.md)", () => {
+  const script = readRepoFile("scripts/deploy.sh");
+
+  it("logs in to ECR Public before the builds, so base image pulls are not held to the anonymous limit (#33)", () => {
+    expect(script).toMatch(
+      /^\s*aws ecr-public get-login-password --region us-east-1 \| docker login --username AWS --password-stdin public\.ecr\.aws [^\n]*\n(?:.*\n)*?\s*bridge_image=\$\(image /mu,
+    );
+  });
+
+  it("says so and pulls anonymously when the ECR Public login fails, so a deploy that builds nothing does not stop on it", () => {
+    expect(script).toMatch(
+      /--password-stdin public\.ecr\.aws \|\| echo "[^"]*ECR Public[^"]*" \| tee -a "\$summary" >&2$/mu,
     );
   });
 });
