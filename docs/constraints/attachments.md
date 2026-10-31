@@ -13,6 +13,10 @@ upload link is short, and a Lambda signs for it at the moment of use.
 - A request carries the media in its own message, the message it
   replies to, and any a member sent in the last ten minutes that no
   session has had yet. At most five, each at most 25 MB.
+- An interjecting delivery carries media as a request does: what the
+  people who may ask the Claude sent since it last heard, not yet given
+  to it. At most five, each at most 25 MB, and each file goes once to
+  each Claude.
 - Only media from owners and members is passed on.
 - The bridge downloads each into its store. tagalong uploads it to
   attachments/<random id>/<safe name> and gives the session a presigned
@@ -68,4 +72,5 @@ session's files are sent to the chat since the same day (#12). A turn
 sends from the folder of each delivery it answers, each file once, since
 27 October 2026 (#17). Each session has one short upload link, which a
 Lambda turns into an upload URL, since 31 October 2026, at the owner's
-request (#59).
+request (#59). An interjecting delivery carries media as a request does
+since 31 October 2026, at the owner's request (#81).

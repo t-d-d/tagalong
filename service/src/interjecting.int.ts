@@ -70,7 +70,16 @@ async function says(
     spoken.push(content.replace(/^@\w+ /u, ""));
   t.clock.now += 1000;
   const chat = typeof extra.chatJID === "string" ? extra.chatJID : GROUP;
-  t.db.message({ id, chat, sender, content, at: t.clock.now });
+  t.db.message({
+    id,
+    chat,
+    sender,
+    content,
+    at: t.clock.now,
+    ...(typeof extra.mediaType === "string"
+      ? { mediaType: extra.mediaType }
+      : {}),
+  });
   await t.deliver({ messageId: id, sender, content, ...extra });
 }
 
@@ -196,6 +205,87 @@ describe("an interjecting Claude (who-can-use-it.md)", () => {
     await poll(t);
     await quiet(t);
     expect(t.fake.calls).toHaveLength(1);
+  });
+
+  it("is given the media people who may ask it sent since it last heard, once each, with voice notes transcribed (attachments.md)", async () => {
+    const t = (h = await harness({
+      groups: interjecting(),
+      env: { ATTACHMENTS_BUCKET: "files" },
+    }));
+    t.bridge.media.set("v1", {
+      filename: "audio_1.ogg",
+      bytes: Buffer.from("ogg bytes"),
+    });
+    t.bridge.media.set("v2", {
+      filename: "audio_2.ogg",
+      bytes: Buffer.from("garbled"),
+    });
+    t.bridge.media.set("p1", {
+      filename: "theirs.png",
+      bytes: Buffer.from("png"),
+    });
+    t.bridge.media.set("p2", {
+      filename: "from_a_claude.png",
+      bytes: Buffer.from("png"),
+    });
+    t.bridge.media.set("d1", {
+      filename: "huge.pdf",
+      bytes: Buffer.from("pdf"),
+    });
+    t.aws.speech.set("ogg bytes", "the CI broke again");
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("PASS")]);
+    await says(t, "v1", MEMBER, "", { mediaType: "audio" });
+    await says(t, "v2", OWNER, "", { mediaType: "audio" });
+    await says(t, "p1", STRANGER, "", { mediaType: "image" });
+    t.clock.now += 1000;
+    t.db.message({
+      id: "p2",
+      sender: CLAUDE,
+      content: "*podstow:* here it is",
+      at: t.clock.now,
+      fromMe: true,
+      mediaType: "image",
+    });
+    t.clock.now += 1000;
+    t.db.message({
+      id: "d1",
+      sender: MEMBER,
+      content: "",
+      at: t.clock.now,
+      mediaType: "document",
+      fileLength: 26 * 1024 * 1024,
+    });
+    await quiet(t);
+
+    const prompt = launches(t)[0]?.prompt ?? "";
+    expect(prompt).toContain("Nobody asked you");
+    expect(prompt).toMatch(
+      /- audio_1\.ogg \(audio\/ogg, 1 KB\): https:\/\/files\.s3\.example\.test\/attachments\/[\w-]+\/audio_1\.ogg\?expires=3600\n {2}Transcript, by speech recognition, so it may have errors: "the CI broke again"\n/u,
+    );
+    expect(prompt).toMatch(
+      /- audio_2\.ogg \(audio\/ogg, 1 KB\): \S+\n(?! {2}Transcript)/u,
+    );
+    expect(prompt).not.toContain("theirs.png");
+    expect(prompt).not.toContain("from_a_claude.png");
+    expect(prompt).not.toContain("huge.pdf");
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({
+        event: "attachment-skipped",
+        why: "too-large",
+      }),
+    );
+
+    // Named next, it is not given the same notes again.
+    await poll(t);
+    await says(t, "r1", MEMBER, "@brainstorm what did I say?");
+    const follow = followUps(t)[0]?.options.input ?? "";
+    expect(follow).toContain("Ollie asks you, @brainstorm");
+    expect(follow).not.toContain("audio_1.ogg");
+    expect(follow).not.toContain("audio_2.ogg");
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({ event: "session-followup", files: 0 }),
+    );
   });
 
   it("hears only the people who may ask it, and is started only by them", async () => {
