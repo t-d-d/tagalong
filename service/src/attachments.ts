@@ -17,8 +17,8 @@ export const LIMITS = {
   windowMs: 10 * 60_000,
   linkSeconds: 3600,
   /** How often to ask the bridge for a file it is still writing, and how long to wait between. */
-  wholeTries: 5,
-  wholeWaitMs: 100,
+  wholeTries: 10,
+  wholeWaitMs: 200,
 } as const;
 
 const MEDIA = new Set(["image", "video", "audio", "document", "sticker"]);
@@ -131,7 +131,7 @@ async function transcribed(
 /**
  * The file's bytes once the bridge has finished writing it. The bridge
  * writes a download in place, and hands back a file that exists as whole,
- * so a file shorter than the length WhatsApp gave is asked for again.
+ * so a file whose size is not the length WhatsApp gave is asked for again.
  * Undefined when it never comes whole. With no length to check, the bytes
  * read; the bridge cannot download a file without one.
  */
@@ -141,13 +141,20 @@ async function wholeFile(
 ): Promise<
   { filename: string; body: Buffer } | { tooLarge: number } | undefined
 > {
+  const { fileLength } = row;
+  if (fileLength !== undefined && fileLength > LIMITS.bytes)
+    return { tooLarge: fileLength };
   for (let tries = 1; ; tries += 1) {
     const file = await share.bridge.download(share.chat, row.id);
     const size = statSync(file.path).size;
     if (size > LIMITS.bytes) return { tooLarge: size };
-    const body = readFileSync(file.path);
-    if (row.fileLength === undefined || body.length === row.fileLength)
-      return { filename: file.filename, body };
+    if (fileLength === undefined || size === fileLength) {
+      // Checked again on the bytes read: a second download can truncate it between.
+      const body = readFileSync(file.path);
+      if (body.length > LIMITS.bytes) return { tooLarge: body.length };
+      if (fileLength === undefined || body.length === fileLength)
+        return { filename: file.filename, body };
+    }
     if (tries >= LIMITS.wholeTries) return undefined;
     await new Promise((done) => setTimeout(done, LIMITS.wholeWaitMs));
   }

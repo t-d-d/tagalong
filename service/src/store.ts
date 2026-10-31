@@ -13,7 +13,7 @@ export interface MessageRow {
   timestamp: string;
   isFromMe: boolean;
   mediaType: string;
-  /** The media's length in bytes as WhatsApp gave it, when the bridge has it. */
+  /** The media's length in bytes as WhatsApp gave it, when the bridge has it. The bridge stores 0 for none. */
   fileLength: number | undefined;
 }
 
@@ -36,7 +36,7 @@ const messageSchema = z
     timestamp: row.timestamp,
     isFromMe: row.is_from_me === true || row.is_from_me === 1,
     mediaType: row.media_type ?? "",
-    fileLength: row.file_length ?? undefined,
+    fileLength: row.file_length || undefined,
   }));
 
 const deviceSchema = z.object({ jid: z.string(), lid: z.string().nullable() });

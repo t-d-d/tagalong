@@ -470,6 +470,26 @@ describe("asking a Claude", () => {
     );
   });
 
+  it("takes a stored length of nothing as no length, and uploads the note", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    const whole = Buffer.from("ogg bytes, the whole note");
+    t.bridge.media.set("v1", { filename: "audio_1.ogg", bytes: whole });
+    t.db.message({
+      id: "v1",
+      sender: MEMBER,
+      content: "",
+      at: NOW - 60_000,
+      mediaType: "audio",
+      fileLength: 0,
+    });
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow what did I say?");
+    const uploads = [...t.aws.objects.values()].map((object) => object.body);
+    expect(uploads).toContainEqual(whole);
+    expect(launches(t)[0]?.prompt).toContain("audio_1.ogg");
+  });
+
   it("never uploads a voice note the bridge does not finish writing", async () => {
     const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
     const whole = Buffer.from("ogg bytes, the whole note");
