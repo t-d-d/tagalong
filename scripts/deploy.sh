@@ -9,6 +9,9 @@
 # Needs AWS credentials for the account, and for role the repo's numeric ids
 # in GITHUB_REPOSITORY_OWNER_ID and GITHUB_REPOSITORY_ID.
 set -euo pipefail
+# Bash drops set -e inside a command substitution unless told to keep it, and
+# the images are built inside one (#32).
+shopt -s inherit_errexit
 
 cd "$(dirname "$0")/.."
 summary=${GITHUB_STEP_SUMMARY:-/dev/null}
@@ -31,8 +34,8 @@ image() {
   if aws ecr describe-images --repository-name "$repo" --image-ids "imageTag=$tag" > /dev/null 2>&1; then
     echo "$repo:$tag is already pushed" >&2
   else
-    docker build --platform linux/arm64 --file "$dockerfile" --tag "$uri:$tag" . >&2
-    docker push "$uri:$tag" >&2
+    docker build --platform linux/arm64 --file "$dockerfile" --tag "$uri:$tag" . >&2 || { echo "Building $repo:$tag failed." | tee -a "$summary" >&2; return 1; }
+    docker push "$uri:$tag" >&2 || { echo "Pushing $repo:$tag failed." | tee -a "$summary" >&2; return 1; }
   fi
   echo "$uri:$tag"
 }

@@ -20,4 +20,19 @@ describe("fitness: a failed deploy says why (repo-and-delivery.md)", () => {
       /create-service-linked-role --aws-service-name ecs\.amazonaws\.com/u,
     );
   });
+
+  it("keeps set -e inside command substitutions, so a failed image build stops the deploy (#32)", () => {
+    expect(script).toMatch(
+      /^set -euo pipefail\n(?:#.*\n)*shopt -s inherit_errexit$/mu,
+    );
+  });
+
+  it("says which image failed to build or push, in the log and the run's summary", () => {
+    expect(script).toMatch(
+      /docker build [^\n]*\|\| \{ echo "[^"]*\$repo:\$tag[^"]*" \| tee -a "\$summary" >&2; return 1; \}/u,
+    );
+    expect(script).toMatch(
+      /docker push [^\n]*\|\| \{ echo "[^"]*\$repo:\$tag[^"]*" \| tee -a "\$summary" >&2; return 1; \}/u,
+    );
+  });
 });
