@@ -40,6 +40,19 @@ describe("fitness: a failed deploy says why (repo-and-delivery.md)", () => {
       /docker push [^\n]*\|\| \{ echo "[^"]*\$repo:\$tag[^"]*" \| tee -a "\$summary" >&2; return 1; \}/u,
     );
   });
+
+  // The image() function, from its name to its closing brace.
+  const image = /^image\(\) \{\n[\s\S]*?^\}$/mu.exec(script)?.[0] ?? "";
+
+  it("builds an image only when ECR says it is not there, and stops on any other lookup failure (#46)", () => {
+    expect(image).not.toMatch(/describe-images[^\n]*2>&1\s*;?\s*then/u);
+    expect(image).toMatch(
+      /elif [^\n]*ImageNotFoundException[^\n]*; then\n\s*docker build /u,
+    );
+    expect(image).toMatch(
+      /else\n[\s\S]*?echo "Looking up \$repo:\$tag in ECR failed[^"]*" \| tee -a "\$summary" >&2\n\s*return 1\n\s*fi/u,
+    );
+  });
 });
 
 // A re-run can repeat any set of jobs, and a job it does not repeat keeps its
