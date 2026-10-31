@@ -114,9 +114,25 @@ function started(
   });
 }
 
-/** The folder in the bucket a message's upload form writes to. */
-const folderIn = (text: string | undefined): string =>
-  /-F 'key=(outgoing\/[\w-]+\/)\$\{filename\}'/u.exec(text ?? "")?.[1] ?? "";
+/** Where a Claude may send files from (attachments.md). */
+const FILES = {
+  ATTACHMENTS_BUCKET: "files",
+  UPLOAD_LINK: "https://links.example.test/up/",
+};
+
+/** The id of the upload link a message gives, or "" for none. */
+const linkIn = (text: string | undefined): string =>
+  /curl -fsS -T <path> "\$\(curl -fsS 'https:\/\/links\.example\.test\/up\/([\w-]{24})\/<name>'\)"/u.exec(
+    text ?? "",
+  )?.[1] ?? "";
+
+/** A file a session uploads with its link. */
+const uploads = (t: Harness, id: string, name: string, body = "png") => {
+  t.aws.objects.set(`files/outgoing/${id}/${name}`, {
+    body: Buffer.from(body),
+    contentType: "application/octet-stream",
+  });
+};
 
 /** Each reaction tagalong sent: the message and the emoji, "" to take one off. */
 const reactions = (t: Harness) =>
@@ -574,29 +590,23 @@ describe("asking a Claude", () => {
     expect(t.aws.transcribed).toEqual([]);
   });
 
-  it("sends the files a Claude uploads in its turn after its answer, and only that turn's", async () => {
-    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+  it("gives a new session one short upload link, and sends what it uploads after its answer", async () => {
+    const t = (h = await harness({ env: FILES }));
     t.fake.launches.push(SESSION);
     started(t, SESSION);
     await says(t, "r1", MEMBER, "@podstow draw me the chart");
     const prompt = launches(t)[0]?.prompt ?? "";
     expect(prompt).toContain(
-      "To send pictures, audio or files to the chat with your answer, upload each before you answer, at most 5, each at most 16 MB:",
+      "To send pictures, audio or files to the chat, upload each before you answer, at most 5, each at most 16 MB.",
     );
-    expect(prompt).toContain("'https://files.s3.example.test/'");
-    expect(prompt).toContain("-F 'Policy=max-16777216-for-7200'");
-    const [, folder] =
-      /-F 'key=(outgoing\/[\w-]+\/)\$\{filename\}'/u.exec(prompt) ?? [];
-    expect(folder).toBeDefined();
+    const id = linkIn(prompt);
+    expect(id).toMatch(/^[\w-]{24}$/u);
+    expect(prompt).not.toMatch(/X-Amz|Policy/u);
+    // The link works while its marker is fresh (upload-link.ts).
+    expect(t.aws.objects.get(`files/links/${id}`)?.at).toBe(t.clock.now);
     // The session uploads a picture and a voice note.
-    t.aws.objects.set(`files/${folder ?? ""}chart.png`, {
-      body: Buffer.from("png bytes"),
-      contentType: "image/png",
-    });
-    t.aws.objects.set(`files/${folder ?? ""}note.ogg`, {
-      body: Buffer.from("ogg bytes"),
-      contentType: "audio/ogg",
-    });
+    uploads(t, id, "chart.png", "png bytes");
+    uploads(t, id, "note.ogg", "ogg bytes");
     t.api.sessions.get(SESSION)?.events.push(result("Here it is."));
     await poll(t);
     const sent = t.bridge.sent.slice(-3);
@@ -617,34 +627,132 @@ describe("asking a Claude", () => {
       expect.objectContaining({ event: "files-sent", count: 2, bytes: 18 }),
     );
     expect(t.raw.filter((line) => line.includes("chart"))).toEqual([]);
+    expect(t.raw.filter((line) => line.includes(id))).toEqual([]);
 
+    // A follow-up keeps the link working, but does not repeat it.
+    t.clock.now += 60_000;
     await says(t, "r2", MEMBER, "@podstow thanks");
     const next = followUps(t)[0]?.options.input ?? "";
-    expect(next).not.toContain(folder ?? "");
-    expect(next).toMatch(/-F 'key=outgoing\/[\w-]+\/\$\{filename\}'/u);
+    expect(next).not.toContain("curl");
+    expect(t.aws.objects.get(`files/links/${id}`)?.at).toBe(t.clock.now);
     t.api.sessions.get(SESSION)?.events.push(result("You're welcome."));
     await poll(t);
-    expect(t.bridge.sent.at(-1)?.message).toBe("*podstow:* You're welcome.");
+    // Each file goes once.
+    expect(t.bridge.sent.slice(3).map((message) => message.message)).toEqual([
+      "*podstow:* You're welcome.",
+    ]);
   });
 
-  it("sends at most five files with an answer, and none too large", async () => {
+  it("gives the same link again after two hours without it", async () => {
+    const t = (h = await harness({ env: FILES }));
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow hello");
+    const id = linkIn(launches(t)[0]?.prompt);
+    expect(id).toMatch(/^[\w-]{24}$/u);
+    t.api.sessions.get(SESSION)?.events.push(result("Hi."));
+    await poll(t);
+    t.clock.now += 90 * 60_000;
+    await says(t, "r2", MEMBER, "@podstow still there?");
+    expect(followUps(t)[0]?.options.input).not.toContain("curl");
+    t.api.sessions.get(SESSION)?.events.push(result("Yes."));
+    await poll(t);
+    t.clock.now += 31 * 60_000;
+    await says(t, "r3", MEMBER, "@podstow send the chart");
+    expect(linkIn(followUps(t)[1]?.options.input)).toBe(id);
+  });
+
+  it("keeps the link when a new session carries on a gone one's conversation", async () => {
+    const t = (h = await harness({ env: FILES }));
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION);
+    started(t, SECOND);
+    await says(t, "r1", MEMBER, "@podstow hello");
+    const id = linkIn(launches(t)[0]?.prompt);
+    expect(id).toMatch(/^[\w-]{24}$/u);
+    uploads(t, id, "early.png");
+    t.api.sessions.get(SESSION)?.events.push(result("Hi."));
+    await poll(t);
+    t.fake.followUps.set(SESSION, "archived");
+    await says(t, "r2", MEMBER, "@podstow again");
+    // The carried dialogue shows the link, and the new ask gives it again.
+    const prompt = launches(t)[1]?.prompt ?? "";
+    const ask = prompt.slice(prompt.lastIndexOf("asks you, @podstow"));
+    expect(linkIn(ask)).toBe(id);
+    // What the gone session sent is not sent again.
+    uploads(t, id, "later.png");
+    t.api.sessions.get(SECOND)?.events.push(result("Again."));
+    await poll(t);
+    expect(
+      t.bridge.sent.map(
+        (sent) => sent.media_path?.split("/").at(-1) ?? sent.message,
+      ),
+    ).toEqual([
+      "*podstow:* Hi.",
+      "early.png",
+      "*podstow:* Again.",
+      "later.png",
+    ]);
+  });
+
+  it("hands the link over on an update, so a file goes once though the old session still answers", async () => {
+    const t = (h = await harness({ env: FILES }));
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION);
+    started(t, SECOND);
+    await says(t, "r1", MEMBER, "@podstow long job");
+    const id = linkIn(launches(t)[0]?.prompt);
+    await says(t, "c1", OWNER, "@claude update podstow");
+    await says(t, "r2", MEMBER, "@podstow and this");
+    expect(launches(t)).toHaveLength(2);
+    uploads(t, id, "chart.png");
+    // The old session's turn ends after the new one has started.
+    t.api.sessions.get(SESSION)?.events.push(result("Long job done."));
+    t.api.sessions.get(SECOND)?.events.push(result("And this."));
+    await poll(t);
+    expect(
+      t.bridge.sent.filter((sent) => sent.media_path?.endsWith("chart.png")),
+    ).toHaveLength(1);
+  });
+
+  it("starts a fresh conversation with a new link", async () => {
+    const t = (h = await harness({ env: FILES }));
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION);
+    started(t, SECOND);
+    await says(t, "r1", MEMBER, "@podstow hello");
+    const id = linkIn(launches(t)[0]?.prompt);
+    t.api.sessions.get(SESSION)?.events.push(result("Hi."));
+    await poll(t);
+    await says(t, "c1", OWNER, "@claude fresh podstow");
+    await says(t, "r2", MEMBER, "@podstow start over");
+    const next = linkIn(launches(t)[1]?.prompt);
+    expect(next).toMatch(/^[\w-]{24}$/u);
+    expect(next).not.toBe(id);
+  });
+
+  it("gives no upload line without a link to give", async () => {
     const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
     t.fake.launches.push(SESSION);
     started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow hello");
+    expect(launches(t)[0]?.prompt).not.toContain("curl -fsS -T");
+    expect(
+      [...t.aws.objects.keys()].filter((key) => key.includes("links/")),
+    ).toEqual([]);
+  });
+
+  it("sends at most five files with an answer, and none too large", async () => {
+    const t = (h = await harness({ env: FILES }));
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
     await says(t, "r1", MEMBER, "@podstow lots of pictures");
-    const [, folder = ""] =
-      /-F 'key=(outgoing\/[\w-]+\/)\$\{filename\}'/u.exec(
-        launches(t)[0]?.prompt ?? "",
-      ) ?? [];
-    t.aws.objects.set(`files/${folder}huge.png`, {
+    const id = linkIn(launches(t)[0]?.prompt);
+    t.aws.objects.set(`files/outgoing/${id}/huge.png`, {
       body: Buffer.alloc(16 * 1024 * 1024 + 1),
       contentType: "image/png",
     });
-    for (const n of [1, 2, 3, 4, 5, 6])
-      t.aws.objects.set(`files/${folder}p${String(n)}.png`, {
-        body: Buffer.from("png"),
-        contentType: "image/png",
-      });
+    for (const n of [1, 2, 3, 4, 5, 6]) uploads(t, id, `p${String(n)}.png`);
     t.api.sessions.get(SESSION)?.events.push(result("Pictures."));
     await poll(t);
     const files = t.bridge.sent.filter(
@@ -1020,25 +1128,16 @@ describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
     ]);
   });
 
-  it("sends the files from every message a turn answers, and a later turn's, each once", async () => {
-    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+  it("sends what a turn uploads after its answer, and a later turn's, each once", async () => {
+    const t = (h = await harness({ env: FILES }));
     t.fake.launches.push(SESSION);
     started(t, SESSION);
     await says(t, "r1", MEMBER, "@podstow draw the chart");
     await says(t, "r2", MEMBER, "@podstow and the table");
-    const first = folderIn(launches(t)[0]?.prompt);
-    const second = folderIn(followUps(t)[0]?.options.input);
-    expect(first).not.toBe("");
-    expect(second).not.toBe("");
-    expect(second).not.toBe(first);
-    const upload = (key: string) => {
-      t.aws.objects.set(`files/${key}`, {
-        body: Buffer.from("png"),
-        contentType: "image/png",
-      });
-    };
-    upload(`${first}chart.png`);
-    upload(`${second}table.png`);
+    const id = linkIn(launches(t)[0]?.prompt);
+    expect(followUps(t)[0]?.options.input).not.toContain("curl");
+    uploads(t, id, "chart.png");
+    uploads(t, id, "table.png");
     t.api.sessions.get(SESSION)?.events.push(result("Both attached."));
     await poll(t);
     const names = () =>
@@ -1051,8 +1150,8 @@ describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
       "table.png",
     ]);
 
-    // Background work finishes and uploads with the form it was given.
-    upload(`${second}late.png`);
+    // Background work finishes and uploads with the same link.
+    uploads(t, id, "late.png");
     t.api.sessions.get(SESSION)?.events.push(selfStarted("And the late one."));
     await poll(t);
     expect(names().slice(3)).toEqual([

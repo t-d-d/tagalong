@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  tagalong images: the two ECR repositories the task's images live in
-  (repo-and-delivery.md). Stack tagalong-images, in us-east-1, applied by
+  tagalong images: the ECR repositories the task's two images and the upload
+  link's image live in (repo-and-delivery.md). Stack tagalong-images, in us-east-1, applied by
   scripts/deploy.sh before the images are pushed.
 
 Resources:
@@ -28,8 +28,37 @@ Resources:
         LifecyclePolicyText: |
           {"rules":[{"rulePriority":1,"description":"Keep the last 10","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}
 
+  # The upload link's Lambda (attachments.md). Lambda pulls its image with
+  # its own service principal, so the repository lets it, for this account's
+  # functions only.
+  LinkRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: tagalong/upload-link
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep the last 10","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LambdaPull
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+            Condition:
+              StringLike:
+                aws:sourceArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
+
 Outputs:
   BridgeRepositoryUri:
     Value: !GetAtt BridgeRepository.RepositoryUri
   AppRepositoryUri:
     Value: !GetAtt AppRepository.RepositoryUri
+  LinkRepositoryUri:
+    Value: !GetAtt LinkRepository.RepositoryUri

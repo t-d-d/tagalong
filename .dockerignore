@@ -7,3 +7,4 @@ service/**/*.test.ts
 service/**/*.int.ts
 !images/bridge-start.sh
 !images/bridge.patch
+!images/upload-link.js

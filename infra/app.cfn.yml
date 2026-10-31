@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   tagalong: one always-on Fargate Spot task holding the WhatsApp bridge and
-  tagalong, its volume, its bucket and its alarms (hosting.md). Stack
-  tagalong-app, in us-east-1, applied by scripts/deploy.sh.
+  tagalong, its volume, its bucket, the upload link and its alarms
+  (hosting.md). Stack tagalong-app, in us-east-1, applied by scripts/deploy.sh.
 
 Parameters:
   VpcId:
@@ -22,6 +22,10 @@ Parameters:
     Type: String
     AllowedPattern: "[0-9]+\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/tagalong/app:[0-9a-f]{64}"
     Description: tagalong's image, tagged with the hash of its files.
+  LinkImage:
+    Type: String
+    AllowedPattern: "[0-9]+\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/tagalong/upload-link:[0-9a-f]{64}"
+    Description: The upload link's image, tagged with the hash of its files.
   AlertEmail:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /tagalong/alerts/email
@@ -182,6 +186,96 @@ Resources:
               Bool:
                 aws:SecureTransport: "false"
 
+  # ------------------------------------------------------------ the upload link
+
+  # Turns a session's link into a five-minute URL to put one file in its
+  # folder (attachments.md). It holds no state and nothing waits on it
+  # starting; the device stays in the task (hosting.md).
+  LinkRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: upload-link
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # A link's marker, whose age says whether the link works.
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "${Bucket.Arn}/links/*"
+              # So S3 answers a missing marker with not found.
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt Bucket.Arn
+              # The URLs it signs put files here and nowhere else.
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "${Bucket.Arn}/outgoing/*"
+              # Its lines go to /tagalong, where the error alarm reads them
+              # (alerting.md).
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt LogGroup.Arn
+
+  LinkFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: tagalong-upload-link
+      Description: Turns a session's upload link into a URL to put one file
+      PackageType: Image
+      Code:
+        ImageUri: !Ref LinkImage
+      Architectures:
+        - arm64
+      MemorySize: 256
+      Timeout: 10
+      Role: !GetAtt LinkRole.Arn
+      Environment:
+        Variables:
+          ATTACHMENTS_BUCKET: !Ref Bucket
+      LoggingConfig:
+        LogGroup: !Ref LogGroup
+        LogFormat: Text
+
+  # GET /up/{id}/{name}, on execute-api.<region>.amazonaws.com, which a
+  # cloud session can reach. The route, its integration and the $default
+  # stage come with the API.
+  LinkApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: tagalong-upload-link
+      ProtocolType: HTTP
+      RouteKey: "GET /up/{id}/{name}"
+      Target: !GetAtt LinkFunction.Arn
+
+  # Anyone who finds the address can call it, so it is throttled well below
+  # what costs anything.
+  LinkApiThrottle:
+    Type: AWS::ApiGatewayV2::ApiGatewayManagedOverrides
+    Properties:
+      ApiId: !Ref LinkApi
+      Stage:
+        DefaultRouteSettings:
+          ThrottlingBurstLimit: 10
+          ThrottlingRateLimit: 5
+
+  LinkPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LinkFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${LinkApi}/*"
+
   # ------------------------------------------------------------ the volume
 
   # The device, groups.json, state.json, the login's working copy and the
@@ -319,13 +413,15 @@ Resources:
                   - s3:PutObject
                   - s3:GetObject
                 Resource: !Sub "${Bucket.Arn}/attachments/*"
-              # Files a Claude sends back: the upload form is signed with
-              # this role, and tagalong reads what landed (attachments.md).
+              # Files a Claude sends back: tagalong reads what landed in a
+              # session's folder, and keeps its link working with a marker
+              # the upload link reads (attachments.md).
               - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:GetObject
+                Action: s3:GetObject
                 Resource: !Sub "${Bucket.Arn}/outgoing/*"
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "${Bucket.Arn}/links/*"
               - Effect: Allow
                 Action:
                   - s3:GetObject
@@ -411,6 +507,8 @@ Resources:
               Value: /tagalong/claude-login
             - Name: ATTACHMENTS_BUCKET
               Value: !Ref Bucket
+            - Name: UPLOAD_LINK
+              Value: !Sub "${LinkApi.ApiEndpoint}/up/"
             - Name: AWS_REGION
               Value: !Ref AWS::Region
           Secrets:
@@ -472,3 +570,5 @@ Outputs:
     Value: !Ref LogGroup
   FileSystemId:
     Value: !Ref FileSystem
+  UploadLink:
+    Value: !Sub "${LinkApi.ApiEndpoint}/up/"
