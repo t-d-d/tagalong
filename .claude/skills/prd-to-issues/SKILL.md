@@ -17,7 +17,7 @@ For each ticket, ask: **if only this merged and nothing after it ever did, would
 2. **NFR** (`type: nfr`): a quality is now met: more reliable, more secure, faster, or easier to see into.
 3. **Refactor** (`type: refactor`): existing code is simpler or safer, and behaves the same.
 
-Anything else is **scaffolding**, code that earns its keep only once a sibling lands. Fold it into the ticket that makes it useful. The usual cases:
+Anything else is **groundwork**: code that does nothing until a later ticket lands. Fold it into the ticket that makes it useful. The usual cases:
 
 - a field in groups.json or state.json that nothing reads;
 - a parser whose output nothing uses;
@@ -41,7 +41,7 @@ Read enough to see how things stand, especially to find refactors worth doing be
 
 Start from the PRD's user journeys. For each, find the smallest change that ships some part of it end to end. A rough version is fine, with a fixed default, one option or no command to change it, as long as it delivers the journey. Thicker slices follow and build on it.
 
-Put a refactor before the ticket that benefits from it, where it improves the code as it stands. Never invent one to justify scaffolding.
+Put a refactor before the ticket that benefits from it, where it improves the code as it stands. Never invent one to justify groundwork.
 
 Give each ticket a mode:
 
@@ -53,7 +53,7 @@ Give each ticket a mode:
 
 Rules for each ticket:
 
-- It passes the delivery-train test. No scaffolding.
+- It passes the delivery-train test. No groundwork.
 - An enhancement cuts through everything it needs, from the stack to the command to the reply in the chat, in one merge.
 - An NFR improves something that already runs.
 - A refactor changes no behaviour. The gate is green before and after.
@@ -85,4 +85,4 @@ With the `issue-dependencies` skill, one call per blocker:
 
 ### 7. Ready the train
 
-Only once every ticket and every blocker exists: add `workflow: ready for development` to each ticket that meets the readiness criteria, then move the PRD to `workflow: under development`. A ticket readied any earlier could start before its blockers are recorded.
+Only once every ticket and every blocker exists: add `workflow: ready for development` to each ticket that meets the readiness criteria, then replace the PRD's `workflow: ready for development` with `workflow: under development`. A ticket readied any earlier could start before its blockers are recorded.

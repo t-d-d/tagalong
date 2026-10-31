@@ -50,7 +50,7 @@ traverse() {
     next=""
     for n in $frontier; do
       local fetched
-      fetched=$(api "/repos/$REPO/issues/$n/dependencies/$direction" --paginate --jq '.[].number' || true)
+      fetched=$(api "/repos/$REPO/issues/$n/dependencies/$direction" --paginate --jq '.[].number') || exit 1
       for m in $fetched; do
         if ! grep -qx "$m" <<<"$seen"; then
           seen="$seen"$'\n'"$m"

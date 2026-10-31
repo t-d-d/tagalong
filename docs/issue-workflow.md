@@ -68,8 +68,8 @@ Every new ticket passes one test: if it merged and nothing after it ever did, ta
 ## Who applies which label
 
 - Whoever files a ticket gives it a `type:` label and, for an implementation ticket, a `mode:` label. They add `workflow: ready for development` once it is ready, and take it off again if an open question is added.
-- A session readies an enhancement only when it is a sub-issue of a PRD the owner has readied. A new capability starts from a PRD, not from a session's own ticket.
-- A PRD's `workflow:` label moves only on the owner's word. The owner readies it, and `prd-to-issues` moves it to `under development` when it files a train the owner approved. The owner closes it.
+- A session readies an enhancement only when it is a sub-issue of a PRD the owner has readied, one that is `ready for development` or `under development`. A new capability starts from a PRD, not from a session's own ticket.
+- A PRD's `workflow:` label moves only when the owner says so. The owner readies it, and `prd-to-issues` moves it to `under development` when it files a train the owner approved. The owner closes it.
 - Governor claims a ticket it starts. A session that starts a ticket any other way claims it itself: it takes off `ready for development` and adds `under development`.
 
 ## Dependencies

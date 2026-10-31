@@ -9,7 +9,7 @@ A PRD is an issue labelled `type: prd` ([issue-workflow.md](../../../docs/issue-
 
 1. **Ask the owner** for the problem, in detail, and any ideas for solving it. If a backlog PRD already covers it, start from that issue and edit it rather than filing another.
 
-2. **The premise round.** Before reading the code or talking about a solution, establish that the problem is real. Ask these four, and push on each until you hear the kind of answer named. When the evidence is already concrete, the round closes in one exchange. When it is not, the pushing is the point.
+2. **The premise round.** Before reading the code or talking about a solution, establish that the problem is real. Ask these four, and push on each until you hear the kind of answer named. When the evidence is already concrete, the round closes in one exchange. When it is not, keep pushing until it is.
 
    - **Who asked for this, and what is the evidence?** Push until you hear a chat where it came up, a request that failed, an alert, or the owner's own repeated friction. Red flags: "people might want", "it would be nice", "an obvious gap".
    - **What do they do today without it, and what does that cost?** Push until you hear a workaround with a cost: a step someone repeats, something they give up on, a question nobody asks a Claude because it would not work. "Nothing" usually means the pain is not real yet.
@@ -20,7 +20,7 @@ A PRD is an issue labelled `type: prd` ([issue-workflow.md](../../../docs/issue-
 
 3. **Read the repo** to check what the owner said and see how things stand. Read every constraint file the idea touches (the `constraints` skill's catalogue).
 
-4. **Interview** one question at a time until you agree. Start from the premises the round settled. Keep each question on how people move through tagalong over time, not on how to build it. When the owner drifts into implementation, note the decision for step 7 and steer back.
+4. **Interview** one question at a time until you agree. Start from the premises the round settled. Keep each question on how people move through tagalong over time, not on how to build it. When the owner moves on to implementation, note the decision for step 7 and go back to the journeys.
 
 5. **State the premises.** List the premises the PRD rests on as numbered statements and get the owner's agreement or disagreement on each. A disagreement reopens that thread. Draft no journeys on a premise the owner has not accepted.
 

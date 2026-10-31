@@ -1,10 +1,10 @@
 ---
 name: Chore
 about: Setup only the owner can do, for the ticket it unblocks
-labels: "type: chore"
+labels: "type: chore, mode: human"
 ---
 
-<!-- Label it mode: human. Record its order against the ticket it serves with the issue-dependencies skill. -->
+<!-- Record its order against the ticket it serves with the issue-dependencies skill. -->
 
 ### Cost of not doing
 
