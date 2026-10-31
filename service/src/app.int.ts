@@ -2101,7 +2101,33 @@ describe("waiting on a session", () => {
     expect(t.bridge.sent).toEqual([]);
   });
 
-  it("keeps the 👀 on a request whose turn has not started while the session reads idle (#93)", async () => {
+  it("keeps the 👀 on a request delivered just after a turn whose result is read with it (#93)", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow first");
+    await poll(t);
+    const session = t.api.sessions.get(SESSION);
+    if (session === undefined) throw new Error("no session");
+    session.events.push(...answer("First."));
+    await says(t, "r2", MEMBER, "@podstow second");
+    // The second message is in, but the session has not taken it up yet.
+    const second = session.events.pop();
+    session.status = "idle";
+    await poll(t);
+    expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
+      "*podstow:* First.",
+    ]);
+    expect(reactions(t).filter(([id]) => id === "r2")).toEqual([["r2", "👀"]]);
+    session.status = "running";
+    session.events.push(second, ...answer("Second."));
+    t.clock.now += 60_000;
+    await t.app.pollOnce();
+    expect(t.bridge.sent.at(-1)?.message).toBe("*podstow:* Second.");
+    expect(reactions(t).at(-1)).toEqual(["r2", ""]);
+  });
+
+  it("keeps the 👀 while the session reads idle just after a delivery, and takes it off once it stays idle (#93)", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);
     started(t, SESSION);
@@ -2109,12 +2135,28 @@ describe("waiting on a session", () => {
     if (session !== undefined) session.status = "idle";
     await says(t, "r1", MEMBER, "@podstow go");
     await poll(t);
+    expect(reactions(t)).toEqual([["r1", "👀"]]);
     t.clock.now += 30_000;
     await t.app.pollOnce();
+    expect(reactions(t)).toEqual([
+      ["r1", "👀"],
+      ["r1", ""],
+    ]);
+    expect(t.bridge.sent).toEqual([]);
+  });
+
+  it("keeps the 👀 while the session reads idle just after a delivery, and takes it off when the turn ends (#93)", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    const session = t.api.sessions.get(SESSION);
+    if (session !== undefined) session.status = "idle";
+    await says(t, "r1", MEMBER, "@podstow go");
+    await poll(t);
     expect(reactions(t)).toEqual([["r1", "👀"]]);
     if (session !== undefined) session.status = "running";
     session?.events.push(...answer("Done."));
-    t.clock.now += 60_000;
+    t.clock.now += 30_000;
     await t.app.pollOnce();
     expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
       "*podstow:* Done.",

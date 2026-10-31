@@ -21,7 +21,8 @@ const deliverySchema = z.object({
   // Whether its turn is over: a result listed it, the session went idle
   // after its turn began, or the session ended.
   answered: z.boolean().default(false),
-  // Whether the session did anything after its user event: its turn began.
+  // Whether its turn began: the session did anything after its user event,
+  // or a read already found the session idle with it waiting (relay.ts).
   started: z.boolean().default(false),
   // A delivery nobody asked for, to an interjecting Claude: nobody waits on it.
   interjecting: z.boolean().default(false),

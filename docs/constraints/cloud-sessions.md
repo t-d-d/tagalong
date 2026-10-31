@@ -78,8 +78,9 @@ result, so nothing has to be scraped or posted back by the session.
   a delivery ends when a result lists it. With no result matched to it,
   it ends when a read finds the session idle, archived or failed with
   nothing new to read, once the session has done anything after the
-  delivery's user event: just after a delivery goes in, the session can
-  read idle before its turn starts.
+  delivery's user event or an earlier read found it idle with the
+  delivery waiting: just after a delivery goes in, the session can read
+  idle before its turn starts.
 - A busy session waiting for an approval is mentioned once, with its
   link, the one place to approve it. A session that ends while a
   request still has its 👀 gets tagalong's notice. There is no notice

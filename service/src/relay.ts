@@ -84,7 +84,6 @@ export async function check(
 ): Promise<void> {
   const { events, cursor } = await deps.api.eventsAfter(id, session.cursor);
   session.cursor = cursor;
-  let ended = 0;
   for (const event of events) {
     const text = textOf(event);
     if (event.type === "user" && event.uuid !== undefined && text !== "")
@@ -96,15 +95,9 @@ export async function check(
     if (event.type === "assistant" && text !== "")
       await postTagged(id, session, text, deps);
     if (event.type === "result") {
-      ended += 1;
       await end(id, session, event, deps);
     }
   }
-  // A delivery whose user event was not known by its text began, if at all,
-  // by the time a turn ended after it went in.
-  if (ended > 0)
-    for (const delivery of session.deliveries)
-      if (delivery.uuid === null) delivery.started = true;
   // A read that finds new events starts the gaps again.
   if (events.length > 0) session.idle = 0;
   await look(id, session, deps);
@@ -212,8 +205,12 @@ async function look(
     return;
   }
   if (status === "idle") {
-    // Just after a delivery the session can read idle before its turn starts.
+    // Just after a delivery the session can read idle before its turn
+    // starts, so one with nothing yet after its user event gets until the
+    // next read. One whose user event is not known by its text, or that was
+    // saved before turns were noted as begun, is treated the same.
     const over = waiting.filter((delivery) => delivery.started);
+    for (const delivery of waiting) delivery.started = true;
     for (const delivery of over) delivery.answered = true;
     await lookAway(session.chat, asksOf(over), deps);
   }
