@@ -95,32 +95,31 @@ export function textOf(payload: Payload): string {
  * A session's dialogue, to carry into the next one (cloud-sessions.md):
  * each message it was sent and each turn's answer, oldest first, the code
  * it read and the tools it ran left out. A turn's answer is every message
- * it wrote with <whatsapp> tags in it, in order, since that is what the
- * chat saw; a turn with none is shown by its result. At most `limit`
- * characters, the latest kept.
+ * it wrote with <whatsapp> tags in it, each where it was written, since
+ * that is what the chat saw; a turn with none is shown by its result. At
+ * most `limit` characters, the latest kept.
  */
 export function carried(events: Payload[], limit: number): string {
   const turns: string[] = [];
-  let tags: string[] = [];
-  const answered = (text: string): void => {
-    turns.push(`You answered:\n${text}`);
-    tags = [];
-  };
+  // Whether the turn under way has tagged a message yet.
+  let tagging = false;
   for (const event of events) {
     const text = textOf(event).trim();
     if (event.type === "result") {
-      if (tags.length > 0) answered(tags.join("\n\n"));
-      else if (text !== "") answered(text);
+      if (!tagging && text !== "") turns.push(`You answered:\n${text}`);
+      tagging = false;
       continue;
     }
     if (text === "") continue;
-    if (event.type === "assistant" && tagged(text)) tags.push(text);
+    if (event.type === "assistant" && tagged(text)) {
+      turns.push(`You answered:\n${text}`);
+      tagging = true;
+    }
     if (event.type === "user")
       turns.push(
         `Sent to you:\n${text.length > 3000 ? `${text.slice(0, 3000)}…` : text}`,
       );
   }
-  if (tags.length > 0) answered(tags.join("\n\n"));
   const kept: string[] = [];
   let size = 0;
   for (const turn of turns.reverse()) {

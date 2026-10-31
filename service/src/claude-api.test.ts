@@ -51,7 +51,7 @@ describe("carried", () => {
   });
   const result = (text: string): Payload => ({ type: "result", result: text });
 
-  it("shows every message of a turn that held tags, in order, not the result", () => {
+  it("shows every message of a turn that held tags, in order, not its result", () => {
     expect(
       carried(
         [
@@ -65,7 +65,7 @@ describe("carried", () => {
         10_000,
       ),
     ).toBe(
-      'Sent to you:\n[m1] Ollie: is main green?\n\nYou answered:\n<whatsapp reply="m1">Yes, green.</whatsapp>\n\nBefore: <whatsapp>One.</whatsapp> after.',
+      'Sent to you:\n[m1] Ollie: is main green?\n\nYou answered:\n<whatsapp reply="m1">Yes, green.</whatsapp>\n\nYou answered:\nBefore: <whatsapp>One.</whatsapp> after.',
     );
   });
 
@@ -85,6 +85,23 @@ describe("carried", () => {
       ),
     ).toBe(
       "Sent to you:\nfirst\n\nYou answered:\n<whatsapp>A</whatsapp>\n\nSent to you:\nsecond\n\nYou answered:\n<whatsapp>B</whatsapp>",
+    );
+  });
+
+  it("keeps a tagged message before a delivery that arrived mid-turn", () => {
+    expect(
+      carried(
+        [
+          sent("A"),
+          said('<whatsapp reply="m1">X</whatsapp>'),
+          sent("B"),
+          said("<whatsapp>Y</whatsapp>"),
+          result("<whatsapp>Y</whatsapp>"),
+        ],
+        10_000,
+      ),
+    ).toBe(
+      'Sent to you:\nA\n\nYou answered:\n<whatsapp reply="m1">X</whatsapp>\n\nSent to you:\nB\n\nYou answered:\n<whatsapp>Y</whatsapp>',
     );
   });
 

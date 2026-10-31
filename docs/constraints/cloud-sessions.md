@@ -32,10 +32,10 @@ result, so nothing has to be scraped or posted back by the session.
   start a new session carrying the old one's dialogue (what it was sent
   and what it answered, not the code it read or the tools it ran, at
   most CARRY_LIMIT characters, the latest kept). A turn's answer is
-  every message it wrote with <whatsapp> tags in it, in order, or its
-  result when none had tags. The new session gets that and everything
-  said in the chat since. Only @claude fresh starts a Claude over, with
-  the chat's last HISTORY messages.
+  every message it wrote with <whatsapp> tags in it, each where it was
+  written, or its result when none had tags. The new session gets that
+  and everything said in the chat since. Only @claude fresh starts a
+  Claude over, with the chat's last HISTORY messages.
 - Each answer is remembered by the id the bridge stored it under and by
   a hash of its text, so a reply to it reaches the Claude that wrote
   it. An older answer with a session link in it still works.
