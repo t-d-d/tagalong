@@ -21,6 +21,7 @@ import {
   isInterjecting,
   isName,
   withoutGroup,
+  withoutInterjecting,
   withoutReadWriteInterjecting,
 } from "./groups.ts";
 import { CommandError, errorFields, log } from "./log.ts";
@@ -352,8 +353,10 @@ function keepToReadOnly(
     stopped = kept.stopped;
     return kept.file;
   });
+  const byChat = new Map<string, string[]>();
   for (const { chat, claude } of stopped)
-    stopInterjecting(deps, chat, [claude]);
+    byChat.set(chat, [...(byChat.get(chat) ?? []), claude]);
+  for (const [chat, names] of byChat) stopInterjecting(deps, chat, names);
   return [...new Set(stopped.map(({ claude }) => claude))];
 }
 
@@ -425,7 +428,7 @@ export async function runCommand(
         await reply(
           current === undefined
             ? `Defined.\n${line(defined, deps.api)}\n\nAdd it to a group with \`@claude add ${name}\` there.`
-            : `Updated.\n${line(defined, deps.api)}\n\nChats already talking to @${name} keep the old version until \`@claude update ${name}\` there.${stopped.length > 0 ? `\n\n@${name} stopped interjecting, since only read-only Claudes may.` : ""}`,
+            : `Updated.\n${line(defined, deps.api)}\n\nChats already talking to @${name} keep the old version until \`@claude update ${name}\` there.${stopped.includes(name) ? `\n\n@${name} stopped interjecting, since only read-only Claudes may.` : ""}`,
         );
         return;
       }
@@ -617,10 +620,7 @@ export async function runCommand(
           const entry = entryOf(file, chat);
           const askers = entry?.claudes[name];
           if (entry === undefined || askers === undefined) return file;
-          const rest = {
-            members: askers.members,
-            ...(askers.everyone === true ? { everyone: true } : {}),
-          };
+          const rest = withoutInterjecting(askers);
           return {
             ...file,
             groups: {
@@ -656,13 +656,17 @@ export async function runCommand(
           throw new CommandError(
             "Which? `@claude set interjecting read-only` or `@claude set interjecting all`",
           );
-        // Setting it back to all turns nothing back on.
-        const stopped = keepToReadOnly(deps, (file) => {
-          if (value === "read-only") return { ...file, interjecting: value };
-          const rest = { ...file };
-          delete rest.interjecting;
-          return rest;
-        });
+        // Setting it back to all turns nothing back on: any read-write
+        // Claude a file set by hand left on is stopped before it is lifted.
+        const stopped = keepToReadOnly(deps, (file) =>
+          value === "read-only" ? { ...file, interjecting: value } : file,
+        );
+        if (value === "all")
+          deps.groups.update((file) => {
+            const rest = { ...file };
+            delete rest.interjecting;
+            return rest;
+          });
         await reply(
           value === "all"
             ? "Any Claude may interject now. None was turned back on: `@claude interject <name> on` in a chat."

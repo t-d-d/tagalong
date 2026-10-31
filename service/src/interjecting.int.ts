@@ -467,6 +467,29 @@ describe("keeping interjecting to read-only Claudes (who-can-use-it.md)", () => 
     );
   });
 
+  it("turns no Claude back on when set back to all from a file set by hand", async () => {
+    const t = (h = await harness({
+      groups: { ...bothChats, interjecting: "read-only" },
+    }));
+    await says(t, "c1", OWNER, "@claude set interjecting all");
+    const file = t.groupsFile();
+    expect(file.interjecting).toBeUndefined();
+    expect(file.groups?.[GROUP]?.claudes.podstow).toEqual({
+      members: [MEMBER],
+    });
+    expect(file.groups?.[OTHER_GROUP]?.claudes.podstow).toEqual({
+      members: [],
+    });
+  });
+
+  it("names only the redefined Claude as stopped", async () => {
+    const t = (h = await harness({
+      groups: { ...bothChats, interjecting: "read-only" },
+    }));
+    await says(t, "c1", OWNER, "@claude define brainstorm read-only");
+    expect(t.bridge.sent.at(-1)?.message).not.toContain("stopped interjecting");
+  });
+
   it("takes the setting from an owner only, and asks which setting", async () => {
     const t = (h = await harness({ groups: bothChats }));
     await says(t, "c1", MEMBER, "@claude set interjecting read-only");

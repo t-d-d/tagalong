@@ -300,6 +300,14 @@ export function parseOwners(list: string): string[] {
   return owners;
 }
 
+/** Who may ask a Claude in a chat, with interjecting turned off. */
+export const withoutInterjecting = (
+  askers: GroupEntry["claudes"][string],
+): GroupEntry["claudes"][string] => ({
+  members: askers.members,
+  ...(askers.everyone === true ? { everyone: true } : {}),
+});
+
 /**
  * The file with interjecting turned off for every read-write Claude, in every
  * chat, when only read-only Claudes may interject. Returns the chats and
@@ -324,13 +332,7 @@ export function withoutReadWriteInterjecting(file: GroupsFile): {
             )
               return [claude, askers];
             stopped.push({ chat, claude });
-            return [
-              claude,
-              {
-                members: askers.members,
-                ...(askers.everyone === true ? { everyone: true } : {}),
-              },
-            ];
+            return [claude, withoutInterjecting(askers)];
           }),
         ),
       },
