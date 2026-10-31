@@ -45,7 +45,6 @@ export const envSchema = z.object({
   POLL_MS: number(15_000),
   HEARTBEAT_MS: number(300_000),
   LOGIN_CHECK_MS: number(600_000),
-  GIVE_UP_MS: number(7_200_000),
   HISTORY: number(20),
   MAX_PER_HOUR: number(12),
   // An interjecting Claude's delivery waits until the chat has been quiet this long.

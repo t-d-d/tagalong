@@ -14,7 +14,7 @@ export const OUTGOING = {
   bytes: 16 * 1024 * 1024,
   files: 5,
   // How long a link works after the session's latest delivery, and how long
-  // a session goes before it is given the link again: GIVE_UP_MS's default.
+  // a session goes before it is given the link again: two hours.
   linkSeconds: 7200,
   // How long a URL the Lambda signs works: long enough to start one upload.
   putSeconds: 300,

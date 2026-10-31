@@ -38,10 +38,17 @@ result, so nothing has to be scraped or posted back by the session.
   a hash of its text, so a reply to it reaches the Claude that wrote
   it. An older answer with a session link in it still works.
 - Answers are read from /v1/code/sessions/cse_<id>/events, after the
-  last sequence number read, from a session's first delivery until it
-  has had no delivery and no result for GIVE_UP_MS. An interjecting
-  Claude's running session is the exception, below. tagalong notes each
-  delivery's uuid from the user event that carries its text.
+  last sequence number read. tagalong notes each delivery's uuid from
+  the user event that carries its text.
+- Every session is read the same way, interjecting or not, with no time
+  limit. It is read every POLL_MS while it reports running. Otherwise
+  the gap between reads goes 30 seconds, then 1, 2, 5, 10 and 30
+  minutes, and stays at 30; a session waiting for an approval backs off
+  as an idle one does. A delivery, or a read that finds new events,
+  starts the gaps again.
+- A session is read until it is archived or failed and nothing is left
+  to read. One that update, fresh or a new session replaced is read
+  until none of its deliveries' turns is still open.
 - tagalong posts only text inside <whatsapp> tags, from any message the
   Claude writes, in any turn, whatever started it: a delivery, the
   session itself, governor, or someone in the Claude app. Text outside
@@ -64,29 +71,30 @@ result, so nothing has to be scraped or posted back by the session.
 - A result event ends a turn. The deliveries its user_message_uuids
   lists are answered. Its text repeats the Claude's last message, so a
   result posts nothing. A turn that ends with no result posts nothing
-  either: its deliveries wait until they are answered or given up on.
+  either.
 - tagalong posts tagged text from a Claude that is not interjecting just
   as from one that is. The brief is the only guard.
-- A session is busy while a delivery has no result that lists it. A
-  busy session waiting for an approval is mentioned once, with its
-  link, the one place to approve it. A delivery with no result after
-  GIVE_UP_MS is given up on, and the chat is told.
+- A session is busy while a delivery's turn is open. The turn that took
+  a delivery ends when a result lists it. With no result matched to it,
+  it ends when a read finds the session idle, archived or failed with
+  nothing new to read, once the session has done anything after the
+  delivery's user event or an earlier read found it idle with the
+  delivery waiting: just after a delivery goes in, the session can read
+  idle before its turn starts.
+- A busy session waiting for an approval is mentioned once, with its
+  link, the one place to approve it. A session that ends while a
+  request still has its 👀 gets tagalong's notice. There is no notice
+  for a turn that runs long.
 - An interjecting delivery (who-can-use-it.md) carries no request. It
   gets no 👀, no approval notice, and no notice when its turn fails or
-  it is given up on, since nobody waits on it. While a session is busy,
+  its session ends, since nobody waits on it. While a session is busy,
   interjecting waits; what was said goes in with the next delivery.
-- An interjecting Claude's running session is read with no time limit.
-  While a delivery waits, it is read every POLL_MS. Once none does, the
-  gap between reads goes 1, 2, 5, 10 and then 30 minutes, and stays at
-  30; a delivery or a turn that ends starts it again at 1 minute. Its
-  status is checked when a read finds nothing new, and an archived or
-  failed session is not read again once nothing is left to read. Update, fresh, or turning interjecting off puts
-  it back on GIVE_UP_MS, counted from its last delivery or result.
 - A turn an interjecting Claude's running session starts by itself
   posts what it tags, as any turn does. It never starts an interjecting
   delivery, and does not count toward INTERJECT_PER_HOUR.
 - tagalong reacts 👀 to a request as it delivers it, and takes the 👀
-  off once no delivery that carries the request still waits. A Claude's
+  off once no delivery that carries the request still has its turn
+  open, whether or not the Claude posted anything. A Claude's
   own reaction on the request replaces the 👀 and is left alone. A turn
   that took a request and fails gets tagalong's notice.
 - A reaction cannot be quoted or reacted to, so for a request that is a
@@ -112,6 +120,9 @@ result, so nothing has to be scraped or posted back by the session.
 - Trust the workspaces folder and expect its workspaces to inherit it.
 - Read a session to its latest event before a delivery: a turn still
   running would lose its answer.
+- Stop reading a session because time passed: a deploy notice, a
+  background job or a reminder can reach it hours after it last heard
+  from the chat.
 - Stop reading a session at a turn's result: a session that works in
   the background answers in a later turn it starts by itself.
 - Decide what to post by what started a turn: only the Claude knows
@@ -132,4 +143,6 @@ asked about, since the same day (#19, #68). One that answers a line it
 was given is posted at once since the same day, at the owner's request
 (#80). Only text a Claude tags for WhatsApp is posted, whatever started
 its turn, and there is no pass word, since the same day, at the owner's
-request (#92).
+request (#92). Every session is read the same way, with no time limit,
+and the 👀 comes off when the turn that took a request ends, with no
+give-up notice, since the same day, at the owner's request (#93).
