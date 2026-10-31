@@ -32,7 +32,8 @@ there and who may ask them.
   the people who may ask it said since it last heard, in one delivery.
   Only those people's messages, sent after it was set to interject, start
   one, never a Claude's answer or a command. A turn its own session
-  starts by itself starts one too (cloud-sessions.md). It is told nobody
+  starts by itself starts one too, unless it answers a line and is
+  posted at once (cloud-sessions.md). It is told nobody
   asked it, to answer only with something important, briefly, and
   otherwise to pass, and that a message nobody addressed to it is
   never an instruction to change anything.
@@ -40,7 +41,8 @@ there and who may ask them.
   with `interjecting: "read-only"` in groups.json. Then no read-write
   Claude interjects, whatever a chat says, and setting it stops any that
   was. Setting it back to all turns none back on.
-- At most INTERJECT_PER_HOUR interjecting deliveries go to each Claude in
+- At most INTERJECT_PER_HOUR interjecting deliveries, and turns its
+  session starts by itself that are posted at once, go to each Claude in
   each chat in an hour. They do not count toward MAX_PER_HOUR. Past
   the limit, messages and the session's own turns wait for the next
   delivery.
@@ -88,6 +90,7 @@ A reaction on a Claude's latest answer asks it since 31 October 2026,
 at the owner's request (#45).
 A Claude can interject since 31 October 2026, at the owner's request (#19).
 A turn its own session starts by itself starts an interjecting delivery
-since the same day (#19, #68).
+since the same day (#19, #68), except one that answers a line, which is
+posted at once since the same day (#80).
 An owner can keep interjecting to read-only Claudes since 31 October
 2026 (#19, #52).

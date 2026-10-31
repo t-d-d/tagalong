@@ -32,6 +32,16 @@ export function labelFor(
   return label;
 }
 
+/** Note the labels of the lines a session was just given, the latest kept. */
+export function give(session: SessionState, given: Iterable<string>): void {
+  const labels = new Set(session.given);
+  for (const label of given) {
+    labels.delete(label);
+    labels.add(label);
+  }
+  session.given = [...labels].slice(-LABELS);
+}
+
 /** The message a label stands for in a chat, if the chat still knows it. */
 export const messageFor = (
   state: State,

@@ -68,6 +68,9 @@ const sessionSchema = z.preprocess(
     // When a turn an interjecting Claude's session started by itself last
     // ended, unposted, since its last interjecting delivery; null for none.
     woke: z.number().nullable().default(null),
+    // The labels of the lines given to the session, such as m41, the latest
+    // kept: a turn it starts by itself that answers one is posted (relay.ts).
+    given: z.array(z.string()).default([]),
     // An interjecting Claude's idle session: the reads in a row that found
     // nothing, and when it is read next (relay.ts).
     idle: z.number().default(0),
