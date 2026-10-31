@@ -237,6 +237,12 @@ export class ClaudeApi {
     return list;
   }
 
+  /** Whether the environment is in a fresh list, so a session can start in it. */
+  async exists(id: string): Promise<boolean> {
+    const list = await this.environments(true);
+    return list.some((environment) => environment.id === id);
+  }
+
   /** The names known from the last list, for replies. */
   nameOf(id: string): string | undefined {
     const name = this.#environments.list.find(
@@ -258,10 +264,15 @@ export class ClaudeApi {
     return /\s/u.test(name) ? `env="${name}"` : `env=${name}`;
   }
 
-  /** An environment's env_… id, from its name (any case) or the id itself. */
+  /**
+   * An environment's env_… id, from its name (any case) or the id itself,
+   * found in a fresh list. An id not in the list is refused like a name: the
+   * CLI would start the session in another environment (#22).
+   */
   async resolve(nameOrId: string): Promise<string> {
-    if (/^env_\w+$/u.test(nameOrId)) return nameOrId;
     const list = await this.environments(true);
+    if (list.some((environment) => environment.id === nameOrId))
+      return nameOrId;
     const hits = list.filter(
       (environment) =>
         environment.name.toLowerCase() === nameOrId.toLowerCase(),

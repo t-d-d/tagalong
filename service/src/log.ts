@@ -16,6 +16,7 @@ export const events = [
   "command-failed",
   "session-started",
   "session-environment-mismatch",
+  "session-environment-gone",
   "session-followup",
   "session-relayed",
   "session-passed",

@@ -654,6 +654,91 @@ describe("asking a Claude", () => {
   });
 });
 
+describe("a Claude's environment (cloud-sessions.md)", () => {
+  it("starts nothing for a Claude whose environment is gone, and tells the chat", async () => {
+    const t = (h = await harness());
+    t.api.environments.splice(
+      t.api.environments.findIndex(
+        (environment) => environment.environment_id === "env_fake1",
+      ),
+      1,
+    );
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("Lint.")]);
+    await says(t, "r1", MEMBER, "@podstow why is the build red?");
+    expect(launches(t)).toEqual([]);
+    expect(t.bridge.sent).toEqual([
+      {
+        recipient: GROUP,
+        message:
+          "@podstow's environment is gone, so it can't start. An owner must define it again: `@claude define podstow env=<name>`",
+        quoted_message_id: "r1",
+      },
+    ]);
+    expect(reactions(t)).toEqual([
+      ["r1", "👀"],
+      ["r1", ""],
+    ]);
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "session-environment-gone",
+        claude: "podstow",
+      }),
+    );
+  });
+
+  it("keeps a member's photo for a Claude whose environment was gone, until it starts", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    t.bridge.media.set("p1", {
+      filename: "screen shot.png",
+      bytes: Buffer.from("png bytes"),
+    });
+    t.db.message({
+      id: "p1",
+      sender: MEMBER,
+      content: "",
+      at: NOW - 60_000,
+      mediaType: "image",
+    });
+    const at = t.api.environments.findIndex(
+      (environment) => environment.environment_id === "env_fake1",
+    );
+    const [gone] = t.api.environments.splice(at, 1);
+    await says(t, "r1", MEMBER, "@podstow what's wrong in this screenshot?");
+    expect(launches(t)).toEqual([]);
+    if (gone !== undefined) t.api.environments.push(gone);
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r2", MEMBER, "@podstow what's wrong in it?");
+    expect(launches(t)[0]?.prompt).toContain("screen_shot.png");
+  });
+
+  it("starts the other Claudes named with one whose environment is gone", async () => {
+    const t = (h = await harness());
+    t.api.environments.splice(
+      t.api.environments.findIndex(
+        (environment) => environment.environment_id === "env_fake1",
+      ),
+      1,
+    );
+    t.fake.launches.push(SECOND);
+    started(t, SECOND, [result("Go wide.")]);
+    await says(t, "r1", MEMBER, "@podstow @brainstorm what do you both think?");
+    expect(launches(t)).toHaveLength(1);
+    expect(launches(t)[0]?.prompt).toContain('You are "brainstorm"');
+  });
+
+  it("starts a Claude whose environment is in the list as before, beside one with no environment", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION, [result("Lint.")]);
+    started(t, SECOND, [result("Go wide.")]);
+    await says(t, "r1", MEMBER, "@podstow @brainstorm what do you both think?");
+    expect(launches(t)).toHaveLength(2);
+  });
+});
+
 describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
   it("delivers an ask while the last turn runs, and posts each answer as a reply to its own ask", async () => {
     const t = (h = await harness());
@@ -1195,7 +1280,7 @@ describe("commands", () => {
     expect(launches(t)[0]?.prompt).toContain('You are "brainstorm"');
   });
 
-  it("refuses a Claude it does not know, a reserved name, and an environment it cannot find", async () => {
+  it("refuses a Claude it does not know, a reserved name, and an environment by name or id it cannot find", async () => {
     const t = (h = await harness());
     await says(t, "c1", OWNER, "@claude add nobody", { chatJID: OTHER_GROUP });
     expect(t.bridge.sent.at(-1)?.message).toMatch(
@@ -1213,7 +1298,26 @@ describe("commands", () => {
     expect(t.bridge.sent.at(-1)?.message).toBe(
       'Couldn\'t do that: no environment called "nowhere". Yours: Default Full, spare',
     );
-    expect(t.groupsFile()).toEqual(standardGroups);
+    await says(t, "c4", OWNER, "@claude define critic o/other env_fakegone", {
+      chatJID: OTHER_GROUP,
+    });
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      'Couldn\'t do that: no environment called "env_fakegone". Yours: Default Full, spare',
+    );
+    await says(t, "c5", OWNER, "@claude define critic env=env_fakegone", {
+      chatJID: OTHER_GROUP,
+    });
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      'Couldn\'t do that: no environment called "env_fakegone". Yours: Default Full, spare',
+    );
+    await says(t, "c6", OWNER, "@claude define critic env_fake2", {
+      chatJID: OTHER_GROUP,
+    });
+    expect(t.groupsFile().claudes?.critic).toEqual({
+      repo: "o/critic",
+      environment: "env_fake2",
+      access: "read-only",
+    });
   });
 
   it("starts a Claude afresh, with only the last messages", async () => {

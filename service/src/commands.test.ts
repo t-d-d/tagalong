@@ -4,7 +4,7 @@ import { COMMAND, commandIn, defineEntry, tokens } from "./commands.ts";
 import type { Claude } from "./groups.ts";
 
 const self = new Set(["447700900100", "120363000000100"]);
-// Never reached: these tests give environments by id.
+// Never reached: these tests name no environment, which is looked up.
 const api = new ClaudeApi(
   "http://127.0.0.1:1",
   () => "token",
@@ -84,14 +84,14 @@ describe("defineEntry", () => {
   it("changes only what the command names", async () => {
     expect(
       await defineEntry(
-        "podstow read-only ref=dev env_fake2 model=opus",
+        "podstow read-only ref=dev model=opus",
         current,
         undefined,
         api,
       ),
     ).toEqual({
       repo: "o/old",
-      environment: "env_fake2",
+      environment: "env_fake1",
       access: "read-only",
       ref: "dev",
       model: "opus",
