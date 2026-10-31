@@ -1062,6 +1062,184 @@ describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
   });
 });
 
+describe("a reaction on a Claude's latest answer (who-can-use-it.md)", () => {
+  /** A reaction from `sender`, a second after the last, stored as the bridge stores it, then delivered. */
+  async function reacts(
+    t: Harness,
+    id: string,
+    sender: string,
+    emoji: string,
+    on: string,
+    extra: Record<string, unknown> = {},
+  ) {
+    t.clock.now += 1000;
+    t.db.message({
+      id,
+      sender,
+      content: emoji,
+      at: t.clock.now,
+      fromMe: extra.isFromMe === true,
+      mediaType: "reaction",
+    });
+    await t.deliver({
+      eventType: "reaction",
+      messageId: id,
+      sender,
+      content: emoji,
+      mediaType: "reaction",
+      reactionEmoji: emoji,
+      reactionToMessageId: on,
+      reactionRemoved: emoji === "",
+      ...extra,
+    });
+  }
+
+  /** podstow, asked in r1, answers "Shall I open the PR?", which the bridge stores as sent-1. */
+  async function answered(t: Harness) {
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("Shall I open the PR?")]);
+    spoken.push("Shall I open the PR?");
+    await says(t, "r1", MEMBER, "@podstow is the fix ready?");
+    await poll(t);
+    expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
+      "*podstow:* Shall I open the PR?",
+    ]);
+    t.bridge.sent.splice(0);
+    t.bridge.reactions.splice(0);
+  }
+
+  /** What the session does with the next message delivered to it. */
+  const next = (t: Harness, id: string, reply: unknown[]) =>
+    t.api.sessions.get(id)?.replies?.push(reply);
+
+  it("delivers a 👍 to that Claude's session as an ask with the answer quoted, and replies to the answer", async () => {
+    const t = (h = await harness());
+    await answered(t);
+    next(t, SESSION, [result("Opening it now.")]);
+    await reacts(t, "x1", MEMBER, "👍", "sent-1");
+    expect(followUps(t)).toHaveLength(1);
+    expect(followUps(t)[0]?.args[2]).toBe(`session_${SESSION}`);
+    expect(followUps(t)[0]?.options.input).toMatch(
+      /\[m\d+\] Ollie reacted 👍 to your answer: "Shall I open the PR\?"\n/u,
+    );
+    // The 👀 goes on the answer, which the bridge is told is the device's own.
+    expect(t.bridge.reactions).toEqual([
+      { recipient: GROUP, message_id: "sent-1", from_me: true, emoji: "👀" },
+    ]);
+    await poll(t);
+    expect(t.bridge.sent).toEqual([
+      {
+        recipient: GROUP,
+        message: "*podstow:* Opening it now.",
+        quoted_message_id: "sent-1",
+      },
+    ]);
+    expect(reactions(t)).toEqual([
+      ["sent-1", "👀"],
+      ["sent-1", ""],
+    ]);
+    expect(t.raw.filter((line) => line.includes("👍"))).toEqual([]);
+  });
+
+  it("asks the Claude whose latest answer it is on", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION, [result("Shall I open the PR?")]);
+    started(t, SECOND, [result("Go wide.")]);
+    await says(t, "r1", MEMBER, "@podstow is the fix ready?");
+    await poll(t);
+    await says(t, "r2", MEMBER, "@brainstorm any ideas?");
+    await poll(t);
+    expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
+      "*podstow:* Shall I open the PR?",
+      "*brainstorm:* Go wide.",
+    ]);
+    await reacts(t, "x1", OWNER, "👍", "sent-2");
+    expect(followUps(t).map((call) => call.args[2])).toEqual([
+      `session_${SECOND}`,
+    ]);
+    await reacts(t, "x2", OWNER, "👍", "sent-1");
+    expect(followUps(t).map((call) => call.args[2])).toEqual([
+      `session_${SECOND}`,
+      `session_${SESSION}`,
+    ]);
+  });
+
+  it("asks nobody for a reaction on an older answer, a person's message or one of tagalong's notices", async () => {
+    const t = (h = await harness());
+    await answered(t);
+    next(t, SESSION, [result("Done, it is open.")]);
+    await says(t, "r2", MEMBER, "@podstow yes please");
+    await poll(t);
+    await says(t, "r3", MEMBER, "@claude can you look at this?");
+    expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
+      "*podstow:* Done, it is open.",
+      "Ask one of us by name: @podstow, @brainstorm.",
+    ]);
+    const before = t.bridge.reactions.length;
+    await reacts(t, "x1", MEMBER, "👍", "sent-1");
+    await reacts(t, "x2", MEMBER, "👍", "r2");
+    await reacts(t, "x3", MEMBER, "👍", "sent-3");
+    expect(followUps(t)).toHaveLength(1);
+    expect(t.bridge.reactions).toHaveLength(before);
+  });
+
+  it("asks nobody when a reaction is taken off, or for the device's own", async () => {
+    const t = (h = await harness());
+    await answered(t);
+    await reacts(t, "x1", MEMBER, "", "sent-1");
+    await reacts(t, "x2", CLAUDE, "👍", "sent-1", { isFromMe: true });
+    expect(followUps(t)).toEqual([]);
+    expect(t.bridge.reactions).toEqual([]);
+  });
+
+  it("asks nobody for someone not allowed to ask that Claude, and says so", async () => {
+    const t = (h = await harness());
+    await answered(t);
+    await reacts(t, "x1", STRANGER, "👍", "sent-1");
+    expect(followUps(t)).toEqual([]);
+    expect(t.bridge.reactions).toEqual([]);
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({
+        event: "request-ignored",
+        why: "not-a-member",
+      }),
+    );
+  });
+
+  it("counts towards the hourly cap, and puts the ⏳ on the answer past it", async () => {
+    const t = (h = await harness({ env: { MAX_PER_HOUR: "2" } }));
+    await answered(t);
+    await reacts(t, "x1", MEMBER, "👍", "sent-1");
+    await reacts(t, "x2", MEMBER, "🙏", "sent-1");
+    await says(t, "r2", MEMBER, "@podstow and then?");
+    expect(followUps(t)).toHaveLength(1);
+    expect(reactions(t)).toEqual([
+      ["sent-1", "👀"],
+      ["sent-1", "⏳"],
+      ["r2", "⏳"],
+    ]);
+  });
+
+  it("puts a one-emoji answer on the answer as a reaction, and posts nothing for PASS", async () => {
+    const t = (h = await harness());
+    await answered(t);
+    next(t, SESSION, [result("👌")]);
+    await reacts(t, "x1", MEMBER, "👍", "sent-1");
+    await poll(t);
+    next(t, SESSION, [result("PASS")]);
+    await reacts(t, "x2", MEMBER, "❤️", "sent-1");
+    await poll(t);
+    expect(t.bridge.sent).toEqual([]);
+    expect(t.bridge.reactions).toEqual([
+      { recipient: GROUP, message_id: "sent-1", from_me: true, emoji: "👀" },
+      { recipient: GROUP, message_id: "sent-1", from_me: true, emoji: "👌" },
+      { recipient: GROUP, message_id: "sent-1", from_me: true, emoji: "👀" },
+      { recipient: GROUP, message_id: "sent-1", from_me: true, emoji: "" },
+    ]);
+  });
+});
+
 describe("who is answered", () => {
   it("ignores someone the owner has not allowed", async () => {
     const t = (h = await harness());

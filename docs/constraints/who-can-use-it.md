@@ -19,10 +19,13 @@ there and who may ask them.
 - A chat is a group or a one-to-one chat with the number; both work the
   same. A chat is answered only once an owner has added a Claude to it.
   Until then nothing about it is logged or kept.
-- A Claude is asked by "@name" anywhere in a message, or by a reply to
-  one of its answers. One message can ask several. "@claude" with no
-  command, or a name not in the chat, gets told who is there. Nothing
-  else asks a Claude: a Claude's own answer never does.
+- A Claude is asked by "@name" anywhere in a message, by a reply to
+  one of its answers, or by a reaction on its latest answer in the
+  chat. One message can ask several. "@claude" with no command, or a
+  name not in the chat, gets told who is there. Nothing else asks a
+  Claude: a Claude's own answer never does, nor does a reaction taken
+  off, the device's own reaction, or one on an older answer, a
+  person's message or one of tagalong's notices.
 - A command is "@claude <verb>" at the start of a message, or a mention
   of the number. Only an owner's own number may run one, only in a
   message stored in the last ten minutes, and never from tagalong's own
@@ -59,3 +62,5 @@ not on a sandbox. A Claude whose repo matters is read-write only in
 chats with people trusted with the repo.
 History: Set when the repo was made, October 2026. Named Claudes
 replaced one repo per group on 19 October 2026, at the owner's request.
+A reaction on a Claude's latest answer asks it since 31 October 2026,
+at the owner's request (#45).
