@@ -14,8 +14,9 @@ if you have not used GitHub this session.
 2. **Stop if it is not yours to start.** That means it is closed, it is
    labelled `mode: human`, it is a `type: prd` (the `prd-to-issues` skill
    breaks a PRD into tickets), or another session's pull request for it is
-   already open. It also means it is `workflow: under development` and
-   your prompt does not say governor claimed it for you. Say which in a
+   already open. It also means it is `workflow: under development`,
+   unless your prompt says governor claimed it for you or the owner asked
+   you to take it over. Say which in a
    comment on the issue, and stop. If the open pull request is your own,
    carry on with it.
 3. **Check the blockers.** `gh-deps list-blockers <number>` (the
