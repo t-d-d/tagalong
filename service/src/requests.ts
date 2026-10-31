@@ -14,6 +14,7 @@ import type { Bridge, Quote } from "./bridge.ts";
 import type { ClaudeApi } from "./claude-api.ts";
 import type { Cloud } from "./cloud.ts";
 import type { Env } from "./env.ts";
+import { allowed } from "./access.ts";
 import { oneLine } from "./format.ts";
 import {
   type Claude,
@@ -32,6 +33,7 @@ import {
   conversation,
   firstPrompt,
   followUp,
+  marked,
 } from "./prompts.ts";
 import { OUTGOING, keepLink, newLinkId } from "./outgoing.ts";
 import { lookAway } from "./relay.ts";
@@ -193,8 +195,13 @@ function withLink(
   return { ...ask, upload: `${deps.env.UPLOAD_LINK}${link.id}/` };
 }
 
-/** What the request quotes, as the Claude will read it. */
-function quotedOf(payload: Payload, deps: RequestDeps): Ask["quoted"] {
+/** What the request quotes, as the Claude will read it, a person marked with whether they may ask it. */
+function quotedOf(
+  payload: Payload,
+  group: Group,
+  claude: string,
+  deps: RequestDeps,
+): Ask["quoted"] {
   if (
     payload.quotedMessageId === undefined &&
     payload.quotedContent === undefined
@@ -204,12 +211,17 @@ function quotedOf(payload: Payload, deps: RequestDeps): Ask["quoted"] {
   const text = payload.quotedContent ?? row?.content ?? "";
   if (text === "") return undefined;
   const by = answerBy(text);
+  const quotedPerson = (sender: string) =>
+    marked(
+      deps.people.nameOf(sender),
+      allowed(deps.groups.config, group, claude, deps.people, sender),
+    );
   const who =
     payload.quotedIsFromMe === true
       ? by === undefined
         ? "tagalong"
         : `@${by}`
-      : deps.people.nameOf(payload.quotedSender ?? row?.sender ?? "");
+      : quotedPerson(payload.quotedSender ?? row?.sender ?? "");
   return {
     who,
     text: deps.people.readable(text.replace(/^\*[a-z0-9-]+:\*\s?/u, "")),
@@ -356,7 +368,7 @@ async function turn(
           // A reaction quotes the answer it is on.
           quoted:
             reaction === undefined
-              ? quotedOf(payload, deps)
+              ? quotedOf(payload, group, claude.name, deps)
               : {
                   who: `@${claude.name}`,
                   text: deps.people.readable(

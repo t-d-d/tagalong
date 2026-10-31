@@ -33,7 +33,10 @@ export interface Attachment {
 }
 
 export interface Pick {
-  store: WhatsAppStore;
+  store: {
+    message: WhatsAppStore["message"];
+    recent: WhatsAppStore["recent"];
+  };
   chat: string;
   messageId: string | undefined;
   quotedMessageId: string | undefined;
@@ -58,9 +61,19 @@ export function pickMedia(pick: Pick): MessageRow[] {
         pick.now - timeOf(row.timestamp) <= LIMITS.windowMs &&
         !pick.sent.has(row.id),
     );
-  const rows = [quoted, ...recent, own].filter(ok);
-  const unique = [...new Map(rows.map((row) => [row.id, row])).values()];
-  return unique.slice(-LIMITS.files);
+  // The request's own media and what it replies to always go, so others'
+  // files cannot crowd them out; the latest of the rest fill what is left.
+  const kept = [quoted, own].filter(ok);
+  const keptIds = new Set(kept.map((row) => row.id));
+  const others = recent.filter((row) => ok(row) && !keptIds.has(row.id));
+  const rest = others.slice(
+    Math.max(0, others.length - (LIMITS.files - kept.length)),
+  );
+  const chosen = new Set([...kept, ...rest].map((row) => row.id));
+  const rows = [quoted, ...recent, own].filter(
+    (row): row is MessageRow => row !== undefined && chosen.has(row.id),
+  );
+  return [...new Map(rows.map((row) => [row.id, row])).values()];
 }
 
 /**

@@ -12,7 +12,8 @@ upload link is short, and a Lambda signs for it at the moment of use.
 
 - A request carries the media in its own message, the message it
   replies to, and any sent in the last ten minutes that the Claude has
-  not had yet. At most five, each at most 25 MB.
+  not had yet. At most five, each at most 25 MB. Its own media and what
+  it replies to always go; the latest of the rest fill what is left.
 - An interjecting delivery carries media as a request does: what was
   sent in the chat since it last heard, not yet given to it. At most
   five, each at most 25 MB, and each file goes once to each Claude.
