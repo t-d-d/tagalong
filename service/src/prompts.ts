@@ -2,7 +2,7 @@
 // request, any files, and how its answer reaches WhatsApp.
 import { allowed } from "./access.ts";
 import type { Attachment } from "./attachments.ts";
-import { OUTGOING, type Upload } from "./outgoing.ts";
+import { OUTGOING } from "./outgoing.ts";
 import { COMMAND } from "./commands.ts";
 import type { Claude, Config, Group } from "./groups.ts";
 import { PASS } from "./mailbox.ts";
@@ -116,17 +116,14 @@ export interface Ask {
   /** The message the request replies to, if any: who wrote it and what it said. */
   quoted: { who: string; text: string } | undefined;
   files: Attachment[];
-  /** Where the Claude may upload files to send with its answer. */
-  upload?: Upload;
+  /** The session's upload link, up to the file's name, when this delivery gives it. */
+  upload?: string;
 }
 
-/** How to send files back: one curl per file, to the turn's own folder. */
-export function uploadSection(upload: Upload | undefined): string {
-  if (upload === undefined) return "";
-  const fields = Object.entries(upload.fields)
-    .map(([key, value]) => `-F '${key}=${value}'`)
-    .join(" ");
-  return `\nTo send pictures, audio or files to the chat with your answer, upload each before you answer, at most ${String(OUTGOING.files)}, each at most ${String(OUTGOING.bytes / 1024 / 1024)} MB:\ncurl -fsS ${fields} -F 'file=@<path>' '${upload.url}'\nEach goes to the chat once, after the answer of the turn you upload it in, under its own name: .jpg, .png and .webp as a picture, .ogg (Opus) as a voice note, .mp4 as a video, anything else as a file.\n`;
+/** How to send files back: one short curl per file, with the session's link (attachments.md). */
+export function uploadSection(link: string | undefined): string {
+  if (link === undefined) return "";
+  return `\nTo send pictures, audio or files to the chat, upload each before you answer, at most ${String(OUTGOING.files)}, each at most ${String(OUTGOING.bytes / 1024 / 1024)} MB. Put the file's name, in letters, digits, dots, dashes and underscores, at the end of the link:\ncurl -fsS -T <path> "$(curl -fsS '${link}<name>')"\nEach goes to the chat once, after your next answer, under its name: .jpg, .png and .webp as a picture, .ogg (Opus) as a voice note, .mp4 as a video, anything else as a file. Keep this command for the whole conversation: later messages may not repeat it. It works until two hours after the latest message from the chat.\n`;
 }
 
 const asks = (ask: Ask, claude: string): string => {

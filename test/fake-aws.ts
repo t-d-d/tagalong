@@ -1,9 +1,16 @@
 // Parameter Store, S3 and Transcribe in memory, behind the service's Aws interface.
 import type { Aws } from "../service/src/aws.ts";
 
+/** An object in the fake bucket; `at` is when it was written, if known. */
+export interface FakeObject {
+  body: Buffer;
+  contentType: string;
+  at?: number;
+}
+
 export interface FakeAws extends Aws {
   secrets: Map<string, string>;
-  objects: Map<string, { body: Buffer; contentType: string }>;
+  objects: Map<string, FakeObject>;
   puts: string[];
   /** What each voice note says, by its bytes; one not here fails to transcribe. */
   speech: Map<string, string>;
@@ -11,9 +18,10 @@ export interface FakeAws extends Aws {
   transcribed: string[];
 }
 
-export function fakeAws(): FakeAws {
+/** `now` stamps each object written, as S3's LastModified. */
+export function fakeAws(now: () => number = () => Date.now()): FakeAws {
   const secrets = new Map<string, string>();
-  const objects = new Map<string, { body: Buffer; contentType: string }>();
+  const objects = new Map<string, FakeObject>();
   const puts: string[] = [];
   const speech = new Map<string, string>();
   const transcribed: string[] = [];
@@ -30,7 +38,7 @@ export function fakeAws(): FakeAws {
       return Promise.resolve();
     },
     putObject: (bucket, key, body, contentType) => {
-      objects.set(`${bucket}/${key}`, { body, contentType });
+      objects.set(`${bucket}/${key}`, { body, contentType, at: now() });
       return Promise.resolve();
     },
     presign: (bucket, key, seconds) =>
@@ -47,14 +55,16 @@ export function fakeAws(): FakeAws {
         ? Promise.reject(new Error("transcription failed"))
         : Promise.resolve(text);
     },
-    presignPost: (bucket, prefix, maxBytes, seconds) =>
-      Promise.resolve({
-        url: `https://${bucket}.s3.example.test/`,
-        fields: {
-          key: `${prefix}\${filename}`,
-          Policy: `max-${String(maxBytes)}-for-${String(seconds)}`,
-        },
-      }),
+    presignPut: (bucket, key, seconds) =>
+      Promise.resolve(
+        `https://${bucket}.s3.example.test/${key}?put=${String(seconds)}`,
+      ),
+    modifiedAt: (bucket, key) => {
+      const object = objects.get(`${bucket}/${key}`);
+      return Promise.resolve(
+        object === undefined ? undefined : (object.at ?? now()),
+      );
+    },
     listObjects: (bucket, prefix) =>
       Promise.resolve(
         [...objects.entries()]

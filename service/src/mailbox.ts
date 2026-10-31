@@ -51,7 +51,6 @@ const keyOf = (text: string): string =>
 export const deliveryOf = (
   text: string,
   ask: Quote | null,
-  folder: string | null,
   at: number,
 ): Delivery => ({
   uuid: null,
@@ -59,8 +58,6 @@ export const deliveryOf = (
   ask,
   at,
   answered: false,
-  folder,
-  sent: [],
 });
 
 /** Note the uuid of a user event in the session that is one of tagalong's deliveries. */

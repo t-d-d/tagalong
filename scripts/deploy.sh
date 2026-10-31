@@ -15,6 +15,9 @@ shopt -s inherit_errexit
 
 cd "$(dirname "$0")/.."
 summary=${GITHUB_STEP_SUMMARY:-/dev/null}
+# One manifest per image, with no attestation beside it: Lambda refuses an
+# image whose index carries one, and nothing reads them.
+export BUILDX_NO_DEFAULT_ATTESTATIONS=1
 
 output() {
   aws cloudformation describe-stacks --stack-name "$1" \
@@ -82,14 +85,16 @@ role() {
 app() {
   apply tagalong-images --template-file infra/images.cfn.yml
 
-  local bridge_uri app_uri
+  local bridge_uri app_uri link_uri
   bridge_uri=$(output tagalong-images BridgeRepositoryUri)
   app_uri=$(output tagalong-images AppRepositoryUri)
+  link_uri=$(output tagalong-images LinkRepositoryUri)
   aws ecr get-login-password | docker login --username AWS --password-stdin "${bridge_uri%%/*}"
 
-  local bridge_image app_image
+  local bridge_image app_image link_image
   bridge_image=$(image "$bridge_uri" "$(hash_of images/bridge.Dockerfile images/bridge-start.sh images/bridge.patch)" images/bridge.Dockerfile)
   app_image=$(image "$app_uri" "$(hash_of images/tagalong.Dockerfile .dockerignore package.json package-lock.json service)" images/tagalong.Dockerfile)
+  link_image=$(image "$link_uri" "$(hash_of images/upload-link.Dockerfile images/upload-link.js .dockerignore package.json package-lock.json service)" images/upload-link.Dockerfile)
 
   # The default VPC's first two zones, by zone id, so the volume's mount
   # targets stay put from one deploy to the next.
@@ -116,8 +121,8 @@ app() {
     --capabilities CAPABILITY_IAM \
     --parameter-overrides \
     "VpcId=$vpc" "SubnetA=${subnets[0]}" "SubnetB=${subnets[1]}" \
-    "BridgeImage=$bridge_image" "AppImage=$app_image"
-  echo "Deployed $app_image and $bridge_image" >> "$summary"
+    "BridgeImage=$bridge_image" "AppImage=$app_image" "LinkImage=$link_image"
+  echo "Deployed $app_image, $bridge_image and $link_image" >> "$summary"
 }
 
 # The live check: the task running the stack's task definition writes a

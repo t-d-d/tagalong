@@ -38,6 +38,9 @@ export const envSchema = z.object({
   // The bucket for attachments and the device seed (attachments.md, one-device.md).
   ATTACHMENTS_BUCKET: optional,
   SEED_KEY: z.string().default("seed/device.tgz"),
+  // The upload link's address, up to the session's id: the HTTP API in front
+  // of the Lambda (attachments.md). Without it a Claude is given no link.
+  UPLOAD_LINK: optional.pipe(z.url().endsWith("/").optional()),
   AWS_REGION: optional,
   POLL_MS: number(15_000),
   HEARTBEAT_MS: number(300_000),
@@ -58,6 +61,19 @@ export function readEnv(
   source: Record<string, string | undefined> = process.env,
 ): Env {
   return envSchema.parse(source);
+}
+
+/** The upload link's Lambda: the bucket it signs for (upload-link.ts). */
+export const linkEnvSchema = z.object({
+  ATTACHMENTS_BUCKET: z.string().min(1),
+  AWS_REGION: optional,
+});
+
+export function readLinkEnv(
+  // eslint-disable-next-line no-restricted-properties -- the Lambda's one read of the environment
+  source: Record<string, string | undefined> = process.env,
+): z.infer<typeof linkEnvSchema> {
+  return linkEnvSchema.parse(source);
 }
 
 /** The environment every CLI call runs under: ours, with the login's org named (claude-login.md). */

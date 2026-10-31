@@ -20,9 +20,13 @@ const deliverySchema = z.object({
   at: z.number(),
   // Whether a result has listed it, or it was given up on.
   answered: z.boolean().default(false),
-  // The folder in the bucket its upload form writes to (outgoing.ts), and
-  // the files from it already sent or skipped.
-  folder: z.string().nullable().default(null),
+});
+
+// The session's upload link (outgoing.ts): its id, when the session was last
+// given it, and the files from its folder already sent or skipped.
+const linkSchema = z.object({
+  id: z.string(),
+  given: z.number(),
   sent: z.array(z.string()).default([]),
 });
 
@@ -32,7 +36,6 @@ const legacySchema = z.looseObject({
   request: quoteSchema,
   waiting: z.literal(true),
   since: z.number(),
-  outbox: z.string().nullable().default(null),
   deliveries: z.undefined().optional(),
 });
 
@@ -40,11 +43,8 @@ const sessionSchema = z.preprocess(
   (raw) => {
     const old = legacySchema.safeParse(raw);
     if (!old.success) return raw;
-    const { request, since, outbox } = old.data;
-    return {
-      ...old.data,
-      deliveries: [{ key: "", ask: request, at: since, folder: outbox }],
-    };
+    const { request, since } = old.data;
+    return { ...old.data, deliveries: [{ key: "", ask: request, at: since }] };
   },
   z.object({
     chat: z.string(),
@@ -60,6 +60,9 @@ const sessionSchema = z.preprocess(
     // The turn's latest words, kept across polls.
     lastText: z.string().default(""),
     deliveries: z.array(deliverySchema).default([]),
+    // None for a session from before links (#59) until its next delivery,
+    // or with no bucket or link to give.
+    link: linkSchema.nullable().default(null),
   }),
 );
 
@@ -104,6 +107,7 @@ const stateSchema = z.object({
 
 export type SessionState = z.infer<typeof sessionSchema>;
 export type Delivery = z.infer<typeof deliverySchema>;
+export type Link = z.infer<typeof linkSchema>;
 export type Thread = State["threads"][string];
 
 /** The key of a request that shows tagalong's 👀. */

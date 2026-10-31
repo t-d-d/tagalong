@@ -24,6 +24,7 @@ const session = (): SessionState => ({
   nudged: false,
   lastText: "",
   deliveries: [],
+  link: null,
 });
 
 describe("labels", () => {
@@ -52,7 +53,7 @@ describe("labels", () => {
 describe("deliveries", () => {
   it("knows its own message in the session by its text, whitespace aside", () => {
     const s = session();
-    s.deliveries.push(deliveryOf("Ollie asks you:\nwhy?\n", ask, null, 1));
+    s.deliveries.push(deliveryOf("Ollie asks you:\nwhy?\n", ask, 1));
     heard(s, "u9", "someone else's message");
     expect(s.deliveries[0]?.uuid).toBeNull();
     heard(s, "u1", "Ollie asks you: why?");
@@ -61,8 +62,8 @@ describe("deliveries", () => {
 
   it("says which deliveries a result answers, and when it answers only messages from elsewhere", () => {
     const s = session();
-    s.deliveries.push(deliveryOf("one", ask, null, 1));
-    s.deliveries.push(deliveryOf("two", ask, null, 2));
+    s.deliveries.push(deliveryOf("one", ask, 1));
+    s.deliveries.push(deliveryOf("two", ask, 2));
     heard(s, "u1", "one");
     heard(s, "u2", "two");
     expect(busy(s)).toBe(true);
@@ -71,7 +72,7 @@ describe("deliveries", () => {
     // A turn the session started by itself lists no messages.
     expect(answering(s, [])).toEqual([]);
     // A delivery saved before uuids were noted takes the next result.
-    s.deliveries.push({ ...deliveryOf("", ask, null, 3), key: "" });
+    s.deliveries.push({ ...deliveryOf("", ask, 3), key: "" });
     expect(answering(s, ["u7"])).toEqual([s.deliveries[2]]);
     s.deliveries.pop();
     for (const delivery of s.deliveries) delivery.answered = true;

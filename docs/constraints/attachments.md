@@ -1,10 +1,12 @@
 # Attachments
-Relevance: Photos, files or voice notes passed to a session or sent back to the chat: service/src/attachments.ts, service/src/outgoing.ts, the bucket and its policy in infra/app.cfn.yml
-Decision: Files pass both ways through a private bucket that deletes them after a day: to a session as hour-long links, back through a form for its turn.
+Relevance: Photos, files or voice notes passed to a session or sent back to the chat: service/src/attachments.ts, service/src/outgoing.ts, service/src/upload-link.ts, the bucket, its policy and the upload link in infra/app.cfn.yml
+Decision: Files pass both ways through a private bucket that deletes them after a day: to a session as hour-long links, back through each session's upload link.
 
 Why: A cloud session cannot reach the bridge, but its environment can
 fetch from *.amazonaws.com. A short link gives it the one file and
-nothing else.
+nothing else. Anything the task signs carries its role's session token,
+so a signed upload form is about 3 KB a Claude must copy exactly. The
+upload link is short, and a Lambda signs for it at the moment of use.
 
 ## Rules
 
@@ -21,15 +23,31 @@ nothing else.
   once read. The session gets the transcript under the link, marked as
   speech recognition that may have errors. A note that fails or takes
   over a minute still goes, as a link alone.
-- Each delivery to a session gets its own folder,
-  outgoing/<random id>/, and a presigned POST form for it that lasts
-  two hours and takes files of at most 16 MB. Once a turn's answer is posted, at most five
-  new files go to the chat from the folders of the deliveries answered
-  by then whose forms still work, each through the bridge's outbox,
-  which is emptied as each is sent. Each file goes once. The folder of
-  a delivery still waiting for its answer is not read.
+- Each session has one upload link, /up/<id>/ on the upload link's
+  HTTP API, whose id is 24 random URL-safe characters. A Claude uploads
+  with curl -fsS -T <path> "$(curl -fsS '<link><name>')". A session
+  that carries on another's conversation keeps its link. @claude fresh
+  starts a new one.
+- The link goes in a session's first prompt, and again in a follow-up
+  when the session last had it more than two hours earlier. Other
+  follow-ups carry no upload line.
+- tagalong writes an empty marker at links/<id> with every delivery.
+  The upload link's Lambda answers GET /up/<id>/<name> with a
+  five-minute presigned PUT URL for outgoing/<id>/<safe name> while
+  the marker is less than two hours old, and with 404 otherwise. The
+  task signs nothing for uploads.
+- Once an answer is posted, at most five new files go to the chat from
+  the session's folder, each at most 16 MB, each through the bridge's
+  outbox, which is emptied as each is sent. Each file goes once. A PUT
+  URL cannot cap a file's size, so a larger file can land. It is
+  skipped, and the bucket deletes it within a day.
+- The folder is read after every posted answer, even while another
+  delivery to the session waits. A file uploaded for a queued ask in
+  the seconds before tagalong reads the previous answer goes with that
+  answer.
 - File names, sizes and types never reach a log line; counts and bytes
-  do. A transcript never reaches one; its length may.
+  do. A transcript never reaches one; its length may. A link's id never
+  reaches one.
 
 ## Do not
 
@@ -37,12 +55,17 @@ nothing else.
 - Put a file's contents in the prompt. A voice note's transcript is the
   one exception.
 - Send audio outside the account to be transcribed.
-- Give a session a way to write anywhere in the bucket but its
-  deliveries' folders.
+- Give a session a way to write anywhere in the bucket but its own
+  folder.
+- Put a form or URL the task signed in a prompt for uploads: it carries
+  the role's session token, which a Claude must copy exactly, in every
+  message.
 - Keep files past a day.
 
 History: Set when the repo was made, October 2026. Voice notes are
 transcribed since 19 October 2026, at the owner's request (#8). A
 session's files are sent to the chat since the same day (#12). A turn
 sends from the folder of each delivery it answers, each file once, since
-27 October 2026 (#17).
+27 October 2026 (#17). Each session has one short upload link, which a
+Lambda turns into an upload URL, since 31 October 2026, at the owner's
+request (#59).

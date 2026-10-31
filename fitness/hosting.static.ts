@@ -145,10 +145,89 @@ describe("fitness: the task may only run its own transcription jobs (attachments
   });
 });
 
-describe("fitness: a turn's uploads stay in their own folder (attachments.md)", () => {
-  it("may write and read outgoing/*, so it can sign the upload form and fetch what came", () => {
-    expect(JSON.stringify(resourcesOf("AWS::IAM::Role"))).toContain(
-      '{"Effect":"Allow","Action":["s3:PutObject","s3:GetObject"],"Resource":{"Fn::Sub":"${Bucket.Arn}/outgoing/*"}}',
+describe("fitness: a session's uploads stay in its own folder (attachments.md)", () => {
+  const policiesSchema = z.object({
+    Policies: z.array(
+      z.object({
+        PolicyDocument: z.object({
+          Statement: z.array(
+            z.object({
+              Effect: z.string(),
+              Action: z.union([z.string(), z.array(z.string())]),
+              Resource: z.unknown(),
+            }),
+          ),
+        }),
+      }),
+    ),
+  });
+
+  /** A role's S3 statements, each as JSON. */
+  const s3Of = (role: string) =>
+    resourcesOf("AWS::IAM::Role")
+      .filter((each) => each.name === role)
+      .flatMap((each) => policiesSchema.parse(each.properties).Policies)
+      .flatMap((policy) => policy.PolicyDocument.Statement)
+      .filter((statement) =>
+        [statement.Action].flat().some((action) => action.startsWith("s3:")),
+      )
+      .map((statement) => JSON.stringify(statement));
+
+  it("lets the task read what landed and keep links working, but not upload", () => {
+    expect(s3Of("TaskRole")).toEqual(
+      expect.arrayContaining([
+        '{"Effect":"Allow","Action":"s3:GetObject","Resource":{"Fn::Sub":"${Bucket.Arn}/outgoing/*"}}',
+        '{"Effect":"Allow","Action":"s3:PutObject","Resource":{"Fn::Sub":"${Bucket.Arn}/links/*"}}',
+      ]),
+    );
+    expect(
+      s3Of("TaskRole").filter(
+        (statement) =>
+          statement.includes("outgoing") && statement.includes("PutObject"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("lets the upload link read markers and sign uploads to outgoing/*, and nothing else in the bucket", () => {
+    expect(s3Of("LinkRole")).toEqual([
+      '{"Effect":"Allow","Action":"s3:GetObject","Resource":{"Fn::Sub":"${Bucket.Arn}/links/*"}}',
+      '{"Effect":"Allow","Action":"s3:ListBucket","Resource":{"Fn::GetAtt":["Bucket","Arn"]}}',
+      '{"Effect":"Allow","Action":"s3:PutObject","Resource":{"Fn::Sub":"${Bucket.Arn}/outgoing/*"}}',
+    ]);
+  });
+});
+
+describe("fitness: the upload link is one small Lambda, throttled, that logs where the alarm reads (hosting.md, alerting.md)", () => {
+  it("runs from its own arm64 image and logs to /tagalong", () => {
+    expect(only("AWS::Lambda::Function")).toMatchObject({
+      PackageType: "Image",
+      Code: { ImageUri: { Ref: "LinkImage" } },
+      Architectures: ["arm64"],
+      LoggingConfig: { LogGroup: { Ref: "LogGroup" } },
+    });
+  });
+
+  it("answers GET /up/{id}/{name} only, throttled", () => {
+    expect(only("AWS::ApiGatewayV2::Api")).toMatchObject({
+      ProtocolType: "HTTP",
+      RouteKey: "GET /up/{id}/{name}",
+      Target: { "Fn::GetAtt": ["LinkFunction", "Arn"] },
+    });
+    expect(only("AWS::ApiGatewayV2::ApiGatewayManagedOverrides")).toMatchObject(
+      {
+        Stage: {
+          DefaultRouteSettings: {
+            ThrottlingBurstLimit: 10,
+            ThrottlingRateLimit: 5,
+          },
+        },
+      },
+    );
+  });
+
+  it("gives the task the link's address", () => {
+    expect(readRepoFile("infra/app.cfn.yml")).toMatch(
+      /- Name: UPLOAD_LINK\n\s+Value: !Sub "\$\{LinkApi\.ApiEndpoint\}\/up\/"/u,
     );
   });
 });

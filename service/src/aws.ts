@@ -3,12 +3,13 @@ import { randomUUID } from "node:crypto";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   ListObjectsV2Command,
   NoSuchKey,
+  NotFound,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import {
   DeleteTranscriptionJobCommand,
@@ -56,16 +57,10 @@ export interface Aws {
   /** An object's bytes, or undefined when there is none. */
   getObject(bucket: string, key: string): Promise<Buffer | undefined>;
   deleteObject(bucket: string, key: string): Promise<void>;
-  /**
-   * A form anyone holding it can POST files to for `seconds`, each under
-   * `prefix` with its own name and at most `maxBytes` (attachments.md).
-   */
-  presignPost(
-    bucket: string,
-    prefix: string,
-    maxBytes: number,
-    seconds: number,
-  ): Promise<{ url: string; fields: Record<string, string> }>;
+  /** A link anyone holding it can PUT one object to, at `key`, for `seconds` (attachments.md). */
+  presignPut(bucket: string, key: string, seconds: number): Promise<string>;
+  /** When an object was last written, in ms, or undefined when there is none. */
+  modifiedAt(bucket: string, key: string): Promise<number | undefined>;
   /** The objects under `prefix`, in key order, as S3 lists them. */
   listObjects(
     bucket: string,
@@ -134,17 +129,23 @@ export function realAws(region: string | undefined): Aws {
     async deleteObject(bucket, key) {
       await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
     },
-    async presignPost(bucket, prefix, maxBytes, seconds) {
-      const { url, fields } = await createPresignedPost(s3, {
-        Bucket: bucket,
-        Key: `${prefix}\${filename}`,
-        Conditions: [
-          ["starts-with", "$key", prefix],
-          ["content-length-range", 1, maxBytes],
-        ],
-        Expires: seconds,
-      });
-      return { url, fields };
+    async presignPut(bucket, key, seconds) {
+      return getSignedUrl(
+        s3,
+        new PutObjectCommand({ Bucket: bucket, Key: key }),
+        { expiresIn: seconds },
+      );
+    },
+    async modifiedAt(bucket, key) {
+      try {
+        const result = await s3.send(
+          new HeadObjectCommand({ Bucket: bucket, Key: key }),
+        );
+        return result.LastModified?.getTime();
+      } catch (error) {
+        if (error instanceof NotFound) return undefined;
+        throw error;
+      }
     },
     async listObjects(bucket, prefix) {
       const result = await s3.send(

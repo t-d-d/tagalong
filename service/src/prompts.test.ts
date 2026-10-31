@@ -148,6 +148,21 @@ describe("prompts", () => {
     );
   });
 
+  it("gives a Claude one short command to send a file, with its session's link", () => {
+    const link =
+      "https://abc.execute-api.example.test/up/Zk3q9xT0aB4mN7pR2sV5wY8c/";
+    const text = followUp("podstow", "", { ...ask, upload: link });
+    expect(text).toContain(
+      `\ncurl -fsS -T <path> "$(curl -fsS '${link}<name>')"\n`,
+    );
+    expect(text).toContain("at most 5, each at most 16 MB");
+    expect(text).toContain("after your next answer");
+    // Later messages may not repeat it, so the Claude keeps it.
+    expect(text).toContain("Keep this command");
+    expect(text).not.toMatch(/X-Amz|Policy/u);
+    expect(followUp("podstow", "", ask)).not.toContain("curl");
+  });
+
   it("marks an answer with its Claude's name, and reads it back", () => {
     expect(answerText("brainstorm", "Go wide.")).toBe("*brainstorm:* Go wide.");
     expect(answerText("", "Old style.")).toBe("Old style.");

@@ -1,8 +1,8 @@
-// Files a Claude sends back to the chat (attachments.md). Each delivery gets
-// its own folder in the bucket and a form to upload to it; once a turn's
-// answer is posted, what landed there goes to the chat through the bridge's
-// outbox, each file once.
-import { randomUUID } from "node:crypto";
+// Files a Claude sends back to the chat (attachments.md). Each session gets
+// one short link; the upload link's Lambda turns it into a URL to put one file
+// in the session's folder in the bucket. Once an answer is posted, what landed
+// there goes to the chat through the bridge's outbox, each file once.
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { safeName } from "./attachments.ts";
@@ -13,27 +13,40 @@ import { errorFields, log } from "./log.ts";
 export const OUTGOING = {
   bytes: 16 * 1024 * 1024,
   files: 5,
-  // As long as a turn is waited on (GIVE_UP_MS's default).
+  // How long a link works after the session's latest delivery, and how long
+  // a session goes before it is given the link again: GIVE_UP_MS's default.
   linkSeconds: 7200,
+  // How long a URL the Lambda signs works: long enough to start one upload.
+  putSeconds: 300,
 } as const;
 
-export interface Upload {
-  /** The turn's folder in the bucket. */
-  folder: string;
-  url: string;
-  fields: Record<string, string>;
+/** A link's id: 18 random bytes, as 24 URL-safe characters. */
+export const LINK_ID = /^[\w-]{24}$/u;
+export const newLinkId = (): string => randomBytes(18).toString("base64url");
+
+/** The folder a link's files go to. */
+export const folderOf = (id: string): string => `outgoing/${id}/`;
+/** The empty object whose age says whether a link still works. */
+export const markerOf = (id: string): string => `links/${id}`;
+
+/** Make a link work for the next linkSeconds. */
+export async function keepLink(
+  aws: Aws,
+  bucket: string,
+  id: string,
+): Promise<void> {
+  await aws.putObject(
+    bucket,
+    markerOf(id),
+    Buffer.alloc(0),
+    "application/octet-stream",
+  );
 }
 
-/** A new folder for one turn, and the form to upload to it. */
-export async function uploadFor(aws: Aws, bucket: string): Promise<Upload> {
-  const folder = `outgoing/${randomUUID()}/`;
-  const { url, fields } = await aws.presignPost(
-    bucket,
-    folder,
-    OUTGOING.bytes,
-    OUTGOING.linkSeconds,
-  );
-  return { folder, url, fields };
+/** A session's link: its id, and the files from its folder already sent or skipped. */
+export interface Box {
+  id: string;
+  sent: string[];
 }
 
 export interface Send {
@@ -43,37 +56,28 @@ export interface Send {
   outboxDir: string;
 }
 
-/** A delivery's upload folder, and the files from it already sent or skipped. */
-export interface Box {
-  folder: string;
-  sent: string[];
-}
-
 /**
- * Send what was uploaded to these folders and has not gone yet, at most five,
- * each at most 16 MB. Each file is noted in its box, sent or not, so it goes
- * once.
+ * Send what was uploaded to this link's folder and has not gone yet, at most
+ * five, each at most 16 MB. Each file is noted in the box, sent or not, so it
+ * goes once; a note whose file the bucket has dropped is let go.
  */
 export async function sendUploads(
   chat: string,
-  boxes: Box[],
+  box: Box,
   send: Send,
 ): Promise<void> {
-  const listed = await Promise.all(
-    boxes.map(async (box) => {
-      try {
-        const objects = await send.aws.listObjects(send.bucket, box.folder);
-        return objects
-          .filter((object) => !box.sent.includes(object.key))
-          .map((object) => ({ box, ...object }));
-      } catch (error) {
-        log.warn("file-skipped", { why: "failed", ...errorFields(error) });
-        return [];
-      }
-    }),
-  );
-  const fresh = listed.flat();
-  for (const { box, key } of fresh) box.sent.push(key);
+  const folder = folderOf(box.id);
+  let objects: { key: string; bytes: number }[];
+  try {
+    objects = await send.aws.listObjects(send.bucket, folder);
+  } catch (error) {
+    log.warn("file-skipped", { why: "failed", ...errorFields(error) });
+    return;
+  }
+  const listed = new Set(objects.map((object) => object.key));
+  const kept = box.sent.filter((key) => listed.has(key));
+  const fresh = objects.filter((object) => !kept.includes(object.key));
+  box.sent.splice(0, box.sent.length, ...kept, ...fresh.map(({ key }) => key));
   const fit = fresh.filter(
     (object) => object.bytes > 0 && object.bytes <= OUTGOING.bytes,
   );
@@ -84,9 +88,9 @@ export async function sendUploads(
     });
   let count = 0;
   let bytes = 0;
-  for (const { box, key } of fit.slice(0, OUTGOING.files)) {
+  for (const { key } of fit.slice(0, OUTGOING.files)) {
     const dir = join(send.outboxDir, randomUUID());
-    const path = join(dir, safeName(key.slice(box.folder.length)));
+    const path = join(dir, safeName(key.slice(folder.length)));
     try {
       const body = await send.aws.getObject(send.bucket, key);
       if (body === undefined) continue;
