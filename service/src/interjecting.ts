@@ -1,7 +1,7 @@
-// A Claude an owner set to interject in a chat (who-can-use-it.md). Once the
-// chat has been quiet for INTERJECT_QUIET_MS, it is given what the people who
-// may ask it said since it last heard, with no request, and posts only when
-// it has something to add.
+// A Claude an owner set to interject in a chat (who-can-use-it.md). Once one
+// of the people who may ask it has spoken and the chat has been quiet for
+// INTERJECT_QUIET_MS, it is given what everyone said since it last heard,
+// with no request, and posts only when it has something to add.
 //
 // Its session waking by itself starts one too (cloud-sessions.md): what that
 // turn said is not posted, and the Claude is asked whether the chat should hear.

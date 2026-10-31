@@ -1,14 +1,11 @@
 // Photos and files people send, passed to a session as short-lived links
-// (attachments.md). Only from people who may use the group, only recent ones.
+// (attachments.md). From anyone in the chat, only recent ones.
 import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { extname } from "node:path";
-import { allowed } from "./access.ts";
 import type { Aws } from "./aws.ts";
 import type { Bridge } from "./bridge.ts";
-import type { Config, Group } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
-import type { People } from "./people.ts";
 import { type MessageRow, type WhatsAppStore, timeOf } from "./store.ts";
 
 export const LIMITS = {
@@ -23,9 +20,8 @@ export const LIMITS = {
 
 const MEDIA = new Set(["image", "video", "audio", "document", "sticker"]);
 
-/** Media a person sent who may ask the Claude, not the device's own. */
-const passable = (row: MessageRow, mayAsk: (sender: string) => boolean) =>
-  MEDIA.has(row.mediaType) && !row.isFromMe && mayAsk(row.sender);
+/** Media anyone in the chat sent, not the device's own. */
+const passable = (row: MessageRow) => MEDIA.has(row.mediaType) && !row.isFromMe;
 
 export interface Attachment {
   name: string;
@@ -37,11 +33,6 @@ export interface Attachment {
 }
 
 export interface Pick {
-  config: Config;
-  group: Group;
-  /** The Claude the files are for: only from people who may ask it. */
-  claude: string;
-  people: People;
   store: WhatsAppStore;
   chat: string;
   messageId: string | undefined;
@@ -53,14 +44,11 @@ export interface Pick {
 
 /**
  * Which media a request carries: the message itself, the one it replies to,
- * and anything a member sent in the last ten minutes, not yet given to a session.
+ * and anything anyone sent in the last ten minutes, not yet given to the Claude.
  */
 export function pickMedia(pick: Pick): MessageRow[] {
   const ok = (row: MessageRow | undefined): row is MessageRow =>
-    row !== undefined &&
-    passable(row, (sender) =>
-      allowed(pick.config, pick.group, pick.claude, pick.people, sender),
-    );
+    row !== undefined && passable(row);
   const own = pick.store.message(pick.chat, pick.messageId);
   const quoted = pick.store.message(pick.chat, pick.quotedMessageId);
   const recent = pick.store
@@ -76,20 +64,19 @@ export function pickMedia(pick: Pick): MessageRow[] {
 }
 
 /**
- * Which media an interjecting delivery carries: what the people who may ask
- * the Claude sent in `rows`, the messages since it last heard, not yet given
- * to it. The latest five, as for a request.
+ * Which media an interjecting delivery carries: what anyone sent in `rows`,
+ * the messages since it last heard, not yet given to it. The latest five, as
+ * for a request.
  */
 export function heardMedia(
   rows: MessageRow[],
   heard: {
-    mayAsk: (sender: string) => boolean;
     /** Media already given to this Claude. */
     sent: { has(id: string): boolean };
   },
 ): MessageRow[] {
   return rows
-    .filter((row) => passable(row, heard.mayAsk) && !heard.sent.has(row.id))
+    .filter((row) => passable(row) && !heard.sent.has(row.id))
     .slice(-LIMITS.files);
 }
 

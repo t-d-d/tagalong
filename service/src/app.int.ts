@@ -146,12 +146,19 @@ describe("asking a Claude", () => {
   it("starts its session in its repo and environment, then posts its answer under its name", async () => {
     const t = (h = await harness({
       db: (db) =>
-        db.message({
-          id: "old",
-          sender: MEMBER,
-          content: "the CI broke again",
-          at: NOW - 60_000,
-        }),
+        db
+          .message({
+            id: "old",
+            sender: MEMBER,
+            content: "the CI broke again",
+            at: NOW - 60_000,
+          })
+          .message({
+            id: "old2",
+            sender: STRANGER,
+            content: "it was the linter",
+            at: NOW - 30_000,
+          }),
     }));
     t.fake.launches.push(SESSION);
     started(t, SESSION);
@@ -165,7 +172,11 @@ describe("asking a Claude", () => {
       'You are "podstow", one of the Claudes in the WhatsApp chat "Side projects"',
     );
     expect(launch?.prompt).toContain("The other Claudes here are @brainstorm");
-    expect(launch?.prompt).toContain("Ollie: the CI broke again");
+    // A first session starts with the chat's last messages, from everyone.
+    expect(launch?.prompt).toContain("Ollie (may ask you): the CI broke again");
+    expect(launch?.prompt).toContain(
+      "Sam (may not ask you): it was the linter",
+    );
     expect(launch?.prompt).toContain(
       "Ollie asks you, @podstow:\n@podstow why is the build red?",
     );
@@ -228,8 +239,13 @@ describe("asking a Claude", () => {
     expect(input).toMatch(/^Said in the chat since you last heard from it:\n/u);
     expect(input).toContain("podstow (you): It fails on lint.");
     // Each line has a label the Claude can answer it by.
-    expect(input).toMatch(/^\[m\d+\] \S+ \S+ Thomas: we ship on Friday$/mu);
-    expect(input).not.toContain("secret plan");
+    expect(input).toMatch(
+      /^\[m\d+\] \S+ \S+ Thomas \(may ask you\): we ship on Friday$/mu,
+    );
+    // Everyone in the chat is heard, marked as someone who may not ask.
+    expect(input).toMatch(
+      /^\[m\d+\] \S+ \S+ Sam \(may not ask you\): the secret plan$/mu,
+    );
     expect(input).toContain(
       "Ollie asks you, @podstow:\n@podstow can you fix it?",
     );
@@ -299,7 +315,9 @@ describe("asking a Claude", () => {
     );
     const input = followUps(t)[0]?.options.input ?? "";
     expect(input).toContain("brainstorm: B could become an offline queue.");
-    expect(input).toContain("Thomas: @brainstorm take idea B and go wide");
+    expect(input).toContain(
+      "Thomas (may ask you): @brainstorm take idea B and go wide",
+    );
   });
 
   it("asks each Claude a message names", async () => {
@@ -367,7 +385,7 @@ describe("asking a Claude", () => {
     ]);
   });
 
-  it("gives each Claude a member's recent photos once, as short-lived links, and nobody else's", async () => {
+  it("gives each Claude anyone's recent photos once, as short-lived links, and none the device sent", async () => {
     const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
     t.bridge.media.set("p1", {
       filename: "screen shot.png",
@@ -399,7 +417,7 @@ describe("asking a Claude", () => {
     expect(prompt).toMatch(
       /- screen_shot\.png \(image\/png, 1 KB\): https:\/\/files\.s3\.example\.test\/attachments\/[\w-]+\/screen_shot\.png\?expires=3600/u,
     );
-    expect(prompt).not.toContain("theirs.png");
+    expect(prompt).toContain("theirs.png");
     await says(t, "r2", MEMBER, "@podstow and now?");
     expect(followUps(t)[0]?.options.input).not.toContain("screen_shot.png");
     await says(t, "r3", MEMBER, "@brainstorm what do you see?");
@@ -1079,7 +1097,7 @@ describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
     await says(t, "m1", OWNER, "we ship on Friday");
     await says(t, "r1", MEMBER, "@podstow does that work?");
     const label =
-      /^\[(m\d+)\] \S+ \S+ Thomas: we ship on Friday$/mu.exec(
+      /^\[(m\d+)\] \S+ \S+ Thomas \(may ask you\): we ship on Friday$/mu.exec(
         launches(t)[0]?.prompt ?? "",
       )?.[1] ?? "";
     expect(label).not.toBe("");
@@ -1111,7 +1129,7 @@ describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
     expect(t.bridge.sent).toEqual([]);
 
     const label =
-      /^\[(m\d+)\] \S+ \S+ Thomas: we ship on Friday$/mu.exec(
+      /^\[(m\d+)\] \S+ \S+ Thomas \(may ask you\): we ship on Friday$/mu.exec(
         launches(t)[0]?.prompt ?? "",
       )?.[1] ?? "";
     t.api.sessions
@@ -1407,10 +1425,15 @@ describe("who is answered", () => {
     expect(t.bridge.sent.at(-1)?.message).toBe(
       "Ask one of us by name: @brainstorm.",
     );
-    // podstow never hears someone who may not ask it.
+    // podstow hears someone who may not ask it, marked as such.
     await says(t, "r3", OWNER, "@podstow what did Ollie say?");
-    expect(launches(t)[1]?.prompt).not.toContain("what do you think?");
+    expect(launches(t)[1]?.prompt).toContain(
+      "Ollie (may not ask you): @podstow @brainstorm what do you think?",
+    );
     expect(launches(t)[1]?.prompt).toContain('You are "podstow"');
+    expect(launches(t)[1]?.prompt).toContain(
+      "Thomas asks you, @podstow:\n@podstow what did Ollie say?",
+    );
   });
   it("answers an owner who writes from their LID", async () => {
     const t = (h = await harness());
@@ -1586,7 +1609,7 @@ describe("commands", () => {
     );
     expect(prompt).not.toContain("secret file contents");
     expect(prompt).toContain("Said in the chat since you last heard from it:");
-    expect(prompt).toContain("Thomas: we ship on Friday");
+    expect(prompt).toContain("Thomas (may ask you): we ship on Friday");
     expect(t.lines).toContainEqual(
       expect.objectContaining({ event: "session-started", carried: true }),
     );

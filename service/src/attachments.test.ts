@@ -28,8 +28,7 @@ describe("attachments", () => {
     expect(typeOf("thing.bin")).toBe("application/octet-stream");
   });
 
-  it("hears the media an interjecting Claude is given: from people who may ask it, once each, at most five", () => {
-    const mayAsk = (sender: string) => sender === "447700900002";
+  it("hears the media an interjecting Claude is given: from anyone in the chat but the device, once each, at most five", () => {
     const rows = [
       row("a1"),
       row("t1", { mediaType: "", content: "just words" }),
@@ -39,21 +38,19 @@ describe("attachments", () => {
       row("i1", { mediaType: "image" }),
       row("i2", { mediaType: "document" }),
       row("i3", { mediaType: "video" }),
-      row("i4", { mediaType: "sticker" }),
     ];
-    const heard = heardMedia(rows, { mayAsk, sent: new Set(["g1"]) });
+    const heard = heardMedia(rows, { sent: new Set(["g1"]) });
     expect(heard.map((each) => each.id)).toEqual([
       "a1",
+      "s1",
       "i1",
       "i2",
       "i3",
-      "i4",
     ]);
     expect(LIMITS.files).toBe(5);
-    const more = heardMedia([...rows, row("i5", { mediaType: "image" })], {
-      mayAsk,
+    const more = heardMedia([...rows, row("i4", { mediaType: "sticker" })], {
       sent: new Set(["g1"]),
     });
-    expect(more.map((each) => each.id)).toEqual(["i1", "i2", "i3", "i4", "i5"]);
+    expect(more.map((each) => each.id)).toEqual(["s1", "i1", "i2", "i3", "i4"]);
   });
 });

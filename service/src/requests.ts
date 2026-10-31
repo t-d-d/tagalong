@@ -4,7 +4,6 @@
 // when it has none or it is gone, a new session starts with the last messages
 // here.
 import type { Aws } from "./aws.ts";
-import { allowed } from "./access.ts";
 import {
   type Attachment,
   heardMedia,
@@ -117,17 +116,12 @@ function givenTo(claude: string, deps: RequestDeps) {
 
 async function files(
   payload: Payload,
-  group: Group,
   claude: string,
   deps: RequestDeps,
 ): Promise<Attachment[]> {
   const given = givenTo(claude, deps);
   if (given === undefined) return [];
   const rows = pickMedia({
-    config: deps.groups.config,
-    group,
-    claude,
-    people: deps.people,
     store: deps.store,
     chat: payload.chatJID,
     messageId: payload.messageId,
@@ -138,10 +132,9 @@ async function files(
   return given.share(payload.chatJID, rows);
 }
 
-/** For an interjecting delivery: the media sent after `after` up to `upTo` (ms) by people who may ask it. */
+/** For an interjecting delivery: the media anyone sent after `after` up to `upTo` (ms). */
 async function heardFiles(
   chat: string,
-  group: Group,
   claude: string,
   after: number,
   upTo: number,
@@ -153,11 +146,7 @@ async function heardFiles(
     deps.store
       .since(chat, after, 200)
       .rows.filter((row) => timeOf(row.timestamp) <= upTo),
-    {
-      mayAsk: (sender) =>
-        allowed(deps.groups.config, group, claude, deps.people, sender),
-      sent: given.sent,
-    },
+    { sent: given.sent },
   );
   return given.share(chat, rows);
 }
@@ -270,8 +259,8 @@ export async function handleRequest(
 }
 
 /**
- * An interjecting Claude's turn: what the people who may ask it said up to
- * `at` (ms), with no request, so nobody waits on it (who-can-use-it.md).
+ * An interjecting Claude's turn: what everyone in the chat said up to `at`
+ * (ms), with no request, so nobody waits on it (who-can-use-it.md).
  */
 export const interjectingTurn = (
   chat: string,
@@ -374,7 +363,7 @@ async function turn(
                     request.content.replace(ANSWER, ""),
                   ),
                 },
-          files: await files(payload, group, claude.name, deps),
+          files: await files(payload, claude.name, deps),
         };
   if (ask !== undefined && reaction !== undefined) ask.reaction = reaction;
   // Nobody asked an interjecting Claude, so it is given what people sent
@@ -383,7 +372,6 @@ async function turn(
     ask === undefined
       ? await heardFiles(
           chat,
-          group,
           claude.name,
           Math.max(thread.heard, deps.state.state.interjecting[key] ?? 0),
           at,
