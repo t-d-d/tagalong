@@ -51,6 +51,12 @@ order.
    addressed here" passes, and so does "fixes the bug #50 reported",
    since a word between them stops GitHub matching.
 
+   It fails, too, if a closing word sits directly before an issue
+   reference in the title, by the same reading. Governor merges with a
+   merge commit whose message carries the title, and GitHub closes that
+   issue when the commit reaches main. So "Fix #30 retry path" fails, and
+   "Repair the retry path #30 reported" passes.
+
 3. **It says what the change costs, and nothing in the cost is the
    owner's to decide.** It fails if the body or the changed files show
    any of these:
@@ -91,8 +97,8 @@ order.
 ## The answer
 
 `pass`, or `fail` with the first failed test's number, one sentence saying
-what the body would need to say to meet it, and whether any edit to the
-body can make the pull request pass.
+what the title or body would need to say to meet it, and whether any edit
+to the title or body can make the pull request pass.
 
 ## By hand
 
