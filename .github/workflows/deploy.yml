@@ -52,9 +52,12 @@ jobs:
   # live-ok names the last commit that passed its live check (repo-and-delivery.md).
   mark-live-ok:
     needs: deploy
-    # A re-run after a rollback checks the build the rollback put back, not
-    # this run's commit, so only the first attempt moves the tag.
-    if: ${{ success() && github.run_attempt == '1' }}
+    # Any attempt moves the tag. GitHub re-runs a job's dependents with it and
+    # keeps the result of a job it does not re-run, so this job runs again
+    # only beside a deploy job that ran again, and that job deploys and checks
+    # the run's own commit. A re-run of the rollback alone leaves deploy
+    # failed, so the tag stays where it is.
+    if: ${{ success() }}
     runs-on: ubuntu-24.04
     # A tag left behind only means a rollback goes one build further back.
     continue-on-error: true
