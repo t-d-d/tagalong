@@ -68,7 +68,7 @@ issue this closes. Every criterion gets a row, including ones nothing
 answers yet. The rows come from the issue, never from what the session
 chose to test. Where a criterion puts a closing word before an issue
 reference, such as "Fixes #30's retry path too", the row rewords it
-("Covers #30's retry path too") and keeps its meaning.
+("Repairs #30's retry path too") and keeps its meaning.
 
 `Green at` is one of:
 
