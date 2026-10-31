@@ -168,6 +168,7 @@ const row = (
   timestamp: `2026-10-18 17:${at}:00+00:00`,
   isFromMe,
   mediaType: "",
+  fileLength: 0,
 });
 
 // The chat: podstow answered twice, brainstorm once, a person spoke and

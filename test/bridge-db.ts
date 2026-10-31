@@ -27,6 +27,8 @@ export interface Row {
   at: number;
   fromMe?: boolean;
   mediaType?: string;
+  /** The media's length in bytes, as WhatsApp gave it. */
+  fileLength?: number;
 }
 
 export class BridgeDb {
@@ -98,7 +100,7 @@ export class BridgeDb {
   message(row: Row): this {
     this.#messages
       .prepare(
-        "INSERT INTO messages (id, chat_jid, sender, content, timestamp, is_from_me, media_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, chat_jid, sender, content, timestamp, is_from_me, media_type, file_length) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         row.id,
@@ -108,6 +110,7 @@ export class BridgeDb {
         stamp(row.at),
         row.fromMe === true ? 1 : 0,
         row.mediaType ?? "",
+        row.fileLength ?? null,
       );
     return this;
   }

@@ -34,8 +34,12 @@ export interface FakeBridge {
   connected: boolean;
   /** The bytes of each file sent, by its path, read as the bridge sends it. */
   files: Map<string, Buffer>;
-  /** Media the bridge can download, by message id. */
-  media: Map<string, { filename: string; bytes: Buffer }>;
+  /**
+   * Media the bridge can download, by message id. Each download answers with
+   * the next of `writing`, a file its own download is still writing, while any
+   * are left, and then with the whole file.
+   */
+  media: Map<string, { filename: string; bytes: Buffer; writing?: Buffer[] }>;
   close(): Promise<void>;
 }
 
@@ -77,7 +81,7 @@ export async function fakeBridge(
         const dir = join(store, "media");
         mkdirSync(dir, { recursive: true });
         const path = join(dir, file.filename);
-        writeFileSync(path, file.bytes);
+        writeFileSync(path, file.writing?.shift() ?? file.bytes);
         return { body: { success: true, filename: file.filename, path } };
       }
       default:
