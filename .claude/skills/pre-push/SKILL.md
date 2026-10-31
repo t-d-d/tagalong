@@ -62,6 +62,27 @@ again.
 
 ## 4. Push
 
+Check the branch's commit messages for a closing word. GitHub reads a
+commit message that reaches main the way it reads a pull request body:
+close, fix or resolve in any form, before an issue reference, closes that
+issue. It reads no negation, so "does not fix #N yet" closes it too. This
+repo merges with merge commits, so every commit on the branch reaches main
+as written, and the issue closes at the merge. An issue reference is `#N`,
+`owner/repo#N` or a full link to the issue.
+
+List the candidates with:
+
+```
+git log --format=%B origin/main..HEAD | grep -inE '\b(close|fix|resolve)[a-z]*\b'
+```
+
+Read each line it prints. Where a closing word comes before an issue
+reference, reword the commit so it does not, such as "#N is not
+addressed here", with `git commit --amend` for the last commit or
+`git rebase` for an earlier one. A commit already pushed then needs
+`git push --force-with-lease` to your own branch. The pull request body's `Closes #N`
+lines close the branch's issues, so no commit message needs a closing word.
+
 Fetch `origin/main` again. If it moved and touches anything your diff
 touches, go back to step 1. Then push the branch. Never push to main.
 
