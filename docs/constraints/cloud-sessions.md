@@ -46,6 +46,8 @@ result, so nothing has to be scraped or posted back by the session.
   Claude writes, in any turn, whatever started it: a delivery, the
   session itself, governor, or someone in the Claude app. Text outside
   the tags is never posted, and there is no pass word.
+  A session started before these rules is told them once, with its
+  next delivery.
 - Each pair is one WhatsApp message, posted when tagalong reads it, in
   the order written, with its line breaks kept. One message from the
   Claude can hold several pairs. A pair opens and closes within one

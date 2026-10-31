@@ -292,7 +292,11 @@ export async function lookAway(
   }
 }
 
-/** Post what one message from the Claude tagged for the chat, each pair in turn. */
+/**
+ * Post what one message from the Claude tagged for the chat, each pair in
+ * turn, then the files uploaded with it. A pair the bridge refuses is lost,
+ * and the rest still go, so the turn's result still answers its asks.
+ */
 async function postTagged(
   id: string,
   session: SessionState,
@@ -300,14 +304,27 @@ async function postTagged(
   deps: RelayDeps,
 ): Promise<void> {
   const { posts, unclosed } = forChat(text);
-  for (const each of posts) await say(id, session, each, deps);
   if (unclosed) log.warn("session-unclosed-tag", { session: id });
+  let posted = false;
+  for (const each of posts) {
+    try {
+      await say(id, session, each, deps);
+      posted = true;
+    } catch (error) {
+      log.warn("bridge-unreachable", errorFields(error));
+    }
+  }
+  if (!posted || deps.files === undefined || session.link === null) return;
+  // What the session uploaded with its link since its last message was posted.
+  await sendUploads(session.chat, session.link, {
+    ...deps.files,
+    bridge: deps.bridge,
+  });
 }
 
 /**
  * One tagged message: a reaction on the line it replies to for one emoji,
- * otherwise a message, a reply to that line while the chat knows it. Then
- * the files uploaded with it.
+ * otherwise a message, a reply to that line while the chat knows it.
  */
 async function say(
   id: string,
@@ -340,12 +357,6 @@ async function say(
     }
     log.info("session-relayed", { session: id, chars: message.length });
   }
-  if (deps.files === undefined || session.link === null) return;
-  // What the session uploaded with its link since its last message was posted.
-  await sendUploads(session.chat, session.link, {
-    ...deps.files,
-    bridge: deps.bridge,
-  });
 }
 
 let polling = false;

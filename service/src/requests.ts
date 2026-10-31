@@ -508,7 +508,7 @@ async function deliver(
     labelAsk();
     const kept = await linkFor(existing.link);
     const told = tell(kept);
-    const text = followUp(claude.name, said, told, heard);
+    const text = followUp(claude.name, said, told, heard, !existing.tags);
     // Noted before it goes, so its user event is known however soon it is read.
     const delivery = deliveryOf(text, request, now, interjecting);
     const drop = () => {
@@ -531,6 +531,7 @@ async function deliver(
       deps.sending.delete(id);
     }
     if (sent === "sent") {
+      existing.tags = true;
       delivered(existing, id, thread.version, {
         kept,
         given: told?.upload !== undefined,
@@ -597,6 +598,7 @@ async function deliver(
     nudged: false,
     deliveries: [deliveryOf(prompt, request, now, interjecting)],
     link: null,
+    tags: true,
     idle: 0,
     readAt: 0,
   };

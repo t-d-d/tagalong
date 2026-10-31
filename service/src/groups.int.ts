@@ -97,6 +97,7 @@ describe("state.json on disk", () => {
         },
       ],
       link: { id: "Zk3q9xT0aB4mN7pR2sV5wY8c", given: 1, sent: ["k1"] },
+      tags: true,
       idle: 2,
       readAt: 4,
     };
@@ -108,6 +109,7 @@ describe("state.json on disk", () => {
     expect(again.state.sessions.abc12345?.cursor).toBe("4");
     expect(again.state.sessions.abc12345?.deliveries[0]?.uuid).toBe("u1");
     expect(again.state.sessions.abc12345?.link?.sent).toEqual(["k1"]);
+    expect(again.state.sessions.abc12345?.tags).toBe(true);
     expect(again.state.sentMedia).toHaveLength(500);
     expect(again.state.sentMedia.at(-1)).toBe("m599");
   });
@@ -141,6 +143,8 @@ describe("state.json on disk", () => {
         interjecting: false,
       },
     ]);
+    // Nor was it told that only tagged text is posted (#92).
+    expect(new StateStore(path).state.sessions.abc12345?.tags).toBe(false);
   });
 
   it("reads a session saved before links, whose deliveries had upload folders (#59)", () => {

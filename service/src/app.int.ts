@@ -275,6 +275,8 @@ describe("asking a Claude", () => {
       "json",
     ]);
     const input = next?.options.input ?? "";
+    // Its first prompt told it of tags, so a follow-up does not again.
+    expect(input).not.toContain("How your words reach the chat has changed");
     expect(input).toMatch(/^Said in the chat since you last heard from it:\n/u);
     expect(input).toContain("podstow (you): It fails on lint.");
     // Each line has a label the Claude can answer it by.
@@ -1260,6 +1262,28 @@ describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
       }),
     );
     expect(t.raw.filter((line) => line.includes("Halfway"))).toEqual([]);
+  });
+
+  it("still answers the ask when the bridge refuses a tagged message, and posts the rest", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [
+      assistant(`${tagged("Lint fails.")} ${tagged("Main is red.", "")}`),
+      result(""),
+    ]);
+    await says(t, "r1", MEMBER, "@podstow why is the build red?");
+    t.bridge.refusing = 1;
+    await poll(t);
+    expect(t.bridge.sent).toEqual([
+      { recipient: GROUP, message: "*podstow:* Main is red." },
+    ]);
+    expect(reactions(t)).toEqual([
+      ["r1", "👀"],
+      ["r1", ""],
+    ]);
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({ event: "bridge-unreachable", level: "warn" }),
+    );
   });
 
   it("posts each pair in one message as its own message, in order, with its line breaks", async () => {

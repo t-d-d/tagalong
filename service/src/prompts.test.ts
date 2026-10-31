@@ -282,6 +282,16 @@ describe("prompts", () => {
     );
   });
 
+  it("tells a session briefed before tags how its answers now reach the chat, once asked to", () => {
+    const old = followUp("podstow", "", ask, [], true);
+    expect(old).toContain(
+      "only text inside <whatsapp> tags reaches the chat, from any message you write, in any turn",
+    );
+    expect(old).toContain('<whatsapp reply="m41">Friday works.</whatsapp>');
+    expect(old).toContain("PASS no longer means anything");
+    expect(followUp("podstow", "", ask)).not.toContain("<whatsapp");
+  });
+
   it("marks an answer with its Claude's name, and reads it back", () => {
     expect(answerText("brainstorm", "Go wide.")).toBe("*brainstorm:* Go wide.");
     expect(answerText("", "Old style.")).toBe("Old style.");

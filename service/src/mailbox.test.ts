@@ -23,6 +23,7 @@ const session = (): SessionState => ({
   nudged: false,
   deliveries: [],
   link: null,
+  tags: true,
   idle: 0,
   readAt: 0,
 });
