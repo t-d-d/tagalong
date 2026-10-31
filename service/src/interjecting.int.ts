@@ -386,7 +386,7 @@ describe("an interjecting Claude (who-can-use-it.md)", () => {
     );
   });
 
-  it("gets no busy or two-hour notices, since nobody waits on it", async () => {
+  it("gets no approval notice, since nobody waits on it", async () => {
     const t = (h = await harness({ groups: interjecting() }));
     t.fake.launches.push(SESSION);
     started(t, SESSION);
@@ -398,7 +398,7 @@ describe("an interjecting Claude (who-can-use-it.md)", () => {
       events: t.api.sessions.get(SESSION)?.events ?? [],
     });
     await poll(t);
-    t.clock.now += t.env.GIVE_UP_MS + 1;
+    t.clock.now += 3 * 3_600_000;
     await poll(t);
     expect(t.bridge.sent).toEqual([]);
   });
@@ -683,6 +683,9 @@ async function answered(t: Harness) {
   started(t, SESSION, PASSES);
   await says(t, "m1", MEMBER, "we could build a recipe app");
   await quiet(t);
+  // Its turn over, the session reports idle.
+  const session = t.api.sessions.get(SESSION);
+  if (session !== undefined) session.status = "idle";
   await poll(t);
   expect(t.bridge.sent).toEqual([]);
 }
@@ -777,10 +780,10 @@ describe("an interjecting Claude's own session (cloud-sessions.md)", () => {
     );
   });
 
-  it("is read with no time limit, backing off to every 30 minutes, and from 1 minute again after a turn", async () => {
+  it("is read with no time limit, backing off to every 30 minutes, and from 30 seconds again after a turn", async () => {
     const t = (h = await harness({ groups: interjecting() }));
     await answered(t);
-    for (const minutes of [1, 2, 5, 10, 30, 30, 30]) {
+    for (const minutes of [0.5, 1, 2, 5, 10, 30, 30, 30]) {
       const before = reads(t);
       await after(t, minutes * MINUTE - 1000);
       expect(reads(t)).toBe(before);
@@ -788,7 +791,7 @@ describe("an interjecting Claude's own session (cloud-sessions.md)", () => {
       expect(reads(t)).toBe(before + 1);
     }
     for (let each = 0; each < 10; each += 1) await after(t, 30 * MINUTE);
-    expect(t.clock.now).toBeGreaterThan(t.env.GIVE_UP_MS * 3);
+    expect(t.clock.now).toBeGreaterThan(6 * 3_600_000);
 
     wakes(t, selfAnswer("The recipe fix is live."));
     await after(t, 30 * MINUTE);
@@ -796,7 +799,7 @@ describe("an interjecting Claude's own session (cloud-sessions.md)", () => {
       "*brainstorm:* The recipe fix is live.",
     );
     const woke = reads(t);
-    await after(t, MINUTE - 1000);
+    await after(t, MINUTE / 2 - 1000);
     expect(reads(t)).toBe(woke);
     await after(t, 1000);
     expect(reads(t)).toBe(woke + 1);
@@ -834,29 +837,31 @@ describe("an interjecting Claude's own session (cloud-sessions.md)", () => {
     expect(sessionState(t)).toMatchObject({ waiting: false });
   });
 
-  it("goes back to GIVE_UP_MS, and posts a turn it starts by itself, once interjecting is off", async () => {
+  it("is still read with no time limit, and posts a turn it starts by itself, once interjecting is off (#93)", async () => {
     const t = (h = await harness({ groups: interjecting() }));
     await answered(t);
     await says(t, "c1", OWNER, "@claude interject brainstorm off");
     wakes(t, selfAnswer("The backfill finished."));
-    await poll(t);
+    await after(t, MINUTE);
     expect(t.bridge.sent.at(-1)?.message).toBe(
       "*brainstorm:* The backfill finished.",
     );
 
-    await after(t, t.env.GIVE_UP_MS + 1);
-    const before = reads(t);
+    for (let each = 0; each < 10; each += 1) await after(t, 30 * MINUTE);
+    wakes(t, selfAnswer("The recipe fix is live."));
     await after(t, 30 * MINUTE);
-    expect(reads(t)).toBe(before);
+    expect(t.bridge.sent.at(-1)?.message).toBe(
+      "*brainstorm:* The recipe fix is live.",
+    );
   });
 
-  it("goes back to GIVE_UP_MS once fresh replaces its session", async () => {
+  it("stops being read once fresh replaces its session and none of its turns is open (#93)", async () => {
     const t = (h = await harness({ groups: interjecting() }));
     await answered(t);
     await says(t, "c1", OWNER, "@claude fresh brainstorm");
-    await after(t, t.env.GIVE_UP_MS + 1);
-    const before = reads(t);
     await after(t, 30 * MINUTE);
+    const before = reads(t);
+    for (let each = 0; each < 4; each += 1) await after(t, 30 * MINUTE);
     expect(reads(t)).toBe(before);
   });
 });

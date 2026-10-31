@@ -480,10 +480,9 @@ async function deliver(
     link: { kept: Link | null; given: boolean },
   ) => {
     hold.reached();
-    // Read every POLL_MS until it answers, then from a minute again.
+    // Read at once, and the gaps start again.
     Object.assign(session, {
       waiting: true,
-      since: now,
       nudged: false,
       idle: 0,
       readAt: 0,
@@ -594,7 +593,6 @@ async function deliver(
     claude: claude.name,
     cursor: null,
     waiting: true,
-    since: now,
     nudged: false,
     deliveries: [deliveryOf(prompt, request, now, interjecting)],
     link: null,

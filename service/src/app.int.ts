@@ -147,6 +147,11 @@ const launches = (t: Harness) =>
   t.fake.calls.filter((call) => call.command === t.env.PYTHON);
 const followUps = (t: Harness) =>
   t.fake.calls.filter((call) => call.command === t.env.CLAUDE_BIN);
+/** How many times SESSION's events have been read. */
+const reads = (t: Harness) =>
+  t.api.served.requests.filter(
+    (request) => request.path === `/v1/code/sessions/cse_${SESSION}/events`,
+  ).length;
 
 describe("asking a Claude", () => {
   it("starts its session in its repo and environment, then posts its answer under its name", async () => {
@@ -1214,7 +1219,7 @@ describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
     ]);
   });
 
-  it("posts a turn the session started by itself, until it has been quiet for GIVE_UP_MS", async () => {
+  it("posts a turn the session started by itself, however long after its last delivery (#93)", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);
     started(t, SESSION, answer("Started the backfill in the background."));
@@ -1231,11 +1236,24 @@ describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
     ]);
     expect(t.bridge.sent[1]?.quoted_message_id).toBeUndefined();
 
-    t.clock.now += t.env.GIVE_UP_MS;
-    await poll(t);
-    t.api.sessions.get(SESSION)?.events.push(...selfAnswer("Much later."));
-    await poll(t);
-    expect(t.bridge.sent).toHaveLength(2);
+    const session = t.api.sessions.get(SESSION);
+    if (session !== undefined) session.status = "idle";
+    for (let each = 0; each < 10; each += 1) {
+      t.clock.now += 30 * 60_000;
+      await t.app.pollOnce();
+    }
+    // Governor says the change is live, and the Claude answers the line that asked.
+    session?.events.push(
+      user("Governor: the change is live.", "g1"),
+      assistant(tagged("It's live.", askIn(launches(t)[0]?.prompt))),
+      { ...result(""), user_message_uuids: ["g1"] },
+    );
+    t.clock.now += 30 * 60_000;
+    await t.app.pollOnce();
+    expect(t.bridge.sent.at(-1)).toMatchObject({
+      message: "*podstow:* It's live.",
+      quoted_message_id: "r1",
+    });
   });
 
   it("posts nothing outside tags, from an unclosed tag, from empty tags or from a result, and still answers the ask", async () => {
@@ -1980,29 +1998,46 @@ describe("commands", () => {
 });
 
 describe("waiting on a session", () => {
-  it("says once when a Claude waits for an approval, and gives up in the end", async () => {
+  it("says once when a Claude waits for an approval, and never gives up on it (#93)", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);
     started(t, SESSION);
     await says(t, "r1", MEMBER, "@podstow deploy it");
-    t.api.sessions.set(SESSION, {
-      status: "requires_action",
-      environmentId: "env_fake1",
-      events: [],
-    });
+    const session = t.api.sessions.get(SESSION);
+    if (session === undefined) throw new Error("no session");
+    session.status = "requires_action";
+    session.events.push(assistant("Asking to deploy."));
     await poll(t);
-    await poll(t);
+    for (let each = 0; each < 10; each += 1) {
+      t.clock.now += 30 * 60_000;
+      await t.app.pollOnce();
+    }
     expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
       `*podstow:* waiting for an approval in the session.\n\n↗ claude.ai/code/session_${SESSION}`,
     ]);
-    t.clock.now += t.env.GIVE_UP_MS + 1;
-    await poll(t);
-    expect(t.bridge.sent.at(-1)?.message).toBe(
-      "*podstow:* no reply after 120 minutes; I may still be working.",
-    );
+    expect(reactions(t)).toEqual([["r1", "👀"]]);
+    session.status = "running";
+    session.events.push(...answer("Deployed."));
+    t.clock.now += 30 * 60_000;
+    await t.app.pollOnce();
+    expect(t.bridge.sent.at(-1)?.message).toBe("*podstow:* Deployed.");
     expect(reactions(t).at(-1)).toEqual(["r1", ""]);
+  });
+
+  it("backs off reading a session that waits for an approval, as an idle one (#93)", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow deploy it");
+    const session = t.api.sessions.get(SESSION);
+    if (session !== undefined) session.status = "requires_action";
     await poll(t);
-    expect(t.bridge.sent).toHaveLength(2);
+    const before = reads(t);
+    await poll(t);
+    expect(reads(t)).toBe(before);
+    t.clock.now += 30_000;
+    await t.app.pollOnce();
+    expect(reads(t)).toBe(before + 1);
   });
 
   it("says nothing of an approval once every request has its answer", async () => {
@@ -2032,21 +2067,120 @@ describe("waiting on a session", () => {
     );
   });
 
-  it("posts no last words of a turn that ended with no result, and gives up on it in the end", async () => {
+  it("posts no last words of a turn that ended with no result, and takes its 👀 off once the session is idle (#93)", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);
     started(t, SESSION, [assistant("Half an answer.")]);
     await says(t, "r1", MEMBER, "@podstow go");
     await poll(t);
+    expect(reactions(t)).toEqual([["r1", "👀"]]);
     const session = t.api.sessions.get(SESSION);
     if (session !== undefined) session.status = "idle";
     await poll(t);
     expect(t.bridge.sent).toEqual([]);
-    t.clock.now += t.env.GIVE_UP_MS;
+    expect(reactions(t)).toEqual([
+      ["r1", "👀"],
+      ["r1", ""],
+    ]);
+  });
+
+  it("takes the 👀 off when a result answers only another message, once the session is idle (#93)", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [
+      assistant("Working on it."),
+      { ...result(""), user_message_uuids: ["elsewhere"] },
+    ]);
+    await says(t, "r1", MEMBER, "@podstow go");
+    await poll(t);
+    expect(reactions(t)).toEqual([["r1", "👀"]]);
+    const session = t.api.sessions.get(SESSION);
+    if (session !== undefined) session.status = "idle";
+    await poll(t);
+    expect(reactions(t).at(-1)).toEqual(["r1", ""]);
+    expect(t.bridge.sent).toEqual([]);
+  });
+
+  it("keeps the 👀 on a request delivered just after a turn whose result is read with it (#93)", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow first");
+    await poll(t);
+    const session = t.api.sessions.get(SESSION);
+    if (session === undefined) throw new Error("no session");
+    session.events.push(...answer("First."));
+    await says(t, "r2", MEMBER, "@podstow second");
+    // The second message is in, but the session has not taken it up yet.
+    const second = session.events.pop();
+    session.status = "idle";
     await poll(t);
     expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
-      `*podstow:* no reply after ${String(t.env.GIVE_UP_MS / 60_000)} minutes; I may still be working.`,
+      "*podstow:* First.",
     ]);
+    expect(reactions(t).filter(([id]) => id === "r2")).toEqual([["r2", "👀"]]);
+    session.status = "running";
+    session.events.push(second, ...answer("Second."));
+    t.clock.now += 60_000;
+    await t.app.pollOnce();
+    expect(t.bridge.sent.at(-1)?.message).toBe("*podstow:* Second.");
+    expect(reactions(t).at(-1)).toEqual(["r2", ""]);
+  });
+
+  it("keeps the 👀 while the session reads idle just after a delivery, and takes it off once it stays idle (#93)", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    const session = t.api.sessions.get(SESSION);
+    if (session !== undefined) session.status = "idle";
+    await says(t, "r1", MEMBER, "@podstow go");
+    await poll(t);
+    expect(reactions(t)).toEqual([["r1", "👀"]]);
+    t.clock.now += 30_000;
+    await t.app.pollOnce();
+    expect(reactions(t)).toEqual([
+      ["r1", "👀"],
+      ["r1", ""],
+    ]);
+    expect(t.bridge.sent).toEqual([]);
+  });
+
+  it("keeps the 👀 while the session reads idle just after a delivery, and takes it off when the turn ends (#93)", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    const session = t.api.sessions.get(SESSION);
+    if (session !== undefined) session.status = "idle";
+    await says(t, "r1", MEMBER, "@podstow go");
+    await poll(t);
+    expect(reactions(t)).toEqual([["r1", "👀"]]);
+    if (session !== undefined) session.status = "running";
+    session?.events.push(...answer("Done."));
+    t.clock.now += 30_000;
+    await t.app.pollOnce();
+    expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
+      "*podstow:* Done.",
+    ]);
+    expect(reactions(t).at(-1)).toEqual(["r1", ""]);
+  });
+
+  it("says so when a session is archived while a request still has its 👀", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow go");
+    const session = t.api.sessions.get(SESSION);
+    if (session !== undefined) session.status = "archived";
+    await poll(t);
+    expect(t.bridge.sent.at(-1)).toMatchObject({
+      message: "*podstow:* ⚠️ The session was archived without a reply.",
+      quoted_message_id: "r1",
+    });
+    expect(reactions(t).at(-1)).toEqual(["r1", ""]);
+    const before = reads(t);
+    t.clock.now += 3 * 3_600_000;
+    await t.app.pollOnce();
+    expect(reads(t)).toBe(before);
   });
 
   it("posts a turn once when its result lands just after its events were read", async () => {
@@ -2091,19 +2225,17 @@ describe("waiting on a session", () => {
     ]);
   });
 
-  it("posts a late answer to a request it gave up on, while it still reads the session", async () => {
+  it("reads a running turn for as long as it runs, and posts its answer with no notice before (#93)", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);
     started(t, SESSION);
     await says(t, "r1", MEMBER, "@podstow migrate the database");
-    t.clock.now += t.env.GIVE_UP_MS - 60_000;
-    await says(t, "r2", MEMBER, "@podstow and the backups?");
-    t.clock.now += 120_000;
-    await poll(t);
-    expect(t.bridge.sent.at(-1)).toMatchObject({
-      message: "*podstow:* no reply after 120 minutes; I may still be working.",
-      quoted_message_id: "r1",
-    });
+    for (let each = 0; each < 12; each += 1) {
+      t.clock.now += 15 * 60_000;
+      await t.app.pollOnce();
+    }
+    expect(t.bridge.sent).toEqual([]);
+    expect(reactions(t)).toEqual([["r1", "👀"]]);
     t.api.sessions
       .get(SESSION)
       ?.events.push(
@@ -2111,10 +2243,32 @@ describe("waiting on a session", () => {
         { ...result(""), user_message_uuids: ["u1"] },
       );
     await poll(t);
-    expect(t.bridge.sent.at(-1)).toMatchObject({
-      message: "*podstow:* Migrated.",
-      quoted_message_id: "r1",
-    });
+    expect(t.bridge.sent).toEqual([
+      expect.objectContaining({
+        message: "*podstow:* Migrated.",
+        quoted_message_id: "r1",
+      }),
+    ]);
+    expect(reactions(t).at(-1)).toEqual(["r1", ""]);
+  });
+
+  it("reads a session fresh replaced until its open turn ends, then stops (#93)", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow migrate the database");
+    await says(t, "c1", OWNER, "@claude fresh podstow");
+    t.clock.now += 3 * 3_600_000;
+    await t.app.pollOnce();
+    t.api.sessions.get(SESSION)?.events.push(...answer("Migrated."));
+    await poll(t);
+    expect(t.bridge.sent.at(-1)?.message).toBe("*podstow:* Migrated.");
+    const before = reads(t);
+    for (let each = 0; each < 4; each += 1) {
+      t.clock.now += 30 * 60_000;
+      await t.app.pollOnce();
+    }
+    expect(reads(t)).toBe(before);
   });
 
   it("stops watching a Claude removed from the chat", async () => {

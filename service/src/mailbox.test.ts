@@ -19,7 +19,6 @@ const session = (): SessionState => ({
   claude: "podstow",
   cursor: null,
   waiting: true,
-  since: 0,
   nudged: false,
   deliveries: [],
   link: null,

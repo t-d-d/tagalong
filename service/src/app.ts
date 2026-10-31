@@ -251,7 +251,6 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       groups,
       state,
       store,
-      giveUpMs: env.GIVE_UP_MS,
       now,
       sending,
       asking,

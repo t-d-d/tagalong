@@ -11,6 +11,10 @@ describe("readEnv", () => {
     expect(env.LAUNCHER.endsWith("service/launch.py")).toBe(true);
   });
 
+  it("has no time after which a session stops being read (#93)", () => {
+    expect(readEnv({ HOME: "/h" })).not.toHaveProperty("GIVE_UP_MS");
+  });
+
   it("reads an empty value as unset, and numbers as numbers", () => {
     const env = readEnv({
       HOME: "/h",
