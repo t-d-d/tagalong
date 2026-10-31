@@ -17,6 +17,7 @@ const row = (
   timestamp: stamp(at),
   isFromMe: false,
   mediaType: "",
+  fileLength: undefined,
   ...extra,
 });
 const base = {
