@@ -35,20 +35,20 @@ A closing word stays out of the title wherever it would sit directly
 before an issue reference. The merge commit's message carries the title,
 and GitHub closes that issue when the commit reaches main. Write "Repair
 the retry path #30 reported", not "Fix #30 retry path" or "fix: #30
-retry path". Closing words and issue references are the ones the *Body*
-section names, and a colon after the closing word still counts.
+retry path". Test 2 of the [`pr-review` checklist](../pr-review/SKILL.md)
+says what counts as a closing word and as an issue reference.
 
 ## Body
 
 The body opens with one `Closes #N` line for each issue the pull request
 closes, one issue per line. GitHub needs a closing word before every
 number, so `Closes #40, #41` closes only #40. These lines are the only
-place a closing word sits next to an issue reference. GitHub matches close,
-fix or resolve in any form, such as closes, fixed or resolves, before an
-issue reference anywhere in the body, and reads no negation, so "does not
-fix #N" closes it. An issue reference is `#N`, `owner/repo#N` or a full
-link to the issue, and the rule covers all three. Write "#N is not
-addressed here".
+place a closing word sits next to an issue reference. GitHub closes an
+issue when a closing word sits directly before a reference to it anywhere
+in the body, and reads no negation, so "does not fix #N" closes it. Test 2
+of the [`pr-review` checklist](../pr-review/SKILL.md) lists the closing
+words and the forms an issue reference takes. Write "#N is not addressed
+here".
 
 After the `Closes #N` lines, if there are any, the body has five sections,
 each a `##` heading, in this order: *Outcome*, *Adds / removes*, *Drift*,
