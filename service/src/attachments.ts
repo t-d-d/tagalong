@@ -71,6 +71,30 @@ export function pickMedia(pick: Pick): MessageRow[] {
   return unique.slice(-LIMITS.files);
 }
 
+/**
+ * Which media an interjecting delivery carries: what the people who may ask
+ * the Claude sent in `rows`, the messages since it last heard, not yet given
+ * to it. The latest five, as for a request.
+ */
+export function heardMedia(
+  rows: MessageRow[],
+  heard: {
+    mayAsk: (sender: string) => boolean;
+    /** Media already given to this Claude. */
+    sent: { has(id: string): boolean };
+  },
+): MessageRow[] {
+  return rows
+    .filter(
+      (row) =>
+        MEDIA.has(row.mediaType) &&
+        !row.isFromMe &&
+        heard.mayAsk(row.sender) &&
+        !heard.sent.has(row.id),
+    )
+    .slice(-LIMITS.files);
+}
+
 const TYPES: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",

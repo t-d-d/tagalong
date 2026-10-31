@@ -4,7 +4,13 @@
 // when it has none or it is gone, a new session starts with the last messages
 // here.
 import type { Aws } from "./aws.ts";
-import { pickMedia, shareMedia, type Attachment } from "./attachments.ts";
+import { allowed } from "./access.ts";
+import {
+  type Attachment,
+  heardMedia,
+  pickMedia,
+  shareMedia,
+} from "./attachments.ts";
 import type { Bridge, Quote } from "./bridge.ts";
 import type { ClaudeApi } from "./claude-api.ts";
 import type { Cloud } from "./cloud.ts";
@@ -39,7 +45,7 @@ import {
   eyesKey,
   threadKey,
 } from "./state.ts";
-import { type WhatsAppStore, timeOf } from "./store.ts";
+import { type MessageRow, type WhatsAppStore, timeOf } from "./store.ts";
 import type { Payload } from "./webhook.ts";
 
 /** The most of an old session's dialogue a new one is given, in characters. */
@@ -92,17 +98,38 @@ export function repliedTo(
   return quoted === undefined ? undefined : answerBy(quoted);
 }
 
+/** Media given to `claude` once each, as links (attachments.md). */
+function givenTo(claude: string, deps: RequestDeps) {
+  const key = (id: string) => `${claude}:${id}`;
+  const given = new Set(deps.state.state.sentMedia);
+  return {
+    sent: { has: (id: string) => given.has(key(id)) },
+    share: async (chat: string, rows: MessageRow[]): Promise<Attachment[]> => {
+      const bucket = deps.env.ATTACHMENTS_BUCKET;
+      if (rows.length === 0 || bucket === undefined || deps.aws === undefined)
+        return [];
+      deps.state.state.sentMedia.push(...rows.map((row) => key(row.id)));
+      return shareMedia(rows, {
+        bridge: deps.bridge,
+        aws: deps.aws,
+        bucket,
+        chat,
+      });
+    },
+  };
+}
+
+const sharing = (deps: RequestDeps): boolean =>
+  deps.env.ATTACHMENTS_BUCKET !== undefined && deps.aws !== undefined;
+
 async function files(
   payload: Payload,
   group: Group,
   claude: string,
   deps: RequestDeps,
 ): Promise<Attachment[]> {
-  const bucket = deps.env.ATTACHMENTS_BUCKET;
-  if (bucket === undefined || deps.aws === undefined) return [];
-  // A file goes once to each Claude.
-  const key = (id: string) => `${claude}:${id}`;
-  const given = new Set(deps.state.state.sentMedia);
+  if (!sharing(deps)) return [];
+  const given = givenTo(claude, deps);
   const rows = pickMedia({
     config: deps.groups.config,
     group,
@@ -112,17 +139,34 @@ async function files(
     chat: payload.chatJID,
     messageId: payload.messageId,
     quotedMessageId: payload.quotedMessageId,
-    sent: { has: (id: string) => given.has(key(id)) },
+    sent: given.sent,
     now: deps.now(),
   });
-  if (rows.length === 0) return [];
-  deps.state.state.sentMedia.push(...rows.map((row) => key(row.id)));
-  return shareMedia(rows, {
-    bridge: deps.bridge,
-    aws: deps.aws,
-    bucket,
-    chat: payload.chatJID,
-  });
+  return given.share(payload.chatJID, rows);
+}
+
+/** For an interjecting delivery: the media sent after `after` up to `upTo` (ms) by people who may ask it. */
+async function heardFiles(
+  chat: string,
+  group: Group,
+  claude: string,
+  after: number,
+  upTo: number,
+  deps: RequestDeps,
+): Promise<Attachment[]> {
+  if (!sharing(deps)) return [];
+  const given = givenTo(claude, deps);
+  const rows = heardMedia(
+    deps.store
+      .since(chat, after, 200)
+      .rows.filter((row) => timeOf(row.timestamp) <= upTo),
+    {
+      mayAsk: (sender) =>
+        allowed(deps.groups.config, group, claude, deps.people, sender),
+      sent: given.sent,
+    },
+  );
+  return given.share(chat, rows);
 }
 
 /**
@@ -340,6 +384,20 @@ async function turn(
           files: await files(payload, group, claude.name, deps),
         };
   if (ask !== undefined && reaction !== undefined) ask.reaction = reaction;
+  // Nobody asked an interjecting Claude, so it is given what people sent
+  // since it last heard, as a request would be (attachments.md).
+  const heard =
+    ask === undefined
+      ? await heardFiles(
+          chat,
+          group,
+          claude.name,
+          Math.max(thread.heard, deps.state.state.interjecting[key] ?? 0),
+          at,
+          deps,
+        )
+      : [];
+  const sent = ask?.files.length ?? heard.length;
   const labelAsk = () => {
     if (ask !== undefined && request !== null) ask.label = label(request);
   };
@@ -385,7 +443,7 @@ async function turn(
     labelAsk();
     const kept = await linkFor(existing.link);
     const told = tell(kept);
-    const text = followUp(claude.name, said, told, woke);
+    const text = followUp(claude.name, said, told, woke, heard);
     // Noted before it goes, so its user event is known however soon it is read.
     const delivery = deliveryOf(text, request, now, interjecting);
     const drop = () => {
@@ -416,7 +474,7 @@ async function turn(
         session: id,
         group: group.label,
         claude: claude.name,
-        files: ask?.files.length ?? 0,
+        files: sent,
         interjecting,
         woke,
       });
@@ -459,6 +517,7 @@ async function turn(
     carried,
     conversation: said,
     ask: told,
+    files: heard,
   });
   const name =
     ask === undefined
@@ -494,7 +553,7 @@ async function turn(
     claude: claude.name,
     access: claude.access,
     carried: carried !== "",
-    files: ask?.files.length ?? 0,
+    files: sent,
     interjecting,
   });
   await verify(id, claude, deps.api);
