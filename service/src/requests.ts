@@ -301,6 +301,25 @@ async function turn(
     thread.carry = id;
   }
 
+  // The CLI starts a session whose environment is not in the list in another
+  // one, so a Claude whose environment is gone starts nothing (#22).
+  if (
+    claude.environment !== undefined &&
+    !(await deps.api.exists(claude.environment))
+  ) {
+    log.warn("session-environment-gone", {
+      group: group.label,
+      claude: claude.name,
+      environment: claude.environment,
+    });
+    await deps.bridge.send(
+      chat,
+      `@${claude.name}'s environment is gone, so it can't start. An owner must define it again: \`@claude define ${claude.name} env=<name>\``,
+      request,
+    );
+    return;
+  }
+
   // A new session: after an update or a gone one, with the old session's
   // dialogue and everything said since; otherwise the last messages here.
   const carried =
