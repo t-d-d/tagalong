@@ -536,6 +536,110 @@ describe("asking a Claude", () => {
     );
   });
 
+  it("offers a voice note the bridge did not finish again with the next request, and then never again (#83)", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    const whole = Buffer.from("ogg bytes, the whole note");
+    t.bridge.media.set("v1", {
+      filename: "audio_1.ogg",
+      bytes: whole,
+      writing: Array.from({ length: 20 }, () => whole.subarray(0, 9)),
+    });
+    t.db.message({
+      id: "v1",
+      sender: MEMBER,
+      content: "",
+      at: NOW - 60_000,
+      mediaType: "audio",
+      fileLength: whole.length,
+    });
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow what did I say?");
+    expect(launches(t)[0]?.prompt).not.toContain("audio_1.ogg");
+
+    t.bridge.media.set("v1", { filename: "audio_1.ogg", bytes: whole });
+    await says(t, "r2", MEMBER, "@podstow and now?");
+    expect(followUps(t)[0]?.options.input).toContain("audio_1.ogg");
+    await says(t, "r3", MEMBER, "@podstow once more?");
+    expect(followUps(t)[1]?.options.input).not.toContain("audio_1.ogg");
+  });
+
+  it("offers a photo the bridge could not download again with the next request (#83)", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    t.db.message({
+      id: "p1",
+      sender: MEMBER,
+      content: "",
+      at: NOW - 60_000,
+      mediaType: "image",
+    });
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow what's in the photo?");
+    expect(launches(t)[0]?.prompt).not.toContain("screen_shot.png");
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({ event: "attachment-skipped", why: "failed" }),
+    );
+
+    t.bridge.media.set("p1", {
+      filename: "screen shot.png",
+      bytes: Buffer.from("png bytes"),
+    });
+    await says(t, "r2", MEMBER, "@podstow and now?");
+    expect(followUps(t)[0]?.options.input).toContain("screen_shot.png");
+  });
+
+  it("offers a photo again when the request it went with never reached a session (#83)", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    t.bridge.media.set("p1", {
+      filename: "screen shot.png",
+      bytes: Buffer.from("png bytes"),
+    });
+    t.db.message({
+      id: "p1",
+      sender: MEMBER,
+      content: "",
+      at: NOW - 60_000,
+      mediaType: "image",
+    });
+    await says(t, "r1", MEMBER, "@podstow what's in the photo?");
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({ event: "request-failed" }),
+    );
+
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r2", MEMBER, "@podstow try again?");
+    expect(launches(t).at(-1)?.prompt).toContain("screen_shot.png");
+  });
+
+  it("never offers a file too large to pass on again (#83)", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    t.bridge.media.set("d1", {
+      filename: "huge.pdf",
+      bytes: Buffer.from("pdf"),
+    });
+    t.db.message({
+      id: "d1",
+      sender: MEMBER,
+      content: "",
+      at: NOW - 60_000,
+      mediaType: "document",
+      fileLength: 26 * 1024 * 1024,
+    });
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r1", MEMBER, "@podstow read the pdf?");
+    await says(t, "r2", MEMBER, "@podstow and now?");
+    expect(followUps(t)[0]?.options.input).not.toContain("huge.pdf");
+    expect(
+      t.lines.filter(
+        (line) =>
+          line.event === "attachment-skipped" && line.why === "too-large",
+      ),
+    ).toHaveLength(1);
+  });
+
   it("takes a voice note that replies to an answer as a request to the Claude that wrote it, and one that replies to nothing as none", async () => {
     const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
     t.bridge.media.set("v1", {
