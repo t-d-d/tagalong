@@ -28,8 +28,8 @@ agree to have them kept in CloudWatch.
   names in its chat-name lines, and keeps the rest of each line. It
   keeps only the bridge's lines about the connection, its warnings and
   its errors, because the bridge prints every message it sees. Each
-  entry in its keep list is tied to the start of a line, so a message's
-  text cannot match it.
+  entry in its keep list is tied to the start of a line, so a word in
+  the middle of a message cannot match it.
 
 ## Do not
 
@@ -45,4 +45,5 @@ send reaches a line, and fitness/bridge-log.static.ts runs the bridge's
 filter on lines shaped like the bridge's own.
 History: Set when the repo was made, October 2026, following spotimy.
 The rule covers the bridge's lines, masked by a filter, since 31
-October 2026 (#14).
+October 2026 (#14). Each entry in the bridge's keep list is tied to the
+start of a line since 31 October 2026 (#53).
