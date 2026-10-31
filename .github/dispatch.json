@@ -12,10 +12,13 @@
     "subscribeMessages": true,
     "prReview": true,
     "conflicts": true,
-    "ciMessages": true
+    "ciMessages": true,
+    "deployMessages": true,
+    "deployedLabels": true
   },
   "workflows": {
-    "ci": ".github/workflows/deploy.yml"
+    "ci": ".github/workflows/deploy.yml",
+    "tags": { "live": "live-ok" }
   },
   "prompts": {
     "ciBreaker": "Read the failed jobs' logs and find the cause. If the cause is in your change, push the fix on a new branch from the default branch with a new PR: PR #{pr} is merged and its branch is done. The repair closes no issue, and you open none for it. Its body links the run, names PR #{pr} as the change that broke it, and says the change goes no further than the repair (test 2 of the pr-review checklist). If the cause is not in your change, or only the owner can fix it, comment on PR #{pr} with what you found instead.",
