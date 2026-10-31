@@ -7,6 +7,7 @@ import {
   parseOwners,
   toConfig,
   withoutGroup,
+  withoutReadWriteInterjecting,
 } from "./groups.ts";
 
 const GROUP = "120363000000000001@g.us";
@@ -82,6 +83,65 @@ describe("groups.json", () => {
     expect(group === undefined ? true : openTo(config, group, "podstow")).toBe(
       false,
     );
+  });
+
+  it("keeps interjecting to read-only Claudes when the file says so, whatever a chat says", () => {
+    const file = {
+      claudes: {
+        podstow: { repo: "o/podstow", access: "read-write" as const },
+        brainstorm: { repo: "o/kickoff", access: "read-only" as const },
+      },
+      groups: {
+        [GROUP]: {
+          claudes: {
+            podstow: { members: [], interjecting: true },
+            brainstorm: { members: [], interjecting: true },
+          },
+        },
+      },
+    };
+    const all = toConfig(parseFile(file), []);
+    expect(all.interjecting).toBe("all");
+    expect(all.groups.get(GROUP)?.interjecting).toEqual([
+      "podstow",
+      "brainstorm",
+    ]);
+    const readOnly = toConfig(
+      parseFile({ ...file, interjecting: "read-only" }),
+      [],
+    );
+    expect(readOnly.interjecting).toBe("read-only");
+    expect(readOnly.groups.get(GROUP)?.interjecting).toEqual(["brainstorm"]);
+    expect(() => parseFile({ interjecting: "some" })).toThrow(
+      /"interjecting"/u,
+    );
+  });
+
+  it("takes interjecting off only read-write Claudes, and only when kept to read-only", () => {
+    const file = {
+      claudes: {
+        podstow: { repo: "o/podstow", access: "read-write" as const },
+        brainstorm: { repo: "o/kickoff", access: "read-only" as const },
+      },
+      groups: {
+        [GROUP]: {
+          claudes: {
+            podstow: { members: [], everyone: true, interjecting: true },
+            brainstorm: { members: [], interjecting: true },
+          },
+        },
+      },
+    };
+    expect(withoutReadWriteInterjecting(file)).toEqual({ file, stopped: [] });
+    const kept = withoutReadWriteInterjecting({
+      ...file,
+      interjecting: "read-only",
+    });
+    expect(kept.stopped).toEqual([{ chat: GROUP, claude: "podstow" }]);
+    expect(kept.file.groups?.[GROUP]?.claudes).toEqual({
+      podstow: { members: [], everyone: true },
+      brainstorm: { members: [], interjecting: true },
+    });
   });
 
   it("turns a group from before named Claudes into a Claude named after its repo", () => {
