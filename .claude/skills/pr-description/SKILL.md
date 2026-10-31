@@ -33,10 +33,12 @@ ask whose link is not https", not "Fix link validation".
 
 ## Body
 
-Use `.github/pull_request_template.md`. Fill every section, strip the
-comments, and add no sections. Aim for about 200 words before *Left for
-later*. Every sentence must make sense to someone who has not opened the
-diff.
+After the `Closes #N` line, if there is one, the body has five sections,
+each a `##` heading, in this order: *Outcome*, *Adds / removes*, *Drift*,
+*Verification* and *Left for later*. Fill every one and add no others.
+The review reads them by these names. Aim for about 200 words before
+*Left for later*. Every sentence must make sense to someone who has not
+opened the diff.
 
 **Outcome.** Two or three sentences. What is true after merge that was not
 before, for a user, an agent or a developer. State the effect, not the
