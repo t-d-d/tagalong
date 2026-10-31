@@ -4,8 +4,9 @@
 // it answers only messages given from elsewhere, such as Claude Desktop.
 //
 // An interjecting Claude's session is read until it ends, less often the
-// longer it is idle, and a turn it starts by itself is not posted: the next
-// interjecting delivery asks the Claude whether the chat should hear of it.
+// longer it is idle. A turn it starts by itself is posted at once only when
+// it answers a line it was given; otherwise the next interjecting delivery
+// asks the Claude whether the chat should hear of it.
 import type { Aws } from "./aws.ts";
 import type { Bridge, Quote } from "./bridge.ts";
 import { type ClaudeApi, textOf } from "./claude-api.ts";
@@ -45,6 +46,10 @@ export interface RelayDeps {
   sending: Set<string>;
   /** Requests, by eyesKey, still being delivered to their Claudes: their 👀 stays. */
   asking: Set<string>;
+  /** Interjecting deliveries and turns posted at once in the last hour, by threadKey (interjecting.ts). */
+  interjected: Map<string, number[]>;
+  /** INTERJECT_PER_HOUR. */
+  interjectPerHour: number;
   /** Where a session's uploads are, and where the bridge sends files from; none without a bucket. */
   files?: { aws: Aws; bucket: string; outboxDir: string };
 }
@@ -58,6 +63,53 @@ const asksOf = (deliveries: Delivery[]): Quote[] =>
 /** The ask an answer to these deliveries replies to: the latest they carry. */
 const latestAsk = (deliveries: Delivery[]): Quote | undefined =>
   deliveries.findLast((delivery) => delivery.ask !== null)?.ask ?? undefined;
+
+const HOUR = 3_600_000;
+
+/**
+ * Whether an interjecting Claude may speak once more in its chat this hour,
+ * counted if it may (who-can-use-it.md).
+ */
+export function spend(
+  interjected: Map<string, number[]>,
+  key: string,
+  now: number,
+  perHour: number,
+): boolean {
+  const hour = (interjected.get(key) ?? []).filter((at) => now - at < HOUR);
+  interjected.set(key, hour);
+  if (hour.length >= perHour) return false;
+  hour.push(now);
+  return true;
+}
+
+/**
+ * Whether a turn an interjecting Claude's session started by itself answers a
+ * line it was given, and is posted at once: a pass always, otherwise while
+ * the hourly limit allows.
+ */
+function answersLine(
+  session: SessionState,
+  text: string,
+  deps: RelayDeps,
+): boolean {
+  const { label, kind } = readAnswer(text);
+  if (
+    label === undefined ||
+    !session.given.includes(label) ||
+    messageFor(deps.state.state, session.chat, label) === undefined
+  )
+    return false;
+  return (
+    kind === "pass" ||
+    spend(
+      deps.interjected,
+      threadKey(session.chat, session.claude),
+      deps.now(),
+      deps.interjectPerHour,
+    )
+  );
+}
 
 /** How many answered deliveries a session keeps. */
 const KEPT = 20;
@@ -130,9 +182,14 @@ export async function check(
       for (const delivery of answers) delivery.answered = true;
       continue;
     }
-    // A turn an interjecting Claude's session started by itself is not
-    // posted: the Claude is asked about it once things are quiet.
+    // A turn an interjecting Claude's session started by itself is posted at
+    // once when it answers a line. Any other is not posted: the Claude is
+    // asked about it once things are quiet.
     if (own && answers !== null && answers.length === 0) {
+      if (!turn.failed && answersLine(session, turn.text, deps)) {
+        await post(id, session, turn.text, [], deps);
+        continue;
+      }
       session.woke = deps.now();
       log.info("session-woke", { session: id });
       continue;

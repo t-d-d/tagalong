@@ -71,8 +71,12 @@ result, so nothing has to be scraped or posted back by the session.
   failed session is not read again once nothing is left to read. Update, fresh, or turning interjecting off puts
   it back on GIVE_UP_MS, counted from its last delivery or result.
 - A turn an interjecting Claude's running session starts by itself is
-  not posted. It is activity, kept in state.json, as a person's message
-  is. Once the chat and the session have both been quiet for
+  posted at once when its result starts with the label of a line the
+  session was given: as a reply to that line, a reaction for one emoji,
+  nothing for the pass word. Such a turn is not activity, and counts
+  toward INTERJECT_PER_HOUR; over the limit it is handled as any other.
+  Any other such turn is not posted. It is activity, kept in state.json,
+  as a person's message is. Once the chat and the session have both been quiet for
   INTERJECT_QUIET_MS, one interjecting delivery goes in: what people
   said since the Claude last heard, or a line saying nothing new was
   said, and that what the session did was not posted. Its answer is a
@@ -117,4 +121,6 @@ The 👀 for a reaction goes on the answer it is on since 31 October
 2026 (#45). Interjecting deliveries carry no request and get no notices
 since the same day (#19). An interjecting Claude's running session is
 read until it ends, and a turn it starts by itself is not posted but
-asked about, since the same day (#19, #68).
+asked about, since the same day (#19, #68). One that answers a line it
+was given is posted at once since the same day, at the owner's request
+(#80).

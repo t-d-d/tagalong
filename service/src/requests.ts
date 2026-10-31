@@ -17,7 +17,7 @@ import {
   versionOf,
 } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
-import { deliveryOf, labelFor } from "./mailbox.ts";
+import { deliveryOf, give, labelFor } from "./mailbox.ts";
 import type { People } from "./people.ts";
 import {
   ANSWER,
@@ -394,6 +394,7 @@ async function turn(
       );
     };
     existing.deliveries.push(delivery);
+    give(existing, text);
     deps.state.save();
     // Until the CLI says it is in, the session may read as archived because
     // it is: the message then goes to a new session, not a warning.
@@ -476,9 +477,11 @@ async function turn(
     deliveries: [deliveryOf(prompt, request, now, interjecting)],
     link: null,
     woke: null,
+    given: [],
     idle: 0,
     readAt: 0,
   };
+  give(session, prompt);
   deps.state.state.sessions[id] = session;
   // Only one session reads a folder, so each file goes once, though the old
   // session may still answer after an update.

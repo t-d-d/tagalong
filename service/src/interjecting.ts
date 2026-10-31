@@ -5,6 +5,8 @@
 //
 // Its session waking by itself starts one too (cloud-sessions.md): what that
 // turn said is not posted, and the Claude is asked whether the chat should hear.
+// A turn that answers a line is posted at once instead (relay.ts), and counts
+// toward the same hourly limit.
 //
 // Nothing waits in memory: what is waiting is read from the bridge's store,
 // after the time the Claude last heard, and a wake from state.json, so a

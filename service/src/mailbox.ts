@@ -32,6 +32,17 @@ export function labelFor(
   return label;
 }
 
+/** Note the labels of the lines in a message about to go into a session. */
+export function give(session: SessionState, text: string): void {
+  const labels = new Set(session.given);
+  for (const [, label] of text.matchAll(/\[(m\d+)\]/gu))
+    if (label !== undefined) {
+      labels.delete(label);
+      labels.add(label);
+    }
+  session.given = [...labels].slice(-LABELS);
+}
+
 /** The message a label stands for in a chat, if the chat still knows it. */
 export const messageFor = (
   state: State,
