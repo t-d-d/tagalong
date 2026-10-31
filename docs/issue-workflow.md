@@ -103,7 +103,7 @@ The `write-a-prd` skill drafts one with the owner, and `prd-to-issues` breaks a 
 
 ## When the fix is live
 
-A merge to main deploys. When the deploy job passes its live check, governor tells the session of each pull request it shipped that the change is live, and asks for any check that pull request promised for the deploy. It also adds `deployed: live` to each ticket those pull requests closed. Governor finds the deploy by the `deploy` job's name and `TICKET_LABEL_PATHS` in `.github/workflows/deploy.yml`, so a change to either can silence it. A red deploy run goes to the session of the merge it blames, as a red CI run does.
+A merge to main deploys. When the deploy job passes its live check, governor tells the session of each pull request it shipped that the change is live, and asks for any check that pull request promised for the deploy. It also adds `deployed: live` to each ticket those pull requests closed. Governor finds the deploy by the `deploy` job's name and `TICKET_LABEL_PATHS` in `.github/workflows/deploy.yml`, so a change to either can silence it. Governor treats a red deploy run as a red CI run: it tells the session of the one merge since the last green run, or starts one fresh session when several merges could have broken it.
 
 Governor tells an issue's filer about its comments and its close, but not about the `deployed: live` label. So a session that files an issue adds this line to the body, on its own line above the session link that ends it, with its own link in place of the placeholder:
 
