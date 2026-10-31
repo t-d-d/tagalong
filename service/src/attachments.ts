@@ -23,6 +23,10 @@ export const LIMITS = {
 
 const MEDIA = new Set(["image", "video", "audio", "document", "sticker"]);
 
+/** Media a person sent who may ask the Claude, not the device's own. */
+const passable = (row: MessageRow, mayAsk: (sender: string) => boolean) =>
+  MEDIA.has(row.mediaType) && !row.isFromMe && mayAsk(row.sender);
+
 export interface Attachment {
   name: string;
   type: string;
@@ -54,9 +58,9 @@ export interface Pick {
 export function pickMedia(pick: Pick): MessageRow[] {
   const ok = (row: MessageRow | undefined): row is MessageRow =>
     row !== undefined &&
-    MEDIA.has(row.mediaType) &&
-    !row.isFromMe &&
-    allowed(pick.config, pick.group, pick.claude, pick.people, row.sender);
+    passable(row, (sender) =>
+      allowed(pick.config, pick.group, pick.claude, pick.people, sender),
+    );
   const own = pick.store.message(pick.chat, pick.messageId);
   const quoted = pick.store.message(pick.chat, pick.quotedMessageId);
   const recent = pick.store
@@ -85,13 +89,7 @@ export function heardMedia(
   },
 ): MessageRow[] {
   return rows
-    .filter(
-      (row) =>
-        MEDIA.has(row.mediaType) &&
-        !row.isFromMe &&
-        heard.mayAsk(row.sender) &&
-        !heard.sent.has(row.id),
-    )
+    .filter((row) => passable(row, heard.mayAsk) && !heard.sent.has(row.id))
     .slice(-LIMITS.files);
 }
 

@@ -283,6 +283,9 @@ describe("an interjecting Claude (who-can-use-it.md)", () => {
     expect(follow).toContain("Ollie asks you, @brainstorm");
     expect(follow).not.toContain("audio_1.ogg");
     expect(follow).not.toContain("audio_2.ogg");
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({ event: "session-followup", files: 0 }),
+    );
   });
 
   it("hears only the people who may ask it, and is started only by them", async () => {

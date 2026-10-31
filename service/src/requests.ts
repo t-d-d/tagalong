@@ -98,29 +98,22 @@ export function repliedTo(
   return quoted === undefined ? undefined : answerBy(quoted);
 }
 
-/** Media given to `claude` once each, as links (attachments.md). */
+/** Media given to `claude` once each, as links (attachments.md); undefined when files are not shared. */
 function givenTo(claude: string, deps: RequestDeps) {
+  const bucket = deps.env.ATTACHMENTS_BUCKET;
+  const { aws } = deps;
+  if (bucket === undefined || aws === undefined) return undefined;
   const key = (id: string) => `${claude}:${id}`;
   const given = new Set(deps.state.state.sentMedia);
   return {
     sent: { has: (id: string) => given.has(key(id)) },
     share: async (chat: string, rows: MessageRow[]): Promise<Attachment[]> => {
-      const bucket = deps.env.ATTACHMENTS_BUCKET;
-      if (rows.length === 0 || bucket === undefined || deps.aws === undefined)
-        return [];
+      if (rows.length === 0) return [];
       deps.state.state.sentMedia.push(...rows.map((row) => key(row.id)));
-      return shareMedia(rows, {
-        bridge: deps.bridge,
-        aws: deps.aws,
-        bucket,
-        chat,
-      });
+      return shareMedia(rows, { bridge: deps.bridge, aws, bucket, chat });
     },
   };
 }
-
-const sharing = (deps: RequestDeps): boolean =>
-  deps.env.ATTACHMENTS_BUCKET !== undefined && deps.aws !== undefined;
 
 async function files(
   payload: Payload,
@@ -128,8 +121,8 @@ async function files(
   claude: string,
   deps: RequestDeps,
 ): Promise<Attachment[]> {
-  if (!sharing(deps)) return [];
   const given = givenTo(claude, deps);
+  if (given === undefined) return [];
   const rows = pickMedia({
     config: deps.groups.config,
     group,
@@ -154,8 +147,8 @@ async function heardFiles(
   upTo: number,
   deps: RequestDeps,
 ): Promise<Attachment[]> {
-  if (!sharing(deps)) return [];
   const given = givenTo(claude, deps);
+  if (given === undefined) return [];
   const rows = heardMedia(
     deps.store
       .since(chat, after, 200)
@@ -397,7 +390,7 @@ async function turn(
           deps,
         )
       : [];
-  const sent = ask?.files.length ?? heard.length;
+  const fileCount = ask?.files.length ?? heard.length;
   const labelAsk = () => {
     if (ask !== undefined && request !== null) ask.label = label(request);
   };
@@ -474,7 +467,7 @@ async function turn(
         session: id,
         group: group.label,
         claude: claude.name,
-        files: sent,
+        files: fileCount,
         interjecting,
         woke,
       });
@@ -553,7 +546,7 @@ async function turn(
     claude: claude.name,
     access: claude.access,
     carried: carried !== "",
-    files: sent,
+    files: fileCount,
     interjecting,
   });
   await verify(id, claude, deps.api);
