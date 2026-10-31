@@ -85,6 +85,7 @@ An implementation ticket:
 ```
 filed -> spec work (no workflow label) -> ready for development
       -> under development -> pull request -> the merge closes it
+      -> deployed: live
 ```
 
 A stuck session comments on the issue with what it tried and leaves `under development` on, so the ticket is not started again.
@@ -99,6 +100,18 @@ filed, no label (discussion or backlog) -> ready for development (the owner agre
 ```
 
 The `write-a-prd` skill drafts one with the owner, and `prd-to-issues` breaks a ready one into tickets once the owner approves the train. A pull request never closes a PRD. A PRD's label starts nothing, since governor reads only each ticket's own labels. To pause a PRD, take `ready for development` off each of its tickets that should wait.
+
+## When the fix is live
+
+A merge to main deploys. When the deploy job passes its live check, governor tells the session of each pull request it shipped that the change is live, and asks for any check that pull request promised for the deploy. It also adds `deployed: live` to each ticket those pull requests closed. Governor finds the deploy by the `deploy` job's name and `TICKET_LABEL_PATHS` in `.github/workflows/deploy.yml`, so a change to either can silence it. A red deploy run goes to the session of the merge it blames, as a red CI run does.
+
+Governor tells an issue's filer about its comments and its close, but not about the `deployed: live` label. So a session that files an issue adds this line to the body, on its own line above the session link that ends it, with its own link in place of the placeholder:
+
+```
+<!-- governor:subscribe https://claude.ai/code/session_… events=deploys -->
+```
+
+The line renders as nothing. A session still open when the label lands hears that the fix is live. Governor drops the line for a session that has signed off by then.
 
 ## Not labels
 
