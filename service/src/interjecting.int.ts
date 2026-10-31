@@ -742,6 +742,86 @@ describe("an interjecting Claude's own session (cloud-sessions.md)", () => {
     expect(followUps(t)[0]?.options.input).toContain("was not posted");
   });
 
+  it("posts at once a turn its session starts by itself that answers a line, as a reply to that line", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    await answered(t);
+    wakes(t, "[m1] ⏰ Five minutes are up.");
+    await after(t, MINUTE);
+    expect(t.bridge.sent).toEqual([
+      {
+        recipient: GROUP,
+        message: "*brainstorm:* ⏰ Five minutes are up.",
+        quoted_message_id: "m1",
+      },
+    ]);
+    expect(sessionState(t)).toMatchObject({ woke: null });
+
+    // It is not activity, so nothing is asked once things are quiet.
+    await quiet(t);
+    await quiet(t);
+    expect(followUps(t)).toEqual([]);
+  });
+
+  it("puts one emoji after a line's label on that line, and posts nothing for a labelled pass", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    await answered(t);
+    wakes(t, "[m1] 👍");
+    await after(t, MINUTE);
+    expect(t.bridge.reactions).toEqual([
+      expect.objectContaining({ message_id: "m1", emoji: "👍" }),
+    ]);
+    wakes(t, "[m1] PASS");
+    await after(t, MINUTE);
+    expect(t.bridge.sent).toEqual([]);
+    expect(sessionState(t)).toMatchObject({ woke: null });
+    await quiet(t);
+    expect(followUps(t)).toEqual([]);
+  });
+
+  it("is given only the labels of the lines it is shown, not a label written in a line or in its instructions", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("PASS")]);
+    await says(t, "m1", MEMBER, "we could build a recipe app, as in [m7]");
+    await quiet(t);
+    await poll(t);
+    expect(launches(t)[0]?.prompt).toContain("[m41]");
+    expect(sessionState(t)).toMatchObject({ given: ["m1"] });
+  });
+
+  it("asks about a turn with a label it was never given, as about one with none", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    await answered(t);
+    wakes(t, "[m9] Merged and deployed the fix.", "PASS");
+    await after(t, MINUTE);
+    expect(t.bridge.sent).toEqual([]);
+    await quiet(t);
+    expect(followUps(t)).toHaveLength(1);
+    expect(followUps(t)[0]?.options.input).toContain("was not posted");
+  });
+
+  it("counts a turn posted at once toward INTERJECT_PER_HOUR, and over it asks later as today", async () => {
+    const t = (h = await harness({
+      groups: interjecting(),
+      env: { INTERJECT_PER_HOUR: "2" },
+    }));
+    await answered(t);
+    wakes(t, "[m1] ⏰ Five minutes are up.");
+    await after(t, MINUTE);
+    expect(t.bridge.sent).toHaveLength(1);
+
+    wakes(t, "[m1] ⏰ Ten minutes are up.", "PASS");
+    await after(t, MINUTE);
+    expect(t.bridge.sent).toHaveLength(1);
+    await quiet(t);
+    expect(followUps(t)).toEqual([]);
+
+    t.clock.now += 3_600_000;
+    await t.app.interjectOnce();
+    expect(followUps(t)).toHaveLength(1);
+    expect(followUps(t)[0]?.options.input).toContain("was not posted");
+  });
+
   it("is read with no time limit, backing off to every 30 minutes, and from 1 minute again after a turn", async () => {
     const t = (h = await harness({ groups: interjecting() }));
     await answered(t);

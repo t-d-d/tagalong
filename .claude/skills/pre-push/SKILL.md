@@ -63,13 +63,13 @@ again.
 ## 4. Push
 
 Check the branch's commit messages for a closing word. GitHub reads a
-commit message that reaches main the way it reads a pull request body:
-close, closes, closed, fix, fixes, fixed, resolve, resolves or resolved,
-before an issue reference, closes that issue. It reads no negation, so
-"does not fix #N yet" closes it too, and the reference may sit on the next
-line. This repo merges with merge commits, so every commit on the branch
-reaches main as written, and the issue closes at the merge. An issue
-reference is `#N`, `owner/repo#N` or a full link to the issue.
+commit message that reaches main the way it reads a pull request body: a
+closing word before an issue reference closes that issue. Test 2 of the
+[`pr-review` checklist](../pr-review/SKILL.md) lists the closing words and
+the forms an issue reference takes. GitHub reads no negation, so "does not
+fix #N yet" closes it too, and the reference may sit on the next line.
+This repo merges with merge commits, so every commit on the branch
+reaches main as written, and the issue closes at the merge.
 
 List the candidates with:
 
@@ -77,6 +77,9 @@ List the candidates with:
 git log --format=%B origin/main..HEAD |
   grep -inE -A1 '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b'
 ```
+
+The pattern matches the closing words test 2 lists. When that list
+changes, change the pattern with it.
 
 Read each line it prints, with the line after it. Where a closing word
 comes before an issue reference, reword the commit so it does not, such

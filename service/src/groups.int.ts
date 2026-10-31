@@ -98,6 +98,7 @@ describe("state.json on disk", () => {
         },
       ],
       link: { id: "Zk3q9xT0aB4mN7pR2sV5wY8c", given: 1, sent: ["k1"] },
+      given: ["m1"],
       woke: 3,
       idle: 2,
       readAt: 4,

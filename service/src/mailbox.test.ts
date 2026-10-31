@@ -4,6 +4,7 @@ import {
   answering,
   busy,
   deliveryOf,
+  give,
   heard,
   labelFor,
   messageFor,
@@ -26,6 +27,7 @@ const session = (): SessionState => ({
   deliveries: [],
   link: null,
   woke: null,
+  given: [],
   idle: 0,
   readAt: 0,
 });
@@ -50,6 +52,18 @@ describe("labels", () => {
       id: "x599",
       sender: "1",
     });
+  });
+});
+
+describe("labels given to a session", () => {
+  it("notes each line's label in what it is given, the latest kept", () => {
+    const one = session();
+    give(one, ["m1", "m2"]);
+    give(one, ["m1", "m3"]);
+    expect(one.given).toEqual(["m2", "m1", "m3"]);
+    for (let each = 4; each < 600; each += 1) give(one, [`m${String(each)}`]);
+    expect(one.given).toHaveLength(500);
+    expect(one.given.at(-1)).toBe("m599");
   });
 });
 
