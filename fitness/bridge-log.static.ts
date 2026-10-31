@@ -15,7 +15,7 @@ interface Substitution {
 // Each mask is one -e 's/.../.../' line of the mask array. The expressions
 // keep to what sed -E and JavaScript read the same way: no slash, no POSIX
 // class, no backslash inside brackets, and no & in the replacement.
-function masks(): Substitution[] {
+function readMasks(): Substitution[] {
   const block = /^mask=\(\n([\s\S]*?)^\)$/mu.exec(script)?.[1] ?? "";
   return block
     .split("\n")
@@ -24,8 +24,12 @@ function masks(): Substitution[] {
       const match = /^\s+-e 's\/([^/]+)\/([^/]*)\/(g?)'$/u.exec(line);
       if (match === null) throw new Error(`Unread mask line: ${line}`);
       const [, pattern = "", replacement = "", flags = ""] = match;
-      expect(pattern, line).not.toMatch(/\[[^\]]*(\\|\[:)/u);
-      expect(replacement, line).not.toMatch(/[&$]/u);
+      if (/\[[^\]]*(\\|\[:)/u.test(pattern))
+        throw new Error(
+          `Mask reads differently in sed and JavaScript: ${line}`,
+        );
+      if (/[&$]/u.test(replacement))
+        throw new Error(`Mask replacement uses & or $: ${line}`);
       return {
         pattern: new RegExp(pattern, `${flags}u`),
         replacement: replacement.replace(/\\(\d)/gu, "$$$1"),
@@ -33,17 +37,24 @@ function masks(): Substitution[] {
     });
 }
 
+function readKeep(): RegExp {
+  const keep = /^keep='([^']+)'$/mu.exec(script)?.[1];
+  if (keep === undefined) throw new Error("No keep pattern in the script.");
+  return new RegExp(keep, "u");
+}
+
+const masks = readMasks();
+const keep = readKeep();
+
 function mask(line: string): string {
-  return masks().reduce(
+  return masks.reduce(
     (masked, { pattern, replacement }) => masked.replace(pattern, replacement),
     line,
   );
 }
 
 function kept(line: string): boolean {
-  const keep = /^keep='([^']+)'$/mu.exec(script)?.[1];
-  if (keep === undefined) throw new Error("No keep pattern in the script.");
-  return new RegExp(keep, "u").test(line);
+  return keep.test(line);
 }
 
 const number = "447700900123";
@@ -106,6 +117,24 @@ describe("fitness: the bridge's lines carry no number, id or name (logging.md)",
       true,
     );
     expect(kept("Error sending webhook: connection refused")).toBe(true);
+    expect(kept("⚠ Webhook failed with status 500")).toBe(true);
+    expect(
+      mask(
+        `12:00:00.000 [Client WARN] Failed to query local contact name for ${number}@s.whatsapp.net: database is locked`,
+      ),
+    ).toBe(
+      "12:00:00.000 [Client WARN] Failed to query local contact name for <jid>: database is locked",
+    );
+  });
+
+  it("reads whatsmeow's coloured lines as the bridge writes them", () => {
+    const line = mask(
+      `12:00:00.000\u001b[33m [Client WARN] Failed to mark chat ${group}@g.us read: database is locked\u001b[0m`,
+    );
+    expect(line).toBe(
+      "12:00:00.000\u001b[33m [Client WARN] Failed to mark chat <jid> read: database is locked\u001b[0m",
+    );
+    expect(kept(line)).toBe(true);
   });
 
   it("drops the lines that print a message", () => {
@@ -119,5 +148,12 @@ describe("fitness: the bridge's lines carry no number, id or name (logging.md)",
         ),
       ),
     ).toBe(false);
+  });
+
+  it("drops the later lines of a message that runs over several lines", () => {
+    expect(kept(mask("Warning: Ann is bringing the cake"))).toBe(false);
+    expect(kept(mask("Error: train cancelled, ring me on 07700 900123"))).toBe(
+      false,
+    );
   });
 });

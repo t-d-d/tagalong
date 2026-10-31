@@ -22,14 +22,14 @@ if [ ! -s store/whatsapp.db ]; then
 fi
 echo "bridge: starting"
 
-keep='Starting WhatsApp client|Starting REST API server|REST API server error|connected to WhatsApp|Connected to WhatsApp|Device logged out|Disconnected from WhatsApp|Connection failure|Stream error|Stream replaced|Connection attempt|Failed to connect|Failed to establish|Failed to resolve media roots|reconnect|Reconnect|QR code|Disconnecting|^panic:| (WARN|ERROR)\]|^(Warning|Error)'
+keep='Starting WhatsApp client|Starting REST API server|REST API server error|connected to WhatsApp|Connected to WhatsApp|Device logged out|Disconnected from WhatsApp|Connection failure|Stream error|Stream replaced|Connection attempt|Failed to connect|Failed to establish|Failed to resolve media roots|reconnect|Reconnect|QR code|Disconnecting|^panic:| (WARN|ERROR)\]|^Warning: (could not open whatsmeow database|LID cache lookup failed|server LID lookup failed|skipping unparseable mention|upload path does not match|failed to store outbound|failed to persist|could not resolve LID chat|OpusHead not found|No valid granule)|^Error (marshaling|building|sending) webhook|^⚠ (Webhook failed|Could not|Media file too large)'
 
 # Applied in order: JIDs first, then any digit run long enough to be a number
-# or an id, then everything after a chat, group or contact name.
+# or an id, then everything after the name in a chat-name line.
 mask=(
   -e 's/[A-Za-z0-9._:+-]+@[a-z.]*[a-z]/<jid>/g'
   -e 's/\+?[0-9]{7,}/<number>/g'
-  -e 's/( name( from PushName)?( for [^ ]+)?: ).*/\1<name>/'
+  -e 's/((Using|Updating) [a-z ]*name( from PushName)?( for [^ ]+)?: ).*/\1<name>/'
 )
 
 exec whatsapp-bridge > >(sed -u -E "${mask[@]}" | grep --line-buffered -E "$keep" || true) 2>&1
