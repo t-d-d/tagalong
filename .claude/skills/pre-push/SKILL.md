@@ -62,6 +62,46 @@ again.
 
 ## 4. Push
 
+Check the branch's commit messages for a closing word. GitHub reads a
+commit message that reaches main the way it reads a pull request body:
+close, closes, closed, fix, fixes, fixed, resolve, resolves or resolved,
+before an issue reference, closes that issue. It reads no negation, so
+"does not fix #N yet" closes it too, and the reference may sit on the next
+line. This repo merges with merge commits, so every commit on the branch
+reaches main as written, and the issue closes at the merge. An issue
+reference is `#N`, `owner/repo#N` or a full link to the issue.
+
+List the candidates with:
+
+```
+git log --format=%B origin/main..HEAD |
+  grep -inE -A1 '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b'
+```
+
+Read each line it prints, with the line after it. Where a closing word
+comes before an issue reference, reword the commit so it does not, such
+as "#N is not addressed here". Use `git commit --amend` for the last
+commit. For an earlier one, step 1's merge must survive, and this session
+has no editor for `git rebase -i`, so mark the commit for `edit` from the
+command line. `<sha>` is its short hash as `git log --oneline` prints it:
+
+```
+GIT_SEQUENCE_EDITOR="sed -i 's/^pick <sha> /edit <sha> /'" \
+  git rebase -i --rebase-merges origin/main
+git commit --amend -m "<new message>"
+git rebase --continue
+```
+
+Amend only once `git status` says the rebase stopped at that commit. If
+it ran through without stopping, the hash did not match. A conflict step
+1 resolved comes back when the merge is replayed. Resolve it the same way.
+
+A reworded commit that was already pushed needs
+`git push --force-with-lease` to your own branch. The pull request body's
+`Closes #N` lines close the branch's issues, so no commit message needs a
+closing word. GitHub's merge commit carries the pull request title as its
+message body, so the title needs none either.
+
 Fetch `origin/main` again. If it moved and touches anything your diff
 touches, go back to step 1. Then push the branch. Never push to main.
 
