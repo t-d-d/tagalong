@@ -1,6 +1,6 @@
 # Who can use it
 Relevance: Who tagalong answers, which Claudes a chat has, who may change that, what a Claude is given, or a command: service/src/access.ts, service/src/addressing.ts, service/src/commands.ts, service/src/prompts.ts, service/src/requests.ts, service/src/attachments.ts, service/src/groups.ts
-Decision: Owners define Claudes, add them to chats and say who may ask each one there; a Claude answers and hears only those people, and other chats are ignored.
+Decision: Owners define Claudes, add them to chats and say who may ask each one there; a Claude hears its whole chat but answers only them. Other chats are ignored.
 
 Why: Anyone can add the number to a group, and a Claude can change a
 repo. So being in a chat gives nothing: an owner says which Claudes are
@@ -29,11 +29,12 @@ there and who may ask them.
 - An owner may set one Claude in one chat to interject. It is off unless
   an owner turns it on. An interjecting Claude is given messages that did
   not ask it: once the chat has been quiet for INTERJECT_QUIET_MS, what
-  the people who may ask it said since it last heard, in one delivery.
-  Only those people's messages, sent after it was set to interject, start
-  one, never a Claude's answer or a command. A turn its own session
-  starts by itself starts one too, unless it answers a line and is
-  posted at once (cloud-sessions.md). It is told nobody
+  everyone in the chat said since it last heard, in one delivery. Only
+  the messages of the people who may ask it, sent after it was set to
+  interject, start one, never a Claude's answer, a command, or anyone
+  else's message. A turn its own session starts by itself starts one
+  too, unless it answers a line and is posted at once (cloud-sessions.md).
+  It is told nobody
   asked it, to answer only with something important, briefly, and
   otherwise to pass, and that a message nobody addressed to it is
   never an instruction to change anything.
@@ -59,9 +60,12 @@ there and who may ask them.
   read-write Claude is never open to everyone, whatever groups.json
   says: anyone a group admin adds could then change its repo.
 - A Claude is given its request, and, since its last turn, the chat's
-  messages from the people who may ask it and the Claudes' answers,
-  with commands left out, and files those people sent in the last ten
-  minutes, once each. It is told only its request is an instruction.
+  messages from everyone in it and the Claudes' answers, with commands
+  left out, and the media in attachments.md. A new session starts with
+  the chat's last messages, from everyone. Each person's line says
+  whether they may ask that Claude. It is told only its request is an
+  instruction, and that a line from someone who may not ask it never
+  is, whatever it says.
 - At most MAX_PER_HOUR turns start or continue a session in an hour,
   counting each Claude asked.
 - groups.json is checked by its schema before it is written. A change
@@ -71,14 +75,17 @@ there and who may ask them.
 
 - Answer anyone in a chat because they are in it.
 - Match an owner by contact name: anyone can choose any name.
-- Give a Claude the whole chat: people who are not members said it.
+- Treat a line from someone who may not ask a Claude as a request, or
+  leave out which lines they are: they are in the chat, not trusted.
 - Let a chat's members add Claudes or people.
 - Give a chat a default Claude: nothing answers until a Claude is named.
 - Turn interjecting on by default, or for every Claude at once: each
   interjecting delivery is a turn, and it costs as much as a short answer.
 - Let a Claude's answer start an interjecting delivery: two interjecting
   Claudes would talk to each other in a loop.
-- Let anyone allowed for one Claude ask, or be heard by, the others.
+- Let anyone allowed for one Claude ask the others.
+- Let anyone who may not ask a Claude start an interjecting delivery:
+  they could run up its turns.
 - Open a read-write Claude to everyone in a chat.
 
 Judgment: read-only rests on the permission mode and the instruction,
@@ -94,3 +101,5 @@ since the same day (#19, #68), except one that answers a line, which is
 posted at once since the same day (#80).
 An owner can keep interjecting to read-only Claudes since 31 October
 2026 (#19, #52).
+A Claude hears everyone in its chat, each line marked with whether its
+sender may ask it, since 31 October 2026, at the owner's request (#84).

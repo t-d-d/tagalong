@@ -11,18 +11,19 @@ upload link is short, and a Lambda signs for it at the moment of use.
 ## Rules
 
 - A request carries the media in its own message, the message it
-  replies to, and any a member sent in the last ten minutes that no
-  session has had yet. At most five, each at most 25 MB.
-- An interjecting delivery carries media as a request does: what the
-  people who may ask the Claude sent since it last heard, not yet given
-  to it. At most five, each at most 25 MB.
+  replies to, and any sent in the last ten minutes that the Claude has
+  not had yet. At most five, each at most 25 MB. Its own media and what
+  it replies to always go; the latest of the rest fill what is left.
+- An interjecting delivery carries media as a request does: what was
+  sent in the chat since it last heard, not yet given to it. At most
+  five, each at most 25 MB.
 - A file goes at least once to each Claude, not exactly once. It counts
   as given once its delivery reaches the session. One the bridge never
   hands over whole, whose upload fails, or whose delivery fails, is not
   counted, so a request in the next ten minutes, or the next try of a
   delivery that failed, offers it again. A send that fails
   without saying whether the session got it can give a file twice.
-- Only media from owners and members is passed on.
+- Media from anyone in the chat is passed on, never the device's own.
 - The bridge downloads each into its store. tagalong uploads it to
   attachments/<random id>/<safe name> and gives the session a presigned
   GET link valid for an hour.
@@ -80,4 +81,5 @@ Lambda turns into an upload URL, since 31 October 2026, at the owner's
 request (#59). An interjecting delivery carries media as a request does
 since 31 October 2026, at the owner's request (#81). A file counts as given
 only once it reaches the session since 31 October 2026 (#83), and goes
-at least once, not exactly once, at the owner's choice (#91).
+at least once, not exactly once, at the owner's choice (#91). Media from
+anyone in the chat is passed on since the same day (#84).

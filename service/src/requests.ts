@@ -4,7 +4,6 @@
 // when it has none or it is gone, a new session starts with the last messages
 // here.
 import type { Aws } from "./aws.ts";
-import { allowed } from "./access.ts";
 import {
   type Attachment,
   heardMedia,
@@ -15,6 +14,7 @@ import type { Bridge, Quote } from "./bridge.ts";
 import type { ClaudeApi } from "./claude-api.ts";
 import type { Cloud } from "./cloud.ts";
 import type { Env } from "./env.ts";
+import { allowed } from "./access.ts";
 import { oneLine } from "./format.ts";
 import {
   type Claude,
@@ -33,6 +33,7 @@ import {
   conversation,
   firstPrompt,
   followUp,
+  marked,
 } from "./prompts.ts";
 import { OUTGOING, keepLink, newLinkId } from "./outgoing.ts";
 import { lookAway } from "./relay.ts";
@@ -153,17 +154,12 @@ function givenTo(claude: string, deps: RequestDeps) {
 
 async function files(
   payload: Payload,
-  group: Group,
   claude: string,
   deps: RequestDeps,
 ): Promise<Given> {
   const given = givenTo(claude, deps);
   if (given === undefined) return none();
   const rows = pickMedia({
-    config: deps.groups.config,
-    group,
-    claude,
-    people: deps.people,
     store: deps.store,
     chat: payload.chatJID,
     messageId: payload.messageId,
@@ -174,10 +170,9 @@ async function files(
   return given.share(payload.chatJID, rows);
 }
 
-/** For an interjecting delivery: the media sent after `after` up to `upTo` (ms) by people who may ask it. */
+/** For an interjecting delivery: the media anyone sent after `after` up to `upTo` (ms). */
 async function heardFiles(
   chat: string,
-  group: Group,
   claude: string,
   after: number,
   upTo: number,
@@ -189,11 +184,7 @@ async function heardFiles(
     deps.store
       .since(chat, after, 200)
       .rows.filter((row) => timeOf(row.timestamp) <= upTo),
-    {
-      mayAsk: (sender) =>
-        allowed(deps.groups.config, group, claude, deps.people, sender),
-      sent: given.sent,
-    },
+    { sent: given.sent },
   );
   return given.share(chat, rows);
 }
@@ -240,8 +231,13 @@ function withLink(
   return { ...ask, upload: `${deps.env.UPLOAD_LINK}${link.id}/` };
 }
 
-/** What the request quotes, as the Claude will read it. */
-function quotedOf(payload: Payload, deps: RequestDeps): Ask["quoted"] {
+/** What the request quotes, as the Claude will read it, a person marked with whether they may ask it. */
+function quotedOf(
+  payload: Payload,
+  group: Group,
+  claude: string,
+  deps: RequestDeps,
+): Ask["quoted"] {
   if (
     payload.quotedMessageId === undefined &&
     payload.quotedContent === undefined
@@ -251,12 +247,17 @@ function quotedOf(payload: Payload, deps: RequestDeps): Ask["quoted"] {
   const text = payload.quotedContent ?? row?.content ?? "";
   if (text === "") return undefined;
   const by = answerBy(text);
+  const quotedPerson = (sender: string) =>
+    marked(
+      deps.people.nameOf(sender),
+      allowed(deps.groups.config, group, claude, deps.people, sender),
+    );
   const who =
     payload.quotedIsFromMe === true
       ? by === undefined
         ? "tagalong"
         : `@${by}`
-      : deps.people.nameOf(payload.quotedSender ?? row?.sender ?? "");
+      : quotedPerson(payload.quotedSender ?? row?.sender ?? "");
   return {
     who,
     text: deps.people.readable(text.replace(/^\*[a-z0-9-]+:\*\s?/u, "")),
@@ -306,8 +307,8 @@ export async function handleRequest(
 }
 
 /**
- * An interjecting Claude's turn: what the people who may ask it said up to
- * `at` (ms), with no request, so nobody waits on it (who-can-use-it.md).
+ * An interjecting Claude's turn: what everyone in the chat said up to `at`
+ * (ms), with no request, so nobody waits on it (who-can-use-it.md).
  */
 export const interjectingTurn = (
   chat: string,
@@ -447,14 +448,14 @@ async function deliver(
           // A reaction quotes the answer it is on.
           quoted:
             reaction === undefined
-              ? quotedOf(payload, deps)
+              ? quotedOf(payload, group, claude.name, deps)
               : {
                   who: `@${claude.name}`,
                   text: deps.people.readable(
                     request.content.replace(ANSWER, ""),
                   ),
                 },
-          files: hold.take(await files(payload, group, claude.name, deps)),
+          files: hold.take(await files(payload, claude.name, deps)),
         };
   if (ask !== undefined && reaction !== undefined) ask.reaction = reaction;
   // Nobody asked an interjecting Claude, so it is given what people sent
@@ -464,7 +465,6 @@ async function deliver(
       ? hold.take(
           await heardFiles(
             chat,
-            group,
             claude.name,
             Math.max(thread.heard, deps.state.state.interjecting[key] ?? 0),
             at,
