@@ -7,7 +7,7 @@
 # numbers, group ids, LIDs and the contact names in its chat-name lines, and
 # keep the rest of each line. The bridge prints every message it sees, with
 # its sender, so only its lines about the connection, its warnings and its
-# errors are kept. It runs as PID 1 through exec, so it gets the task's
+# errors are kept, each matched from the start of the line. It runs as PID 1 through exec, so it gets the task's
 # SIGTERM itself.
 set -euo pipefail
 
@@ -22,7 +22,12 @@ if [ ! -s store/whatsapp.db ]; then
 fi
 echo "bridge: starting"
 
-keep='Starting WhatsApp client|Starting REST API server|REST API server error|connected to WhatsApp|Connected to WhatsApp|Device logged out|Disconnected from WhatsApp|Connection failure|Stream error|Stream replaced|Connection attempt|Failed to connect|Failed to establish|Failed to resolve media roots|reconnect|Reconnect|QR code|Disconnecting|^panic:| (WARN|ERROR)\]|^Warning: (could not open whatsmeow database|LID cache lookup failed|server LID lookup failed|skipping unparseable mention|upload path does not match|failed to store outbound|failed to persist|could not resolve LID chat|OpusHead not found|No valid granule)|^Error (marshaling|building|sending) webhook|^⚠ (Webhook failed|Could not|Media file too large)'
+# Every entry is tied to the start of a line, so a message's text cannot match
+# it. whatsmeow's lines start with a time, a colour code and a
+# [<module> <LEVEL>] tag: every WARN and ERROR line is kept, and only the
+# bridge's own INFO lines about the connection. The bridge's other lines are
+# matched by their exact opening.
+keep='^[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}[^ ]* \[[A-Za-z/]+ ((WARN|ERROR)\] |INFO\] (Starting WhatsApp client|Connection attempt|✓ Successfully connected to WhatsApp|🔄 Attempting to reconnect|✓ Reconnected successfully|Already connected, skipping reconnection))|^(Starting REST API server|REST API server error|✓ Connected to WhatsApp|Disconnecting\.\.\.$|Scan this QR code|QR code refreshed|Waiting for QR code scan|panic:|Warning: (could not open whatsmeow database|LID cache lookup failed|server LID lookup failed|skipping unparseable mention|upload path does not match|failed to store outbound|failed to persist|could not resolve LID chat|OpusHead not found|No valid granule)|Error (marshaling|building|sending) webhook|⚠ (Webhook failed|Could not|Media file too large))'
 
 # Applied in order: JIDs first, then any digit run long enough to be a number
 # or an id, then everything after the name in a chat-name line.

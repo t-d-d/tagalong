@@ -150,6 +150,86 @@ describe("fitness: the bridge's lines carry no number, id or name (logging.md)",
     ).toBe(false);
   });
 
+  it("keeps the bridge's own lines about the connection", () => {
+    const own = [
+      "12:00:00.000 [Client INFO] Starting WhatsApp client...",
+      "12:00:00.000 [Client INFO] Connection attempt 1/3...",
+      "12:00:00.000 [Client INFO] ✓ Successfully connected to WhatsApp servers",
+      "12:00:00.000 [Client INFO] 🔄 Attempting to reconnect...",
+      "12:00:00.000 [Client INFO] ✓ Reconnected successfully",
+      "12:00:00.000 [Client INFO] Already connected, skipping reconnection",
+      "12:00:00.000\u001b[33m [Client WARN] ⚠️  Device logged out, please scan QR code to log in again\u001b[0m",
+      "12:00:00.000\u001b[31m [Client ERROR] ❌ Connection failure: 401\u001b[0m",
+      "12:00:00.000 [Client/Socket WARN] Frame websocket read error",
+      "12:00:00.000 [Database ERROR] Failed to upgrade database",
+      "Starting REST API server on 127.0.0.1:8080...",
+      "REST API server error: listen tcp: address already in use",
+      "✓ Connected to WhatsApp! Type 'help' for commands.",
+      "Disconnecting...",
+      "Waiting for QR code scan...",
+      "panic: runtime error: index out of range",
+    ];
+    expect(own.filter((line) => !kept(line))).toEqual([]);
+  });
+
+  // The words the keep list matched anywhere in a line before #53.
+  const keepWords = [
+    "Starting WhatsApp client",
+    "Starting REST API server",
+    "REST API server error",
+    "connected to WhatsApp",
+    "Connected to WhatsApp",
+    "Device logged out",
+    "Disconnected from WhatsApp",
+    "Connection failure",
+    "Stream error",
+    "Stream replaced",
+    "Connection attempt",
+    "Failed to connect",
+    "Failed to establish",
+    "Failed to resolve media roots",
+    "reconnect",
+    "Reconnect",
+    "QR code",
+    "Disconnecting",
+    "panic:",
+    "[Client WARN]",
+    "[Client ERROR]",
+    "Warning: failed to persist",
+    "Error sending webhook",
+    "⚠ Could not",
+  ];
+
+  it.each(keepWords)("drops a message line that contains %s", (word) => {
+    expect(
+      kept(mask(`[2026-10-31 12:00:00] ← ${number}: before ${word} after`)),
+    ).toBe(false);
+  });
+
+  it.each(keepWords)("drops a history sync line that contains %s", (word) => {
+    expect(
+      kept(
+        mask(
+          `12:00:00.000 [Client INFO] Stored message: [2026-10-31] ${number} -> ${group}@g.us: before ${word} after`,
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      kept(
+        mask(
+          `12:00:00.000 [Client INFO] Message content: before ${word} after, Media Type: `,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it.each(keepWords)(
+    "drops a later line of a message that contains %s",
+    (word) => {
+      expect(kept(mask(`before ${word} after`))).toBe(false);
+    },
+  );
+
   it("drops the later lines of a message that runs over several lines", () => {
     expect(kept(mask("Warning: Ann is bringing the cake"))).toBe(false);
     expect(kept(mask("Error: train cancelled, ring me on 07700 900123"))).toBe(

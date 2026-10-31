@@ -27,7 +27,9 @@ agree to have them kept in CloudWatch.
   filter masks JIDs, phone numbers, group ids, LIDs and the contact
   names in its chat-name lines, and keeps the rest of each line. It
   keeps only the bridge's lines about the connection, its warnings and
-  its errors, because the bridge prints every message it sees.
+  its errors, because the bridge prints every message it sees. Each
+  entry in its keep list is tied to the start of a line, so a message's
+  text cannot match it.
 
 ## Do not
 
