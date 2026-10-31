@@ -42,6 +42,22 @@ describe("fitness: a failed deploy says why (repo-and-delivery.md)", () => {
   });
 });
 
+describe("fitness: a deploy pulls its base images logged in to ECR Public (repo-and-delivery.md)", () => {
+  const script = readRepoFile("scripts/deploy.sh");
+
+  it("logs in to ECR Public before the builds, so base image pulls are not held to the anonymous limit (#33)", () => {
+    expect(script).toMatch(
+      /^\s*aws ecr-public get-login-password --region us-east-1 \| docker login --username AWS --password-stdin public\.ecr\.aws [^\n]*\n(?:.*\n)*?\s*bridge_image=\$\(image /mu,
+    );
+  });
+
+  it("says so and pulls anonymously when the ECR Public login fails, so a deploy that builds nothing does not stop on it", () => {
+    expect(script).toMatch(
+      /--password-stdin public\.ecr\.aws \|\| echo "[^"]*ECR Public[^"]*" \| tee -a "\$summary" >&2$/mu,
+    );
+  });
+});
+
 // A re-run can repeat any set of jobs, and a job it does not repeat keeps its
 // last result. So live-ok moves only in an attempt whose own deploy job
 // deployed this run's commit and passed its live check.
