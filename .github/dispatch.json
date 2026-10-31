@@ -1,9 +1,9 @@
 {
   "environment": "askme",
   "labels": {
-    "ready": ["mode: afk"],
-    "claim": "claimed",
-    "claimRemoves": []
+    "ready": ["workflow: ready for development", "mode: afk"],
+    "claim": "workflow: under development",
+    "claimRemoves": ["workflow: ready for development"]
   },
   "features": {
     "pickup": true,
@@ -24,16 +24,13 @@
   "review": {
     "checklist": { "file": ".claude/skills/pr-review/SKILL.md" },
     "tickets": {
-      "require": [{ "labels": ["mode: afk"] }]
+      "require": [{ "labels": ["mode: afk", "mode: hitl", "mode: human"] }],
+      "forbid": [{ "labels": ["type: prd"] }]
     },
     "humanOnly": [
       {
         "glob": "docs/constraints/**",
         "reason": "the rules in force, whose meaning changes only through an issue the owner agreed to"
-      },
-      {
-        "glob": "/PRD.md",
-        "reason": "what version 1 does and leaves out, which binds every session"
       },
       {
         "glob": "/CLAUDE.md",

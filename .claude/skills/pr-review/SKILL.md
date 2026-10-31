@@ -24,15 +24,17 @@ order.
 
 ## The checklist
 
-1. **Every issue it closes is open, labelled `mode: afk` and `claimed`,
-   and closed by no other open pull request.** The owner adds `mode: afk`
-   to say that a session may work the issue, and governor merge it, with
-   nobody watching.
+1. **Every issue it closes is open, has a `mode:` label, is
+   `workflow: under development`, is not a `type: prd`, and is closed by
+   no other open pull request.** `mode: afk`, `mode: hitl` and
+   `mode: human` all pass. A ticket still `ready for development` fails
+   until its session claims it. A PRD closes when its last ticket does,
+   by the owner's hand ([issue-workflow.md](../../../docs/issue-workflow.md)).
 
 2. **It closes at least one issue, says what the change buys, and that
    is what the issues it closes asked for.** Every change here starts from
-   an issue, and `mode: afk` on that issue is the owner's consent to merge
-   it unattended. One exception: a pull request that repairs a red run of
+   an issue readied before the work, and the body is judged against it.
+   One exception: a pull request that repairs a red run of
    the deploy workflow on main may close no issue. Its body links the run,
    names the merged pull request whose change broke it, and says the
    change goes no further than the repair. Any other pull request that
