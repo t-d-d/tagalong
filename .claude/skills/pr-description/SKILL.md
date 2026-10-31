@@ -33,7 +33,14 @@ ask whose link is not https", not "Fix link validation".
 
 ## Body
 
-After the `Closes #N` line, if there is one, the body has five sections,
+The body opens with one `Closes #N` line for each issue the pull request
+closes, one issue per line. GitHub needs a closing word before every
+number, so `Closes #40, #41` closes only #40. These lines are the only
+place a closing word sits next to an issue number. GitHub matches close,
+fix or resolve plus `#N` anywhere in the body and reads no negation, so
+"does not fix #N" closes it. Write "#N is not addressed here".
+
+After the `Closes #N` lines, if there are any, the body has five sections,
 each a `##` heading, in this order: *Outcome*, *Adds / removes*, *Drift*,
 *Verification* and *Left for later*. Fill every one and add no others.
 Aim for about 200 words before *Left for later*. Every sentence must make
@@ -52,11 +59,6 @@ and what the complexity buys. Never "nothing" when a new mechanism exists.
 criteria, the PRD, a decision record, or the obvious approach, and why. A
 criterion met differently from its wording goes here, first. "Matches #N
 as written" when there is none.
-
-**Closing keywords.** Only the `Closes #N` line at the top puts a closing
-word next to an issue number. GitHub matches close, fix or resolve plus
-`#N` anywhere in the body and reads no negation, so "does not fix #N"
-closes it. Write "#N is not addressed here".
 
 **Verification.** A table with one row per acceptance criterion of each
 issue this closes. Every criterion gets a row, including ones nothing
