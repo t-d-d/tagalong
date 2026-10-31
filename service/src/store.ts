@@ -13,6 +13,8 @@ export interface MessageRow {
   timestamp: string;
   isFromMe: boolean;
   mediaType: string;
+  /** The media's length in bytes as WhatsApp gave it, when the bridge has it. */
+  fileLength: number | undefined;
 }
 
 const messageSchema = z
@@ -24,6 +26,7 @@ const messageSchema = z
     timestamp: z.string(),
     is_from_me: z.union([z.number(), z.boolean(), z.null()]),
     media_type: z.string().nullable(),
+    file_length: z.number().nullable(),
   })
   .transform((row): MessageRow => ({
     id: row.id,
@@ -33,6 +36,7 @@ const messageSchema = z
     timestamp: row.timestamp,
     isFromMe: row.is_from_me === true || row.is_from_me === 1,
     mediaType: row.media_type ?? "",
+    fileLength: row.file_length ?? undefined,
   }));
 
 const deviceSchema = z.object({ jid: z.string(), lid: z.string().nullable() });
@@ -51,7 +55,7 @@ const chatSchema = z.object({
 });
 
 const COLUMNS =
-  "id, chat_jid, sender, content, timestamp, is_from_me, media_type";
+  "id, chat_jid, sender, content, timestamp, is_from_me, media_type, file_length";
 
 /** When a stored timestamp ("2026-10-18 17:55:26+01:00") was, in ms. */
 export const timeOf = (timestamp: string): number =>
