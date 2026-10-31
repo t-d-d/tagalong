@@ -60,11 +60,15 @@ result, so nothing has to be scraped or posted back by the session.
 - A listening delivery (who-can-use-it.md) carries no request. Its
   answer is a plain message unless it starts with a label. It gets no
   👀, no approval notice, and no notice when its turn fails or it is
-  given up on, since nobody waits on it. While a session is busy, listening waits; what
-  was said goes in with the next delivery.
+  given up on, since nobody waits on it. While a session is busy,
+  listening waits; what was said goes in with the next delivery.
 - tagalong reacts 👀 to a request as it delivers it, and takes the 👀
   off once no delivery that carries the request still waits. A Claude's
   own reaction on the request replaces the 👀 and is left alone.
+- A reaction cannot be quoted or reacted to, so for a request that is a
+  reaction on a Claude's answer, the answer stands in for the request:
+  the 👀 or ⏳ goes on it, and the Claude's answer replies to it or
+  reacts on it.
 - Those endpoints are not documented, so every answer goes through a
   schema, and the CLI's version is pinned in the image.
 - Environments are named by their names from /v1/environment_providers,
@@ -91,5 +95,7 @@ History: Set when the repo was made, October 2026, following podstow's
 dispatcher. Each session is a mailbox since 27 October 2026, at the
 owner's request (#17): deliveries go in at any time and every result is
 posted. That replaced reading to the latest event before a follow-up
-(#10). The 👀 comes off an answered request since the same day (#24). Listening deliveries
-carry no request and get no notices since 31 October 2026 (#19).
+(#10). The 👀 comes off an answered request since the same day (#24).
+The 👀 for a reaction goes on the answer it is on since 31 October
+2026 (#45). Listening deliveries carry no request and get no notices
+since the same day (#19).

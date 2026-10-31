@@ -36,15 +36,18 @@ export class Bridge {
   readonly #url: string;
   readonly #token: () => string | undefined;
   readonly #toJid: (user: string) => string;
+  readonly #isSelf: (user: string) => boolean;
 
   constructor(
     url: string,
     token: () => string | undefined,
     toJid: (user: string) => string,
+    isSelf: (user: string) => boolean,
   ) {
     this.#url = url;
     this.#token = token;
     this.#toJid = toJid;
+    this.#isSelf = isSelf;
   }
 
   async #call<T>(
@@ -115,14 +118,14 @@ export class Bridge {
     emoji: string,
   ): Promise<void> {
     if (message.id === "") return;
+    // The device's own message, such as a Claude's answer, is named by
+    // from_me: the bridge then fills in the device's JID itself.
+    const whose = this.#isSelf(message.sender)
+      ? { from_me: true }
+      : { sender_jid: this.#toJid(message.sender) };
     await this.#call(
       "react",
-      {
-        recipient: chat,
-        message_id: message.id,
-        sender_jid: this.#toJid(message.sender),
-        emoji,
-      },
+      { recipient: chat, message_id: message.id, ...whose, emoji },
       sendSchema,
     );
   }

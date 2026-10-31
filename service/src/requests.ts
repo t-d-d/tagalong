@@ -5,7 +5,7 @@
 // here.
 import type { Aws } from "./aws.ts";
 import { pickMedia, shareMedia, type Attachment } from "./attachments.ts";
-import type { Bridge } from "./bridge.ts";
+import type { Bridge, Quote } from "./bridge.ts";
 import type { ClaudeApi } from "./claude-api.ts";
 import type { Cloud } from "./cloud.ts";
 import type { Env } from "./env.ts";
@@ -20,6 +20,7 @@ import { errorFields, log } from "./log.ts";
 import { deliveryOf, labelFor } from "./mailbox.ts";
 import type { People } from "./people.ts";
 import {
+  ANSWER,
   type Ask,
   answerBy,
   bodyOf,
@@ -62,6 +63,13 @@ export interface RequestDeps {
   /** Requests, by eyesKey, still being delivered to their Claudes. */
   asking: Set<string>;
 }
+
+/**
+ * The message a request is: the message itself, or, for a reaction on a
+ * Claude's latest answer, that answer with the emoji. It takes the 👀, and
+ * an answer replies to it (cloud-sessions.md).
+ */
+export type Request = Quote & { reaction?: string };
 
 /** The Claude whose answer `payload` replies to, if it replies to one in this chat. */
 export function repliedTo(
@@ -153,6 +161,7 @@ function quotedOf(payload: Payload, deps: RequestDeps): Ask["quoted"] {
 
 export async function handleRequest(
   payload: Payload,
+  request: Request,
   claudes: Claude[],
   group: Group,
   deps: RequestDeps,
@@ -161,7 +170,7 @@ export async function handleRequest(
   const { recent } = deps;
   while (recent.length > 0 && now - (recent[0] ?? 0) > 3_600_000)
     recent.shift();
-  const message = { id: payload.messageId, sender: payload.sender };
+  const message = { id: request.id, sender: request.sender };
   const room = deps.env.MAX_PER_HOUR - recent.length;
   if (room < claudes.length) {
     log.info("request-capped", {
@@ -183,7 +192,7 @@ export async function handleRequest(
   try {
     for (const claude of claudes) {
       recent.push(now);
-      await turn(payload.chatJID, claude, group, deps, payload);
+      await turn(payload.chatJID, claude, group, deps, { payload, request });
     }
   } finally {
     deps.asking.delete(eyes);
@@ -204,17 +213,27 @@ export const listeningTurn = (
   deps: RequestDeps,
 ): Promise<void> => turn(chat, claude, group, deps, undefined, at);
 
-/** One Claude's turn: into its running session, or a new one. With no payload, a listening one. */
+/** One Claude's turn: into its running session, or a new one. With nothing asked, a listening one. */
 async function turn(
   chat: string,
   claude: Claude,
   group: Group,
   deps: RequestDeps,
-  payload: Payload | undefined,
+  asked: { payload: Payload; request: Request } | undefined,
   heardUpTo?: number,
 ): Promise<void> {
   const now = deps.now();
-  const listening = payload === undefined;
+  const listening = asked === undefined;
+  const payload = asked?.payload;
+  const reaction = asked?.request.reaction;
+  const request: Quote | null =
+    asked === undefined
+      ? null
+      : {
+          id: asked.request.id,
+          sender: asked.request.sender,
+          content: asked.request.content,
+        };
   const key = threadKey(chat, claude.name);
   const thread = deps.state.state.threads[key] ?? {
     session: null,
@@ -224,14 +243,6 @@ async function turn(
   };
   const row = deps.store.message(chat, payload?.messageId);
   const at = heardUpTo ?? (row === undefined ? now : timeOf(row.timestamp));
-  const request =
-    payload === undefined
-      ? null
-      : {
-          id: payload.messageId,
-          sender: payload.sender,
-          content: payload.content,
-        };
   // The CLI starts a session whose environment is not in the list in another
   // one, so a Claude whose environment is gone starts nothing (#22).
   const environmentGone = async (): Promise<boolean> => {
@@ -265,24 +276,37 @@ async function turn(
     config: deps.groups.config,
     group,
     claude: claude.name,
-    except: payload?.messageId ?? "",
+    except: request?.id ?? "",
     label,
   };
   // Labelled once the lines before it are, so labels run in order.
   const ask: Ask | undefined =
-    payload === undefined
+    payload === undefined || request === null
       ? undefined
       : {
           label: "",
           from: deps.people.nameOf(payload.sender),
           // A voice note with no text reads as its type, as in the conversation.
-          text: bodyOf(
-            deps.people.readable(payload.content),
-            payload.mediaType ?? "",
-          ),
-          quoted: quotedOf(payload, deps),
+          text:
+            reaction === undefined
+              ? bodyOf(
+                  deps.people.readable(payload.content),
+                  payload.mediaType ?? "",
+                )
+              : "",
+          // A reaction quotes the answer it is on.
+          quoted:
+            reaction === undefined
+              ? quotedOf(payload, deps)
+              : {
+                  who: `@${claude.name}`,
+                  text: deps.people.readable(
+                    request.content.replace(ANSWER, ""),
+                  ),
+                },
           files: await files(payload, group, claude.name, deps),
         };
+  if (ask !== undefined && reaction !== undefined) ask.reaction = reaction;
   const labelAsk = () => {
     if (ask !== undefined && request !== null) ask.label = label(request);
   };
@@ -369,7 +393,7 @@ async function turn(
   const name =
     ask === undefined
       ? `WhatsApp ${claude.name}: listening`
-      : `WhatsApp ${claude.name}: ${oneLine(ask.text.replace(/@[a-z][a-z0-9-]*\b/giu, "")).slice(0, 50)}`;
+      : `WhatsApp ${claude.name}: ${oneLine((ask.reaction ?? ask.text).replace(/@[a-z][a-z0-9-]*\b/giu, "")).slice(0, 50)}`;
   const id = await deps.cli.run(() => deps.cloud.start(claude, prompt, name));
   const session: SessionState = {
     chat,

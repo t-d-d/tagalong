@@ -12,15 +12,15 @@ import { GroupsStore, claudesOf, parseOwners } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
 import { listen } from "./listening.ts";
 import { Login } from "./login.ts";
-import { People } from "./people.ts";
+import { People, userPart } from "./people.ts";
 import { poll } from "./relay.ts";
-import { handleRequest, repliedTo } from "./requests.ts";
+import { type Request, handleRequest, repliedTo } from "./requests.ts";
 import { type Runner, Serial } from "./run.ts";
 import { type DeviceState, ensureDevice } from "./seed.ts";
 import { StateStore, unsee } from "./state.ts";
 import { WhatsAppStore } from "./store.ts";
 import { type Payload, webhookServer } from "./webhook.ts";
-import { addressed } from "./addressing.ts";
+import { addressed, reactedTo } from "./addressing.ts";
 
 export interface AppDeps {
   aws: Aws | undefined;
@@ -46,8 +46,11 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
   );
   const cloud = new Cloud(env, login, run);
   const token = () => bridgeToken(env.BRIDGE_STORE, env.WHATSAPP_BRIDGE_TOKEN);
-  const bridge = new Bridge(env.BRIDGE_URL, token, (user) =>
-    people.toJid(user),
+  const bridge = new Bridge(
+    env.BRIDGE_URL,
+    token,
+    (user) => people.toJid(user),
+    (user) => people.self.has(userPart(user)),
   );
 
   const seen = new Set<string>();
@@ -118,12 +121,15 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
     }
     // Nothing is logged about a chat with no Claudes: this account is in other groups too.
     if (group === undefined) return;
+    // A reaction asks only about a Claude's latest answer, which then stands
+    // in for the request message: it carries the 👀 and takes the reply.
+    const reaction = reactedTo(payload, store);
     const asked = addressed(
       payload,
       group.claudes,
       new Set(config.claudes.keys()),
       people.self,
-      repliedTo(payload, { store, state }),
+      reaction?.claude ?? repliedTo(payload, { store, state }),
     );
     log.info("message", {
       group: group.label,
@@ -166,21 +172,30 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
     const claudes = claudesOf(config, group).filter((claude) =>
       turns.includes(claude.name),
     );
+    const request: Request =
+      reaction === undefined
+        ? {
+            id: payload.messageId,
+            sender: payload.sender,
+            content: payload.content,
+          }
+        : {
+            id: reaction.answer.id,
+            sender: reaction.answer.sender,
+            content: reaction.answer.content,
+            reaction: payload.reactionEmoji ?? "",
+          };
     pending = requests
-      .run(() => handleRequest(payload, claudes, group, requestDeps))
+      .run(() => handleRequest(payload, request, claudes, group, requestDeps))
       .catch(async (error: unknown) => {
         log.error("request-failed", {
           group: group.label,
           ...errorFields(error),
         });
         // The ⚠️ replaces the 👀, and stays.
-        unsee(state.state, payload.chatJID, payload.messageId);
+        unsee(state.state, payload.chatJID, request.id);
         await bridge
-          .react(
-            payload.chatJID,
-            { id: payload.messageId, sender: payload.sender },
-            "⚠️",
-          )
+          .react(payload.chatJID, request, "⚠️")
           .catch(() => undefined);
       });
   }
