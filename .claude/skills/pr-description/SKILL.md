@@ -35,8 +35,8 @@ A closing word stays out of the title wherever it would sit directly
 before an issue reference. The merge commit's message carries the title,
 and GitHub closes that issue when the commit reaches main. Write "Repair
 the retry path #30 reported", not "Fix #30 retry path" or "fix: #30
-retry path". Test 2 of the [`pr-review` checklist](../pr-review/SKILL.md)
-says what counts as a closing word and as an issue reference.
+retry path". *Body* below says where to find what counts as a closing
+word and as an issue reference.
 
 ## Body
 

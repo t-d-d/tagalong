@@ -78,6 +78,9 @@ git log --format=%B origin/main..HEAD |
   grep -inE -A1 '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b'
 ```
 
+The pattern matches the closing words test 2 lists. When that list
+changes, change the pattern with it.
+
 Read each line it prints, with the line after it. Where a closing word
 comes before an issue reference, reword the commit so it does not, such
 as "#N is not addressed here". Use `git commit --amend` for the last
