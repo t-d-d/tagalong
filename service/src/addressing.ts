@@ -81,7 +81,13 @@ export function reactedTo(
   payload: Payload,
   store: Answers,
 ): { claude: string; answer: MessageRow } | undefined {
-  if (payload.eventType !== "reaction") return undefined;
+  // A reaction taken off, or the device's own, asks nobody (addressed).
+  if (
+    payload.eventType !== "reaction" ||
+    payload.isFromMe ||
+    (payload.reactionEmoji ?? "") === ""
+  )
+    return undefined;
   const answer = store.message(payload.chatJID, payload.reactionToMessageId);
   if (answer === undefined || !answer.isFromMe) return undefined;
   const claude = answerBy(answer.content);
