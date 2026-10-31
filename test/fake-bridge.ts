@@ -17,6 +17,8 @@ const sendSchema = z.object({
 const reactSchema = z.object({
   recipient: z.string(),
   message_id: z.string(),
+  from_me: z.boolean().optional(),
+  sender_jid: z.string().optional(),
   emoji: z.string(),
 });
 const downloadSchema = z.object({

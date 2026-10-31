@@ -157,6 +157,18 @@ export class WhatsAppStore {
     return row === undefined ? undefined : idSchema.parse(row).id;
   }
 
+  /** The newest message the device sent in `chat` that reads as `claude`'s answer (prompts.ts). */
+  latestAnswer(chat: string, claude: string): MessageRow | undefined {
+    const row = this.#db("messages")
+      .prepare(
+        `SELECT ${COLUMNS} FROM messages
+         WHERE chat_jid = ? AND is_from_me = 1 AND deleted_at IS NULL AND content LIKE ?
+         ORDER BY datetime(timestamp) DESC, rowid DESC LIMIT 1`,
+      )
+      .get(chat, `*${claude}:*%`);
+    return row === undefined ? undefined : messageSchema.parse(row);
+  }
+
   /** The chat's messages sent after `after` (ms), oldest first, at most `limit` of the latest; and how many more there were. */
   since(
     chat: string,
