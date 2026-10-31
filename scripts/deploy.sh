@@ -27,15 +27,26 @@ hash_of() {
   git ls-files -s -- "$@" | grep -vE '\.(test|int)\.ts$' | sha256sum | cut -d' ' -f1
 }
 
-# Build and push an image unless its tag is already there.
+# Build and push an image unless its tag is already there. Only ECR's
+# ImageNotFoundException says it is not. Any other failed lookup, such as
+# throttling or a missing permission, says nothing about the image, and a
+# rebuild would only be refused at the push, since tags are immutable (#46).
 image() {
   local uri=$1 tag=$2 dockerfile=$3
-  local repo=${uri#*/}
-  if aws ecr describe-images --repository-name "$repo" --image-ids "imageTag=$tag" > /dev/null 2>&1; then
+  local repo=${uri#*/} lookup
+  if lookup=$(aws ecr describe-images --repository-name "$repo" --image-ids "imageTag=$tag" 2>&1 > /dev/null); then
     echo "$repo:$tag is already pushed" >&2
-  else
+  elif [[ $lookup == *ImageNotFoundException* ]]; then
     docker build --platform linux/arm64 --file "$dockerfile" --tag "$uri:$tag" . >&2 || { echo "Building $repo:$tag failed." | tee -a "$summary" >&2; return 1; }
     docker push "$uri:$tag" >&2 || { echo "Pushing $repo:$tag failed." | tee -a "$summary" >&2; return 1; }
+  else
+    # The error's class only, a name or, when the service sent none, an
+    # HTTP status. Its message can name the account, and the run's log is
+    # public.
+    local class=unknown pattern='An error occurred \(([A-Za-z0-9]+)\)'
+    if [[ $lookup =~ $pattern ]]; then class=${BASH_REMATCH[1]}; fi
+    echo "Looking up $repo:$tag in ECR failed ($class)." | tee -a "$summary" >&2
+    return 1
   fi
   echo "$uri:$tag"
 }
