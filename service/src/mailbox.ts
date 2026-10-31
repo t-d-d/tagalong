@@ -95,6 +95,10 @@ export const busy = (session: SessionState): boolean =>
 
 const OPEN = /<whatsapp(?:\s+reply\s*=\s*"\[?(m\d+)\]?")?\s*>/gu;
 const CLOSE = "</whatsapp>";
+
+/** Whether a message from a Claude holds a <whatsapp> tag, closed or not. */
+export const tagged = (message: string): boolean =>
+  new RegExp(OPEN.source, "u").test(message);
 const EMOJI =
   /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}{2}|[#*0-9]️?⃣)/u;
 const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
