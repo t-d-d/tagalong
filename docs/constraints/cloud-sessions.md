@@ -67,8 +67,8 @@ result, so nothing has to be scraped or posted back by the session.
   While a delivery waits, it is read every POLL_MS. Once none does, the
   gap between reads goes 1, 2, 5, 10 and then 30 minutes, and stays at
   30; a delivery or a turn that ends starts it again at 1 minute. Its
-  status is checked as it is read, and an archived or failed session
-  is not read again. Update, fresh, or turning interjecting off puts
+  status is checked when a read finds nothing new, and an archived or
+  failed session is not read again once nothing is left to read. Update, fresh, or turning interjecting off puts
   it back on GIVE_UP_MS, counted from its last delivery or result.
 - A turn an interjecting Claude's running session starts by itself is
   not posted. It is activity, kept in state.json, as a person's message
@@ -77,7 +77,7 @@ result, so nothing has to be scraped or posted back by the session.
   said since the Claude last heard, or a line saying nothing new was
   said, and that what the session did was not posted. Its answer is a
   chip-in. The result of an interjecting delivery lists it, so it is
-  never activity. Activity from before interjecting was last turned on
+  never activity. A turn read before interjecting was last turned on
   is dropped.
 - tagalong reacts 👀 to a request as it delivers it, and takes the 👀
   off once no delivery that carries the request still waits. A Claude's

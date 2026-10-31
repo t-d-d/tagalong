@@ -184,12 +184,12 @@ async function schedule(
   }
   if (read === 0) {
     const { status } = await deps.api.record(id);
-    // Read once more, so a turn that ended since is not lost.
-    if (
-      (status === "archived" || status === "failed") &&
-      (await deps.api.eventsAfter(id, session.cursor)).events.length === 0
-    ) {
-      session.waiting = false;
+    if (status === "archived" || status === "failed") {
+      // Read once more, so a turn that ended since is not lost: the next
+      // poll reads it.
+      if ((await deps.api.eventsAfter(id, session.cursor)).events.length > 0)
+        session.readAt = 0;
+      else session.waiting = false;
       return;
     }
   }

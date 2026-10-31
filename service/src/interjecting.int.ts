@@ -505,6 +505,23 @@ describe("an interjecting Claude's own session (cloud-sessions.md)", () => {
     expect(reads(t)).toBe(before);
   });
 
+  it("reads the last turn of a session archived as it was read, on the next poll", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    await answered(t);
+    const session = t.api.sessions.get(SESSION);
+    if (session === undefined) throw new Error("no session");
+    session.status = "archived";
+    session.onStatus = () => {
+      delete session.onStatus;
+      wakes(t, "Merged and deployed the fix.");
+    };
+    await after(t, MINUTE);
+    await after(t, 1000);
+    expect(sessionState(t)).toMatchObject({ waiting: true, woke: t.clock.now });
+    await after(t, MINUTE);
+    expect(sessionState(t)).toMatchObject({ waiting: false });
+  });
+
   it("goes back to GIVE_UP_MS, and posts a turn it starts by itself, once interjecting is off", async () => {
     const t = (h = await harness({ groups: interjecting() }));
     await answered(t);
