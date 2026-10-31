@@ -1345,6 +1345,7 @@ describe("commands", () => {
       "@claude define critic owner/repo read-only",
       "@claude allow @",
       "@claude revoke @",
+      "@claude listen podstow on",
       "@claude update podstow",
       "@claude fresh podstow",
       "@claude who",

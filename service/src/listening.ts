@@ -1,0 +1,111 @@
+// A Claude an owner set to listen in a chat (who-can-use-it.md). Once the
+// chat has been quiet for LISTEN_QUIET_MS, it is given what the people who
+// may ask it said since it last heard, with no request, and posts only when
+// it has something to add.
+//
+// Nothing waits in memory: what is waiting is read from the bridge's store,
+// after the time the Claude last heard, so a restart loses no delivery. Only
+// the hourly count is in memory, like MAX_PER_HOUR's.
+import { allowed } from "./access.ts";
+import { COMMAND } from "./commands.ts";
+import { errorFields, log } from "./log.ts";
+import { busy } from "./mailbox.ts";
+import { type RequestDeps, listeningTurn } from "./requests.ts";
+import { threadKey } from "./state.ts";
+import { type MessageRow, timeOf } from "./store.ts";
+
+const HOUR = 3_600_000;
+
+export interface DueInput {
+  /** The chat's messages after the Claude last heard, oldest first. */
+  rows: MessageRow[];
+  now: number;
+  quietMs: number;
+  /** When each listening delivery to this Claude here in the last hour went. */
+  hour: number[];
+  perHour: number;
+  /** Whether someone may ask this Claude here. */
+  mayAsk: (sender: string) => boolean;
+}
+
+/**
+ * Whether a listening delivery is due. Only a person who may ask the Claude
+ * starts one: never a Claude's answer, nor a command.
+ */
+export function listenDue(
+  input: DueInput,
+): "nothing" | "talking" | "capped" | "due" {
+  const starts = input.rows.some(
+    (row) =>
+      !row.isFromMe && !COMMAND.test(row.content) && input.mayAsk(row.sender),
+  );
+  if (!starts) return "nothing";
+  const last = input.rows.at(-1);
+  if (last !== undefined && input.now - timeOf(last.timestamp) < input.quietMs)
+    return "talking";
+  return input.hour.length >= input.perHour ? "capped" : "due";
+}
+
+export interface ListenDeps extends RequestDeps {
+  /** Listening deliveries in the last hour, by threadKey. */
+  listened: Map<string, number[]>;
+  /** The threads at their hourly limit, logged once each time. */
+  capped: Set<string>;
+}
+
+/** One look at every listening Claude, delivering to each one that is due. */
+export async function listen(deps: ListenDeps): Promise<void> {
+  if (deps.env.DRY_RUN) return;
+  const { config } = deps.groups;
+  const { state } = deps.state;
+  for (const group of config.groups.values()) {
+    for (const name of group.listening) {
+      const claude = config.claudes.get(name);
+      if (claude === undefined) continue;
+      const key = threadKey(group.jid, name);
+      const thread = state.threads[key];
+      const session =
+        thread?.session == null ? undefined : state.sessions[thread.session];
+      // What waits goes in with the next delivery, once this one is answered.
+      if (session !== undefined && busy(session)) continue;
+      const now = deps.now();
+      const hour = (deps.listened.get(key) ?? []).filter(
+        (at) => now - at < HOUR,
+      );
+      deps.listened.set(key, hour);
+      const from = Math.max(thread?.heard ?? 0, state.listening[key] ?? 0);
+      const { rows } = deps.store.since(group.jid, from, 200);
+      const due = listenDue({
+        rows,
+        now,
+        quietMs: deps.env.LISTEN_QUIET_MS,
+        hour,
+        perHour: deps.env.LISTEN_PER_HOUR,
+        mayAsk: (sender) => allowed(config, group, name, deps.people, sender),
+      });
+      if (due === "capped" && !deps.capped.has(key)) {
+        deps.capped.add(key);
+        log.info("listen-capped", {
+          group: group.label,
+          claude: name,
+          cap: deps.env.LISTEN_PER_HOUR,
+        });
+      }
+      if (due !== "due") continue;
+      deps.capped.delete(key);
+      // Counted before it goes, so one that fails is not tried every poll.
+      hour.push(now);
+      const last = rows.at(-1);
+      const at = last === undefined ? now : timeOf(last.timestamp);
+      try {
+        await listeningTurn(group.jid, claude, group, at, deps);
+      } catch (error) {
+        log.warn("listen-failed", {
+          group: group.label,
+          claude: name,
+          ...errorFields(error),
+        });
+      }
+    }
+  }
+}

@@ -35,6 +35,7 @@ export const VERBS = [
   "undefine",
   "allow",
   "revoke",
+  "listen",
   "fresh",
   "update",
   "stop",
@@ -43,7 +44,7 @@ export type Verb = (typeof VERBS)[number];
 
 /** A message that is a command, whoever sent it: "@claude <verb> …" or a mention of the number. */
 export const COMMAND =
-  /^\s*@(claude|\d{6,})\b[\s,:]*(help|who|add|remove|define|undefine|allow|revoke|fresh|update|stop)\b(.*)$/isu;
+  /^\s*@(claude|\d{6,})\b[\s,:]*(help|who|add|remove|define|undefine|allow|revoke|listen|fresh|update|stop)\b(.*)$/isu;
 export const FRESH_MS = 10 * 60_000;
 
 export interface Command {
@@ -125,14 +126,17 @@ export const tokens = (args: string): string[] =>
       .match(/\w+="[^"]*"|"[^"]*"|\S+/gu) ?? []
   ).map((token) => token.replace(/"/gu, ""));
 
-/** Claude names in a command's words, with or without an @. */
-const namesIn = (args: string): string[] => [
+/** Claude names in a command's words, with or without an @, less its own `keywords`. */
+const namesIn = (args: string, keywords: string[] = []): string[] => [
   ...new Set(
     tokens(args)
       .map((word) => word.replace(/^@/u, "").toLowerCase())
-      .filter(isName),
+      .filter((word) => isName(word) && !keywords.includes(word)),
   ),
 ];
+
+/** The word that adds a Claude already listening: `@claude add brainstorm listening`. */
+const LISTENING = "listening";
 
 /** One line about a Claude: its repo, access, environment, ref and model. */
 export function line(claude: Claude, api: ClaudeApi): string {
@@ -181,6 +185,9 @@ export function describe(
     return [
       line(claude, api),
       `  Asked by: ${askers.join(", ")}`,
+      ...(group.listening.includes(name)
+        ? ["  Listening: chips in without being asked"]
+        : []),
       ...(older
         ? [`  Talking here on an older version: \`@claude update ${name}\``]
         : []),
@@ -278,6 +285,7 @@ const help = async (
     "@claude define critic owner/repo read-only",
     "@claude allow @",
     "@claude revoke @",
+    `@claude listen ${group?.claudes[0] ?? "podstow"} on`,
     `@claude update ${group?.claudes[0] ?? "podstow"}`,
     `@claude fresh ${group?.claudes[0] ?? "podstow"}`,
     "@claude who",
@@ -285,6 +293,13 @@ const help = async (
   ];
   for (const template of templates) await deps.bridge.send(chat, template);
 };
+
+/** A Claude set to listen hears only what is said from now on. */
+function listenFrom(deps: CommandDeps, chat: string, names: string[]): void {
+  for (const name of names)
+    deps.state.state.listening[threadKey(chat, name)] = deps.now();
+  deps.state.save();
+}
 
 /** A group chat's JID ends @g.us; anything else is a one-to-one chat. */
 export const isGroupChat = (chat: string): boolean => chat.endsWith("@g.us");
@@ -402,7 +417,10 @@ export async function runCommand(
         return;
       }
       case "add": {
-        const names = namesIn(command.args);
+        const names = namesIn(command.args, [LISTENING]);
+        const listening = tokens(command.args).some(
+          (word) => word.toLowerCase() === LISTENING,
+        );
         const unknown = names.filter(
           (name) => !deps.groups.config.claudes.has(name),
         );
@@ -418,7 +436,10 @@ export async function runCommand(
         const config = deps.groups.update((file) => {
           const entry = entryOf(file, chat);
           const claudes = { ...entry?.claudes };
-          for (const name of names) claudes[name] ??= { members: [] };
+          for (const name of names) {
+            const askers = claudes[name] ?? { members: [] };
+            claudes[name] = listening ? { ...askers, listening } : askers;
+          }
           return {
             ...file,
             groups: { ...file.groups, [chat]: { ...entry, label, claudes } },
@@ -427,6 +448,7 @@ export async function runCommand(
         const updated = config.groups.get(chat);
         if (updated === undefined)
           throw new CommandError("the change did not stick");
+        if (listening) listenFrom(deps, chat, names);
         await reply(
           `${describe(updated, config, deps.people, deps.api, deps.state.state)}\n\nOnly owners can ask ${names.map((name) => `@${name}`).join(" and ")} until you allow someone: \`@claude allow @Name ${names[0] ?? ""}\``,
         );
@@ -505,6 +527,52 @@ export async function runCommand(
         );
         return;
       }
+      case "listen": {
+        const names = namesIn(command.args, ["on", "off"]);
+        const words = tokens(command.args).map((word) => word.toLowerCase());
+        const on = words.includes("on");
+        const off = words.includes("off");
+        const name = names[0];
+        if (name === undefined)
+          throw new CommandError(
+            "Which Claude? `@claude listen brainstorm on`",
+          );
+        if (!(group?.claudes.includes(name) ?? false))
+          throw new CommandError(
+            `@${name} isn't here. Add it first: \`@claude add ${name} listening\``,
+          );
+        if (on === off)
+          throw new CommandError(`On or off? \`@claude listen ${name} on\``);
+        deps.groups.update((file) => {
+          const entry = entryOf(file, chat);
+          const askers = entry?.claudes[name];
+          if (entry === undefined || askers === undefined) return file;
+          const rest = {
+            members: askers.members,
+            ...(askers.everyone === true ? { everyone: true } : {}),
+          };
+          return {
+            ...file,
+            groups: {
+              ...file.groups,
+              [chat]: {
+                ...entry,
+                claudes: {
+                  ...entry.claudes,
+                  [name]: on ? { ...rest, listening: true } : rest,
+                },
+              },
+            },
+          };
+        });
+        if (on) listenFrom(deps, chat, [name]);
+        await reply(
+          on
+            ? `@${name} is listening here now, and chips in when it has something to add.`
+            : `@${name} answers only when asked here now.`,
+        );
+        return;
+      }
       case "stop":
         if (deps.groups.read().groups?.[chat] === undefined) {
           await reply("I'm not set up in this group.");
@@ -573,7 +641,11 @@ export async function runCommand(
             const open = everyone
               ? command.verb === "allow"
               : askers.everyone === true;
-            next[name] = { members, ...(open ? { everyone: true } : {}) };
+            next[name] = {
+              members,
+              ...(open ? { everyone: true } : {}),
+              ...(askers.listening === true ? { listening: true } : {}),
+            };
           }
           return {
             ...file,

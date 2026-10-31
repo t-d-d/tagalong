@@ -125,6 +125,8 @@ async function waitOn(
   deps: RelayDeps,
 ): Promise<void> {
   const waiting = session.deliveries.filter((delivery) => !delivery.answered);
+  // Nobody waits on a listening delivery, so it gets no notices.
+  const asked = waiting.filter((delivery) => !delivery.listening);
   const { status } = await deps.api.record(id);
   // An archived or failed session takes no more turns.
   const ended = status === "archived" || status === "failed";
@@ -136,7 +138,7 @@ async function waitOn(
   )
     return;
   if (ended) session.waiting = false;
-  if (status === "requires_action" && !session.nudged) {
+  if (status === "requires_action" && !session.nudged && asked.length > 0) {
     session.nudged = true;
     log.info("session-waiting-approval", { session: id });
     await deps.bridge.send(
@@ -154,6 +156,9 @@ async function waitOn(
     session.since = deps.now();
     await post(id, session, words, waiting, deps);
     return;
+  } else if (ended && asked.length === 0) {
+    for (const delivery of waiting) delivery.answered = true;
+    return;
   } else if (ended) {
     await post(
       id,
@@ -170,6 +175,7 @@ async function waitOn(
   if (overdue.length === 0) return;
   for (const delivery of overdue) delivery.answered = true;
   log.info("session-gave-up", { session: id });
+  if (overdue.every((delivery) => delivery.listening)) return;
   await deps.bridge.send(
     session.chat,
     answerText(

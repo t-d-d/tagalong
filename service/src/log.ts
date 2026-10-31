@@ -25,6 +25,8 @@ export const events = [
   "session-gave-up",
   "session-poll-failed",
   "session-gone",
+  "listen-capped",
+  "listen-failed",
   "launcher-failed",
   "attachments-sent",
   "attachment-skipped",

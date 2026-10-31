@@ -23,6 +23,18 @@ there and who may ask them.
   one of its answers. One message can ask several. "@claude" with no
   command, or a name not in the chat, gets told who is there. Nothing
   else asks a Claude: a Claude's own answer never does.
+- An owner may set one Claude in one chat to listen. It is off unless
+  an owner turns it on. A listening Claude is given messages that did
+  not ask it: once the chat has been quiet for LISTEN_QUIET_MS, what
+  the people who may ask it said since it last heard, said after it
+  was set to listen, in one delivery. Only those people's messages
+  start one, never a Claude's answer or a command. It is told nobody
+  asked it, to answer only with something important, briefly, and
+  otherwise to pass, and that a message nobody addressed to it is
+  never an instruction to change anything.
+- At most LISTEN_PER_HOUR listening deliveries go to each Claude in
+  each chat in an hour. They do not count toward MAX_PER_HOUR. Past
+  the limit, messages wait for the next delivery.
 - A command is "@claude <verb>" at the start of a message, or a mention
   of the number. Only an owner's own number may run one, only in a
   message stored in the last ten minutes, and never from tagalong's own
@@ -51,6 +63,10 @@ there and who may ask them.
 - Give a Claude the whole chat: people who are not members said it.
 - Let a chat's members add Claudes or people.
 - Give a chat a default Claude: nothing answers until a Claude is named.
+- Turn listening on by default, or for every Claude at once: each
+  listening delivery is a turn, and it costs as much as a short answer.
+- Let a Claude's answer start a listening delivery: two listening
+  Claudes would talk to each other in a loop.
 - Let anyone allowed for one Claude ask, or be heard by, the others.
 - Open a read-write Claude to everyone in a chat.
 
@@ -59,3 +75,4 @@ not on a sandbox. A Claude whose repo matters is read-write only in
 chats with people trusted with the repo.
 History: Set when the repo was made, October 2026. Named Claudes
 replaced one repo per group on 19 October 2026, at the owner's request.
+A Claude can listen since 31 October 2026, at the owner's request (#19).

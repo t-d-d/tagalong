@@ -24,6 +24,8 @@ const deliverySchema = z.object({
   // the files from it already sent or skipped.
   folder: z.string().nullable().default(null),
   sent: z.array(z.string()).default([]),
+  // A delivery nobody asked for, to a listening Claude: nobody waits on it.
+  listening: z.boolean().default(false),
 });
 
 // A session saved before deliveries were noted (#17): the request it waits
@@ -85,6 +87,9 @@ const stateSchema = z.object({
       }),
     )
     .default({}),
+  // When each listening Claude, by threadKey, was set to listen: it hears
+  // only what is said after.
+  listening: z.record(z.string(), z.number()).default({}),
   // Each Claude's running conversation in each group, by threadKey: its
   // session, and when the last message it has heard was sent.
   threads: z

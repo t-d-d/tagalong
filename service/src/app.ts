@@ -10,6 +10,7 @@ import { commandIn, mayRun, runCommand } from "./commands.ts";
 import { type Env, cliEnv } from "./env.ts";
 import { GroupsStore, claudesOf, parseOwners } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
+import { listen } from "./listening.ts";
 import { Login } from "./login.ts";
 import { People } from "./people.ts";
 import { poll } from "./relay.ts";
@@ -55,6 +56,25 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
   const sending = new Set<string>();
   // Requests whose deliveries are still going in, whose 👀 stays (relay.ts).
   const asking = new Set<string>();
+  // Listening deliveries in the last hour, and the threads at the limit (listening.ts).
+  const listened = new Map<string, number[]>();
+  const capped = new Set<string>();
+  const requestDeps = {
+    env,
+    groups,
+    people,
+    store,
+    bridge,
+    cloud,
+    api,
+    state,
+    aws,
+    cli,
+    now,
+    recent,
+    sending,
+    asking,
+  };
   let device: DeviceState = store.present() ? "present" : "waiting";
   if (device === "present") people.refresh();
   // Work started by a message, for tests to wait on.
@@ -146,24 +166,8 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
     const claudes = claudesOf(config, group).filter((claude) =>
       turns.includes(claude.name),
     );
-    const deps = {
-      env,
-      groups,
-      people,
-      store,
-      bridge,
-      cloud,
-      api,
-      state,
-      aws,
-      cli,
-      now,
-      recent,
-      sending,
-      asking,
-    };
     pending = requests
-      .run(() => handleRequest(payload, claudes, group, deps))
+      .run(() => handleRequest(payload, claudes, group, requestDeps))
       .catch(async (error: unknown) => {
         log.error("request-failed", {
           group: group.label,
@@ -246,6 +250,9 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
             },
           }),
     });
+  // In turn with direct asks, so the two never deliver into one session at once.
+  const listenOnce = () =>
+    requests.run(() => listen({ ...requestDeps, listened, capped }));
   const keepFresh = () => cli.run(() => login.keepFresh());
 
   async function start(): Promise<Server> {
@@ -283,6 +290,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
     heartbeat,
     checkDevice,
     pollOnce,
+    listenOnce,
     keepFresh,
     settled: () => pending,
     refreshPeople: () => people.refresh(),
