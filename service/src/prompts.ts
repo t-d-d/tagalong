@@ -125,7 +125,7 @@ export interface Ask {
 /** How to send files back: one short curl per file, with the session's link (attachments.md). */
 export function uploadSection(link: string | undefined): string {
   if (link === undefined) return "";
-  return `\nTo send pictures, audio or files to the chat, upload each before you answer, at most ${String(OUTGOING.files)}, each at most ${String(OUTGOING.bytes / 1024 / 1024)} MB. Put the file's name, in letters, digits, dots, dashes and underscores, at the end of the link:\ncurl -fsS -T <path> "$(curl -fsS '${link}<name>')"\nEach goes to the chat once, after your next answer, under its name: .jpg, .png and .webp as a picture, .ogg (Opus) as a voice note, .mp4 as a video, anything else as a file. Keep this command for the whole conversation: later messages may not repeat it. It works until two hours after the latest message from the chat.\n`;
+  return `\nTo send pictures, audio or files to the chat, upload each before you answer, at most ${String(OUTGOING.files)}, each at most ${String(OUTGOING.bytes / 1024 / 1024)} MB. Put the file's name, in letters, digits, dots, dashes and underscores, at the end of the link:\ncurl -fsS -T <path> "$(curl -fsS '${link}<name>')"\nEach goes to the chat once, after your next answer, under its name: .jpg, .png and .webp as a picture, .ogg (Opus) as a voice note, .mp4 as a video, anything else as a file. Keep this command for the whole conversation: later messages may not repeat it. It stops working two hours after the last message you get from the chat, and works again with the next.\n`;
 }
 
 const asks = (ask: Ask, claude: string): string => {

@@ -387,16 +387,14 @@ async function turn(
       ? conversation(lines, 0, deps.env.HISTORY)
       : conversation(lines, thread.heard, deps.env.HISTORY * 3);
   ask.label = label(request);
-  // A session that carries on a conversation keeps its link, which the
+  // A session that carries on a conversation takes over its link, which the
   // carried dialogue shows; either way the first prompt gives it.
   const before =
-    thread.carry === null
-      ? undefined
-      : deps.state.state.sessions[thread.carry]?.link;
+    thread.carry === null ? undefined : deps.state.state.sessions[thread.carry];
   const kept = await keptLink(
-    before === undefined || before === null
+    before?.link === undefined || before.link === null
       ? null
-      : { id: before.id, given: 0, sent: [...before.sent] },
+      : { ...before.link, given: 0 },
     deps,
   );
   const told = withLink(ask, kept, now, deps);
@@ -422,6 +420,10 @@ async function turn(
     link: null,
   };
   deps.state.state.sessions[id] = session;
+  // Only one session reads a folder, so each file goes once, though the old
+  // session may still answer after an update.
+  if (before !== undefined && kept !== null && before.link?.id === kept.id)
+    before.link = null;
   delivered(session, id, versionOf(claude), {
     kept,
     given: told.upload !== undefined,

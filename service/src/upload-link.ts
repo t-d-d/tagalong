@@ -57,21 +57,33 @@ export async function answer(event: unknown, deps: LinkDeps): Promise<Reply> {
     log.info("link-refused", { why: at === undefined ? "unknown" : "lapsed" });
     return reply(404, NO_LINK);
   }
-  const url = await deps.aws.presignPut(
-    deps.bucket,
-    `${folderOf(id)}${safeName(name)}`,
-    OUTGOING.putSeconds,
-  );
+  let url: string;
+  try {
+    url = await deps.aws.presignPut(
+      deps.bucket,
+      `${folderOf(id)}${safeName(name)}`,
+      OUTGOING.putSeconds,
+    );
+  } catch (error) {
+    log.warn("link-failed", errorFields(error));
+    return reply(502, "The bucket did not answer. Try again in a minute.");
+  }
   log.info("link-signed");
   return reply(200, url);
 }
 
-/** The Lambda's entry point, loaded by images/upload-link.mjs. */
+// Made once per Lambda instance, so warm calls reuse its clients.
+let live: LinkDeps | undefined;
+
+/** The Lambda's entry point, loaded by images/upload-link.js. */
 export async function handler(event: unknown): Promise<Reply> {
-  const env = readLinkEnv();
-  return answer(event, {
-    aws: realAws(env.AWS_REGION),
-    bucket: env.ATTACHMENTS_BUCKET,
-    now: () => Date.now(),
-  });
+  if (live === undefined) {
+    const env = readLinkEnv();
+    live = {
+      aws: realAws(env.AWS_REGION),
+      bucket: env.ATTACHMENTS_BUCKET,
+      now: () => Date.now(),
+    };
+  }
+  return answer(event, live);
 }

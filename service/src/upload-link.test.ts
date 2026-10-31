@@ -104,6 +104,26 @@ describe("the upload link (attachments.md)", () => {
     expect(eventsOf(lines).every((name) => name === "link-refused")).toBe(true);
   });
 
+  it("says so, and logs it, when it cannot sign", async () => {
+    const { lines } = logLines();
+    const aws = bucket(60_000);
+    aws.presignPut = () =>
+      Promise.reject(
+        Object.assign(new Error("no credentials"), {
+          name: "CredentialsProviderError",
+        }),
+      );
+    const reply = await answer(event(ID, "a.png"), deps(aws));
+    expect(reply.statusCode).toBe(502);
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "link-failed",
+        error: "CredentialsProviderError",
+      }),
+    );
+  });
+
   it("says S3 failed, and signs nothing, when it cannot read the marker", async () => {
     const { lines } = logLines();
     const aws = bucket(60_000);

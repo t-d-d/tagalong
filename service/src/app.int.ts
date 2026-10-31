@@ -695,6 +695,26 @@ describe("asking a Claude", () => {
     ]);
   });
 
+  it("hands the link over on an update, so a file goes once though the old session still answers", async () => {
+    const t = (h = await harness({ env: FILES }));
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION);
+    started(t, SECOND);
+    await says(t, "r1", MEMBER, "@podstow long job");
+    const id = linkIn(launches(t)[0]?.prompt);
+    await says(t, "c1", OWNER, "@claude update podstow");
+    await says(t, "r2", MEMBER, "@podstow and this");
+    expect(launches(t)).toHaveLength(2);
+    uploads(t, id, "chart.png");
+    // The old session's turn ends after the new one has started.
+    t.api.sessions.get(SESSION)?.events.push(result("Long job done."));
+    t.api.sessions.get(SECOND)?.events.push(result("And this."));
+    await poll(t);
+    expect(
+      t.bridge.sent.filter((sent) => sent.media_path?.endsWith("chart.png")),
+    ).toHaveLength(1);
+  });
+
   it("starts a fresh conversation with a new link", async () => {
     const t = (h = await harness({ env: FILES }));
     t.fake.launches.push(SESSION, SECOND);
