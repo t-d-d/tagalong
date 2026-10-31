@@ -688,7 +688,48 @@ describe("a Claude's environment (cloud-sessions.md)", () => {
     );
   });
 
-  it("starts a Claude whose environment is in the list, and others named in the same message", async () => {
+  it("keeps a member's photo for a Claude whose environment was gone, until it starts", async () => {
+    const t = (h = await harness({ env: { ATTACHMENTS_BUCKET: "files" } }));
+    t.bridge.media.set("p1", {
+      filename: "screen shot.png",
+      bytes: Buffer.from("png bytes"),
+    });
+    t.db.message({
+      id: "p1",
+      sender: MEMBER,
+      content: "",
+      at: NOW - 60_000,
+      mediaType: "image",
+    });
+    const at = t.api.environments.findIndex(
+      (environment) => environment.environment_id === "env_fake1",
+    );
+    const [gone] = t.api.environments.splice(at, 1);
+    await says(t, "r1", MEMBER, "@podstow what's wrong in this screenshot?");
+    expect(launches(t)).toEqual([]);
+    if (gone !== undefined) t.api.environments.push(gone);
+    t.fake.launches.push(SESSION);
+    started(t, SESSION);
+    await says(t, "r2", MEMBER, "@podstow what's wrong in it?");
+    expect(launches(t)[0]?.prompt).toContain("screen_shot.png");
+  });
+
+  it("starts the other Claudes named with one whose environment is gone", async () => {
+    const t = (h = await harness());
+    t.api.environments.splice(
+      t.api.environments.findIndex(
+        (environment) => environment.environment_id === "env_fake1",
+      ),
+      1,
+    );
+    t.fake.launches.push(SECOND);
+    started(t, SECOND, [result("Go wide.")]);
+    await says(t, "r1", MEMBER, "@podstow @brainstorm what do you both think?");
+    expect(launches(t)).toHaveLength(1);
+    expect(launches(t)[0]?.prompt).toContain('You are "brainstorm"');
+  });
+
+  it("starts a Claude whose environment is in the list as before, beside one with no environment", async () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION, SECOND);
     started(t, SESSION, [result("Lint.")]);

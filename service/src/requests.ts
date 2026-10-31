@@ -215,6 +215,29 @@ async function turn(
     sender: payload.sender,
     content: payload.content,
   };
+  // The CLI starts a session whose environment is not in the list in another
+  // one, so a Claude whose environment is gone starts nothing (#22).
+  const environmentGone = async (): Promise<boolean> => {
+    if (claude.environment === undefined) return false;
+    if (await deps.api.exists(claude.environment)) return false;
+    log.warn("session-environment-gone", {
+      group: group.label,
+      claude: claude.name,
+    });
+    await deps.bridge.send(
+      chat,
+      `@${claude.name}'s environment is gone, so it can't start. An owner must define it again: \`@claude define ${claude.name} env=<name>\``,
+      request,
+    );
+    return true;
+  };
+  const existing =
+    thread.session === null
+      ? undefined
+      : deps.state.state.sessions[thread.session];
+  // Checked before its files are taken, so they wait for the session that
+  // starts once it is defined again.
+  if (existing === undefined && (await environmentGone())) return;
   const label = (message: { id: string; sender: string }) =>
     labelFor(deps.state.state, chat, message);
   const lines = {
@@ -252,10 +275,6 @@ async function turn(
     deps.state.save();
   };
 
-  const existing =
-    thread.session === null
-      ? undefined
-      : deps.state.state.sessions[thread.session];
   if (thread.session !== null && existing !== undefined) {
     const id = thread.session;
     // Everything said since this Claude's last message, not only the last few.
@@ -299,25 +318,9 @@ async function turn(
     drop();
     existing.waiting = false;
     thread.carry = id;
-  }
-
-  // The CLI starts a session whose environment is not in the list in another
-  // one, so a Claude whose environment is gone starts nothing (#22).
-  if (
-    claude.environment !== undefined &&
-    !(await deps.api.exists(claude.environment))
-  ) {
-    log.warn("session-environment-gone", {
-      group: group.label,
-      claude: claude.name,
-      environment: claude.environment,
-    });
-    await deps.bridge.send(
-      chat,
-      `@${claude.name}'s environment is gone, so it can't start. An owner must define it again: \`@claude define ${claude.name} env=<name>\``,
-      request,
-    );
-    return;
+    // Kept, so the session that starts once it is defined again carries it.
+    deps.state.save();
+    if (await environmentGone()) return;
   }
 
   // A new session: after an update or a gone one, with the old session's
