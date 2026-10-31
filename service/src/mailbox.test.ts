@@ -58,10 +58,10 @@ describe("labels", () => {
 describe("labels given to a session", () => {
   it("notes each line's label in what it is given, the latest kept", () => {
     const one = session();
-    give(one, "[m1] 10-18 18:00 Sam: hm\n[m2] 10-18 18:01 Ollie: yes");
-    give(one, "[m1] again, and [m3]");
+    give(one, ["m1", "m2"]);
+    give(one, ["m1", "m3"]);
     expect(one.given).toEqual(["m2", "m1", "m3"]);
-    for (let each = 4; each < 600; each += 1) give(one, `[m${String(each)}]`);
+    for (let each = 4; each < 600; each += 1) give(one, [`m${String(each)}`]);
     expect(one.given).toHaveLength(500);
     expect(one.given.at(-1)).toBe("m599");
   });

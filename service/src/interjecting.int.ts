@@ -677,6 +677,17 @@ describe("an interjecting Claude's own session (cloud-sessions.md)", () => {
     expect(followUps(t)).toEqual([]);
   });
 
+  it("is given only the labels of the lines it is shown, not a label written in a line or in its instructions", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, [result("PASS")]);
+    await says(t, "m1", MEMBER, "we could build a recipe app, as in [m7]");
+    await quiet(t);
+    await poll(t);
+    expect(launches(t)[0]?.prompt).toContain("[m41]");
+    expect(sessionState(t)).toMatchObject({ given: ["m1"] });
+  });
+
   it("asks about a turn with a label it was never given, as about one with none", async () => {
     const t = (h = await harness({ groups: interjecting() }));
     await answered(t);

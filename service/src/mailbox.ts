@@ -32,14 +32,13 @@ export function labelFor(
   return label;
 }
 
-/** Note the labels of the lines in a message about to go into a session. */
-export function give(session: SessionState, text: string): void {
+/** Note the labels of the lines a session was just given, the latest kept. */
+export function give(session: SessionState, given: Iterable<string>): void {
   const labels = new Set(session.given);
-  for (const [, label] of text.matchAll(/\[(m\d+)\]/gu))
-    if (label !== undefined) {
-      labels.delete(label);
-      labels.add(label);
-    }
+  for (const label of given) {
+    labels.delete(label);
+    labels.add(label);
+  }
   session.given = [...labels].slice(-LABELS);
 }
 

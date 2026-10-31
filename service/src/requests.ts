@@ -301,8 +301,13 @@ async function turn(
   // Checked before its files are taken, so they wait for the session that
   // starts once it is defined again.
   if (existing === undefined && (await environmentGone())) return;
-  const label = (message: { id: string; sender: string }) =>
-    labelFor(deps.state.state, chat, message);
+  // The labels of the lines the session is shown, noted once it has them.
+  const shown = new Set<string>();
+  const label = (message: { id: string; sender: string }) => {
+    const each = labelFor(deps.state.state, chat, message);
+    shown.add(each);
+    return each;
+  };
   const lines = {
     store: deps.store,
     people: deps.people,
@@ -394,7 +399,6 @@ async function turn(
       );
     };
     existing.deliveries.push(delivery);
-    give(existing, text);
     deps.state.save();
     // Until the CLI says it is in, the session may read as archived because
     // it is: the message then goes to a new session, not a warning.
@@ -409,6 +413,7 @@ async function turn(
       deps.sending.delete(id);
     }
     if (sent === "sent") {
+      give(existing, shown);
       delivered(existing, id, thread.version, {
         kept,
         given: told?.upload !== undefined,
@@ -436,6 +441,7 @@ async function turn(
 
   // A new session: after an update or a gone one, with the old session's
   // dialogue and everything said since; otherwise the last messages here.
+  shown.clear();
   const carried =
     thread.carry === null ? "" : await dialogueOf(thread.carry, deps.api);
   const said =
@@ -481,7 +487,8 @@ async function turn(
     idle: 0,
     readAt: 0,
   };
-  give(session, prompt);
+  // A carried dialogue shows the old session's lines too.
+  give(session, [...(before?.given ?? []), ...shown]);
   deps.state.state.sessions[id] = session;
   // Only one session reads a folder, so each file goes once, though the old
   // session may still answer after an update.

@@ -66,18 +66,28 @@ const latestAsk = (deliveries: Delivery[]): Quote | undefined =>
 
 const HOUR = 3_600_000;
 
+/** When an interjecting Claude spoke in its chat in the last hour, the older times dropped. */
+export function lastHour(
+  interjected: Map<string, number[]>,
+  key: string,
+  now: number,
+): number[] {
+  const hour = (interjected.get(key) ?? []).filter((at) => now - at < HOUR);
+  interjected.set(key, hour);
+  return hour;
+}
+
 /**
  * Whether an interjecting Claude may speak once more in its chat this hour,
  * counted if it may (who-can-use-it.md).
  */
-export function spend(
+function spend(
   interjected: Map<string, number[]>,
   key: string,
   now: number,
   perHour: number,
 ): boolean {
-  const hour = (interjected.get(key) ?? []).filter((at) => now - at < HOUR);
-  interjected.set(key, hour);
+  const hour = lastHour(interjected, key, now);
   if (hour.length >= perHour) return false;
   hour.push(now);
   return true;
