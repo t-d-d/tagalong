@@ -88,6 +88,8 @@ export interface CommandDeps {
   api: ClaudeApi;
   bridge: Bridge;
   now: () => number;
+  /** Tell a Claude's running session in a chat that interjecting turned on or off for it (#94). */
+  tell: (chat: string, claude: string, on: boolean) => Promise<void>;
 }
 
 /** Whether a command may run: an owner's number, and typed in the last ten minutes. */
@@ -360,11 +362,41 @@ function keepToReadOnly(
   return [...new Set(stopped.map(({ claude }) => claude))];
 }
 
+/** Every Claude set to interject, by threadKey, in every chat. */
+const interjectingNow = (config: Config): Set<string> =>
+  new Set(
+    [...config.groups.values()].flatMap((group) =>
+      group.interjecting.map((name) => threadKey(group.jid, name)),
+    ),
+  );
+
 /** A group chat's JID ends @g.us; anything else is a one-to-one chat. */
 export const isGroupChat = (chat: string): boolean => chat.endsWith("@g.us");
 export const DIRECT_LABEL = "direct chat";
 
+/**
+ * Run a command, then tell each Claude it turned interjecting on or off for,
+ * in a chat the Claude is still in, at once (who-can-use-it.md). One it took
+ * out of a chat hears nothing more from there.
+ */
 export async function runCommand(
+  message: Incoming,
+  command: Command,
+  deps: CommandDeps,
+): Promise<void> {
+  const before = interjectingNow(deps.groups.config);
+  await runOne(message, command, deps);
+  const { config } = deps.groups;
+  const after = interjectingNow(config);
+  for (const group of config.groups.values())
+    for (const name of group.claudes) {
+      const key = threadKey(group.jid, name);
+      if (before.has(key) !== after.has(key))
+        await deps.tell(group.jid, name, after.has(key));
+    }
+}
+
+async function runOne(
   message: Incoming,
   command: Command,
   deps: CommandDeps,

@@ -34,6 +34,7 @@ import {
   firstPrompt,
   followUp,
   marked,
+  setToInterject,
 } from "./prompts.ts";
 import { OUTGOING, keepLink, newLinkId } from "./outgoing.ts";
 import { lookAway } from "./relay.ts";
@@ -367,6 +368,8 @@ async function deliver(
 ): Promise<void> {
   const now = deps.now();
   const interjecting = asked === undefined;
+  // Every delivery says whether the Claude is set to interject here now (#94).
+  const setTo = group.interjecting.includes(claude.name);
   const payload = asked?.payload;
   const reaction = asked?.request.reaction;
   const request: Quote | null =
@@ -507,7 +510,11 @@ async function deliver(
     labelAsk();
     const kept = await linkFor(existing.link);
     const told = tell(kept);
-    const text = followUp(claude.name, said, told, heard, !existing.tags);
+    const text = followUp(claude.name, said, told, {
+      interjecting: setTo,
+      files: heard,
+      untold: !existing.tags,
+    });
     // Noted before it goes, so its user event is known however soon it is read.
     const delivery = deliveryOf(text, request, now, interjecting);
     const drop = () => {
@@ -579,6 +586,7 @@ async function deliver(
     chatName: deps.store.chatName(chat) ?? group.label,
     others: group.claudes.filter((other) => other !== claude.name),
     carried,
+    interjecting: setTo,
     conversation: said,
     ask: told,
     files: heard,
@@ -619,6 +627,47 @@ async function deliver(
     interjecting,
   });
   await verify(id, claude, deps.api);
+}
+
+/**
+ * Tell a Claude's running session in a chat at once that an owner turned
+ * interjecting on or off for it, with only that line (who-can-use-it.md).
+ * It is not a delivery: it gets no 👀, counts toward no hourly limit, and
+ * moves nothing on, so what was said goes in with the next delivery.
+ * Nothing is sent for a Claude with no running session there.
+ */
+export async function tellInterjecting(
+  chat: string,
+  claude: string,
+  on: boolean,
+  deps: Pick<RequestDeps, "state" | "cloud" | "cli" | "sending">,
+): Promise<void> {
+  const id = deps.state.state.threads[threadKey(chat, claude)]?.session;
+  const session =
+    id === null || id === undefined ? undefined : deps.state.state.sessions[id];
+  if (id === null || id === undefined || session?.waiting !== true) return;
+  deps.sending.add(id);
+  try {
+    const sent = await deps.cli.run(() =>
+      deps.cloud.send(id, setToInterject(on)),
+    );
+    if (sent === "gone") {
+      log.info("session-gone", { session: id, claude });
+      return;
+    }
+    // Read at once, and the gaps start again, for its answer.
+    Object.assign(session, { idle: 0, readAt: 0 });
+    deps.state.save();
+    log.info("session-told-interjecting", { session: id, claude, on });
+  } catch (error) {
+    log.warn("session-told-failed", {
+      session: id,
+      claude,
+      ...errorFields(error),
+    });
+  } finally {
+    deps.sending.delete(id);
+  }
 }
 
 /** The dialogue of a session being replaced; empty, and logged, if it cannot be read. */

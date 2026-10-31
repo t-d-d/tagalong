@@ -865,3 +865,120 @@ describe("an interjecting Claude's own session (cloud-sessions.md)", () => {
     expect(reads(t)).toBe(before);
   });
 });
+
+const ON_LINE =
+  "You are set to interject in this chat now: you may post on any line, or a plain message, when you have something important to add.";
+const OFF_LINE =
+  "You are not set to interject in this chat now: post only replies to the lines that asked you.";
+
+/** The messages tagalong sent into a session after it started, by session id. */
+const sentTo = (t: Harness, id: string) =>
+  followUps(t)
+    .filter((call) => call.args[2] === `session_${id}`)
+    .map((call) => call.options.input ?? "");
+
+describe("telling a Claude whether it is set to interject (#94)", () => {
+  it("says so in every delivery, the first and each one after", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, PASSES);
+    await says(t, "m1", MEMBER, "@podstow is the build green");
+    expect(launches(t)[0]?.prompt).toContain(`\n${OFF_LINE}\n`);
+    await says(t, "m2", MEMBER, "@podstow and the deploy");
+    expect(sentTo(t, SESSION).at(-1)).toContain(`\n${OFF_LINE}\n`);
+
+    t.fake.launches.push(SECOND);
+    started(t, SECOND, PASSES);
+    await says(t, "m3", MEMBER, "we could build a recipe app");
+    await quiet(t);
+    expect(launches(t)[1]?.prompt).toContain(`\n${ON_LINE}\n`);
+    await says(t, "m4", MEMBER, "@brainstorm which first");
+    expect(sentTo(t, SECOND).at(-1)).toContain(`\n${ON_LINE}\n`);
+  });
+
+  it("tells its running session at once, with only the line, when interjecting is turned off or on, and counts it toward no limit", async () => {
+    const t = (h = await harness({
+      groups: interjecting(),
+      env: { INTERJECT_PER_HOUR: "2", MAX_PER_HOUR: "1" },
+    }));
+    await answered(t);
+    await says(t, "c1", OWNER, "@claude interject brainstorm off");
+    expect(sentTo(t, SESSION)).toEqual([OFF_LINE]);
+    await says(t, "c2", OWNER, "@claude interject brainstorm on");
+    expect(sentTo(t, SESSION)).toEqual([OFF_LINE, ON_LINE]);
+    expect(t.bridge.reactions).toEqual([]);
+    expect(t.bridge.sent.map((sent) => sent.message)).toEqual([
+      "@brainstorm answers only when asked here now.",
+      "@brainstorm interjects here now: it chips in when it has something to add.",
+    ]);
+    expect(sessionState(t)).toMatchObject({ readAt: 0, idle: 0 });
+
+    // Not an interjecting delivery: the second of the hour still goes in,
+    // with what was said since.
+    t.api.sessions.get(SESSION)?.replies?.push(PASSES);
+    await says(t, "m2", MEMBER, "maybe add a shopping list");
+    await quiet(t);
+    expect(sentTo(t, SESSION)).toHaveLength(3);
+    expect(sentTo(t, SESSION)[2]).toContain(
+      "Ollie (may ask you): maybe add a shopping list",
+    );
+    expect(sentTo(t, SESSION)[2]).toContain("Nobody asked you");
+
+    // Nor a turn toward MAX_PER_HOUR: the hour's one request still goes in.
+    await says(t, "m3", MEMBER, "@brainstorm which first");
+    expect(sentTo(t, SESSION)).toHaveLength(4);
+    expect(t.bridge.reactions.map((each) => each.emoji)).toEqual(["👀"]);
+  });
+
+  it("tells a Claude asked directly, when it is turned on to interject", async () => {
+    const t = (h = await harness());
+    t.fake.launches.push(SESSION);
+    started(t, SESSION, PASSES);
+    await says(t, "m1", MEMBER, "@podstow is the build green");
+    await says(t, "c1", OWNER, "@claude interject podstow on");
+    expect(sentTo(t, SESSION)).toEqual([ON_LINE]);
+    await says(t, "c2", OWNER, "@claude add podstow interjecting");
+    expect(sentTo(t, SESSION)).toEqual([ON_LINE]);
+  });
+
+  it("tells each read-write Claude that set interjecting read-only stops, and no other", async () => {
+    const t = (h = await harness({ groups: interjecting(["podstow"]) }));
+    t.fake.launches.push(SESSION, SECOND);
+    started(t, SESSION, PASSES);
+    started(t, SECOND, PASSES);
+    await says(t, "m1", MEMBER, "@podstow is the build green");
+    await says(t, "m2", MEMBER, "@brainstorm which first");
+    await says(t, "c1", OWNER, "@claude set interjecting read-only");
+    expect(sentTo(t, SESSION)).toEqual([OFF_LINE]);
+    expect(sentTo(t, SECOND)).toEqual([]);
+  });
+
+  it("tells a Claude that redefining as read-write stops", async () => {
+    const t = (h = await harness({
+      groups: { ...interjecting(), interjecting: "read-only" },
+    }));
+    await answered(t);
+    await says(t, "c1", OWNER, "@claude define brainstorm read-write");
+    expect(sentTo(t, SESSION)).toEqual([OFF_LINE]);
+  });
+
+  it("sends nothing to a Claude with no running session in the chat", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    await answered(t);
+    await says(t, "c1", OWNER, "@claude interject podstow on");
+    await says(t, "c2", OWNER, "@claude fresh brainstorm");
+    await says(t, "c3", OWNER, "@claude interject brainstorm off");
+    expect(followUps(t)).toEqual([]);
+  });
+
+  it("sends nothing to a Claude whose session was archived", async () => {
+    const t = (h = await harness({ groups: interjecting() }));
+    await answered(t);
+    const session = t.api.sessions.get(SESSION);
+    if (session !== undefined) session.status = "archived";
+    await after(t, MINUTE);
+    expect(sessionState(t)).toMatchObject({ waiting: false });
+    await says(t, "c1", OWNER, "@claude interject brainstorm off");
+    expect(followUps(t)).toEqual([]);
+  });
+});

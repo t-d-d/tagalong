@@ -14,7 +14,12 @@ import { interject } from "./interjecting.ts";
 import { Login } from "./login.ts";
 import { People, userPart } from "./people.ts";
 import { poll } from "./relay.ts";
-import { type Request, handleRequest, repliedTo } from "./requests.ts";
+import {
+  type Request,
+  handleRequest,
+  repliedTo,
+  tellInterjecting,
+} from "./requests.ts";
 import { type Runner, Serial } from "./run.ts";
 import { type DeviceState, ensureDevice } from "./seed.ts";
 import { StateStore, unsee } from "./state.ts";
@@ -104,7 +109,17 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
         ? null
         : commandIn(payload.content, people.self);
     if (command !== null) {
-      const deps = { groups, people, store, state, api, bridge, now };
+      const deps = {
+        groups,
+        people,
+        store,
+        state,
+        api,
+        bridge,
+        now,
+        tell: (chat: string, claude: string, on: boolean) =>
+          tellInterjecting(chat, claude, on, requestDeps),
+      };
       if (mayRun(incoming, deps)) {
         pending = commands
           .run(() => runCommand(incoming, command, deps))
