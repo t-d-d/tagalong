@@ -10,7 +10,7 @@ import { commandIn, mayRun, runCommand } from "./commands.ts";
 import { type Env, cliEnv } from "./env.ts";
 import { GroupsStore, claudesOf, parseOwners } from "./groups.ts";
 import { errorFields, log } from "./log.ts";
-import { listen } from "./listening.ts";
+import { interject } from "./interjecting.ts";
 import { Login } from "./login.ts";
 import { People, userPart } from "./people.ts";
 import { poll } from "./relay.ts";
@@ -59,8 +59,8 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
   const sending = new Set<string>();
   // Requests whose deliveries are still going in, whose 👀 stays (relay.ts).
   const asking = new Set<string>();
-  // Listening deliveries in the last hour, and the threads at the limit (listening.ts).
-  const listened = new Map<string, number[]>();
+  // Interjecting deliveries in the last hour, and the threads at the limit (interjecting.ts).
+  const interjected = new Map<string, number[]>();
   const capped = new Set<string>();
   const requestDeps = {
     env,
@@ -267,12 +267,12 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
     });
   // In turn with direct asks, so the two never deliver into one session at
   // once. A look still waiting or running is not queued again.
-  let listening: Promise<void> | undefined;
-  const listenOnce = () =>
-    (listening ??= requests
-      .run(() => listen({ ...requestDeps, listened, capped }))
+  let interjecting: Promise<void> | undefined;
+  const interjectOnce = () =>
+    (interjecting ??= requests
+      .run(() => interject({ ...requestDeps, interjected, capped }))
       .finally(() => {
-        listening = undefined;
+        interjecting = undefined;
       }));
   const keepFresh = () => cli.run(() => login.keepFresh());
 
@@ -311,7 +311,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
     heartbeat,
     checkDevice,
     pollOnce,
-    listenOnce,
+    interjectOnce,
     keepFresh,
     settled: () => pending,
     refreshPeople: () => people.refresh(),

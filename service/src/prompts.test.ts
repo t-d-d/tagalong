@@ -148,7 +148,7 @@ describe("prompts", () => {
     );
   });
 
-  it("tells a listening Claude nobody asked it, and to pass unless it has something important", () => {
+  it("tells an interjecting Claude nobody asked it, and to pass unless it has something important", () => {
     const later = followUp("podstow", "[m6] 10-18 18:00 Sam: hm", undefined);
     expect(later).toMatch(
       /^Said in the chat since you last heard from it:\n\[m6\]/u,

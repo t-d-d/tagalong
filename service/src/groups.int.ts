@@ -96,7 +96,7 @@ describe("state.json on disk", () => {
           answered: false,
           folder: null,
           sent: [],
-          listening: false,
+          interjecting: false,
         },
       ],
     };
@@ -139,7 +139,7 @@ describe("state.json on disk", () => {
         answered: false,
         folder: null,
         sent: [],
-        listening: false,
+        interjecting: false,
       },
     ]);
   });

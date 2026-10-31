@@ -29,7 +29,7 @@ const every = (loop: string, ms: number, task: () => Promise<unknown>) => {
 await app.start();
 await app.heartbeat();
 every("poll", env.POLL_MS, app.pollOnce);
-every("listen", env.POLL_MS, app.listenOnce);
+every("interject", env.POLL_MS, app.interjectOnce);
 every("heartbeat", env.HEARTBEAT_MS, app.heartbeat);
 every("login", env.LOGIN_CHECK_MS, app.keepFresh);
 every("device", 30_000, app.checkDevice);

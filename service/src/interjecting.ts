@@ -1,5 +1,5 @@
-// A Claude an owner set to listen in a chat (who-can-use-it.md). Once the
-// chat has been quiet for LISTEN_QUIET_MS, it is given what the people who
+// A Claude an owner set to interject in a chat (who-can-use-it.md). Once the
+// chat has been quiet for INTERJECT_QUIET_MS, it is given what the people who
 // may ask it said since it last heard, with no request, and posts only when
 // it has something to add.
 //
@@ -10,7 +10,7 @@ import { allowed } from "./access.ts";
 import { COMMAND } from "./commands.ts";
 import { errorFields, log } from "./log.ts";
 import { busy } from "./mailbox.ts";
-import { type RequestDeps, listeningTurn } from "./requests.ts";
+import { type RequestDeps, interjectingTurn } from "./requests.ts";
 import { threadKey } from "./state.ts";
 import { type MessageRow, timeOf } from "./store.ts";
 
@@ -21,7 +21,7 @@ export interface DueInput {
   rows: MessageRow[];
   now: number;
   quietMs: number;
-  /** When each listening delivery to this Claude here in the last hour went. */
+  /** When each interjecting delivery to this Claude here in the last hour went. */
   hour: number[];
   perHour: number;
   /** Whether someone may ask this Claude here. */
@@ -29,10 +29,10 @@ export interface DueInput {
 }
 
 /**
- * Whether a listening delivery is due. Only a person who may ask the Claude
+ * Whether an interjecting delivery is due. Only a person who may ask the Claude
  * starts one: never a Claude's answer, nor a command.
  */
-export function listenDue(
+export function interjectDue(
   input: DueInput,
 ): "nothing" | "talking" | "capped" | "due" {
   const starts = input.rows.some(
@@ -46,20 +46,20 @@ export function listenDue(
   return input.hour.length >= input.perHour ? "capped" : "due";
 }
 
-export interface ListenDeps extends RequestDeps {
-  /** Listening deliveries in the last hour, by threadKey. */
-  listened: Map<string, number[]>;
+export interface InterjectDeps extends RequestDeps {
+  /** Interjecting deliveries in the last hour, by threadKey. */
+  interjected: Map<string, number[]>;
   /** The threads at their hourly limit, logged once each time. */
   capped: Set<string>;
 }
 
-/** One look at every listening Claude, delivering to each one that is due. */
-export async function listen(deps: ListenDeps): Promise<void> {
+/** One look at every interjecting Claude, delivering to each one that is due. */
+export async function interject(deps: InterjectDeps): Promise<void> {
   if (deps.env.DRY_RUN) return;
   const { config } = deps.groups;
   const { state } = deps.state;
   for (const group of config.groups.values()) {
-    for (const name of group.listening) {
+    for (const name of group.interjecting) {
       const claude = config.claudes.get(name);
       if (claude === undefined) continue;
       const key = threadKey(group.jid, name);
@@ -69,26 +69,26 @@ export async function listen(deps: ListenDeps): Promise<void> {
       // What waits goes in with the next delivery, once this one is answered.
       if (session !== undefined && busy(session)) continue;
       const now = deps.now();
-      const hour = (deps.listened.get(key) ?? []).filter(
+      const hour = (deps.interjected.get(key) ?? []).filter(
         (at) => now - at < HOUR,
       );
-      deps.listened.set(key, hour);
-      const from = Math.max(thread?.heard ?? 0, state.listening[key] ?? 0);
+      deps.interjected.set(key, hour);
+      const from = Math.max(thread?.heard ?? 0, state.interjecting[key] ?? 0);
       const { rows } = deps.store.since(group.jid, from, 200);
-      const due = listenDue({
+      const due = interjectDue({
         rows,
         now,
-        quietMs: deps.env.LISTEN_QUIET_MS,
+        quietMs: deps.env.INTERJECT_QUIET_MS,
         hour,
-        perHour: deps.env.LISTEN_PER_HOUR,
+        perHour: deps.env.INTERJECT_PER_HOUR,
         mayAsk: (sender) => allowed(config, group, name, deps.people, sender),
       });
       if (due === "capped" && !deps.capped.has(key)) {
         deps.capped.add(key);
-        log.info("listen-capped", {
+        log.info("interject-capped", {
           group: group.label,
           claude: name,
-          cap: deps.env.LISTEN_PER_HOUR,
+          cap: deps.env.INTERJECT_PER_HOUR,
         });
       }
       if (due !== "due") continue;
@@ -98,9 +98,9 @@ export async function listen(deps: ListenDeps): Promise<void> {
       const last = rows.at(-1);
       const at = last === undefined ? now : timeOf(last.timestamp);
       try {
-        await listeningTurn(group.jid, claude, group, at, deps);
+        await interjectingTurn(group.jid, claude, group, at, deps);
       } catch (error) {
-        log.warn("listen-failed", {
+        log.warn("interject-failed", {
           group: group.label,
           claude: name,
           ...errorFields(error),

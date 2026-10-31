@@ -45,10 +45,10 @@ export const envSchema = z.object({
   GIVE_UP_MS: number(7_200_000),
   HISTORY: number(20),
   MAX_PER_HOUR: number(12),
-  // A listening Claude's delivery waits until the chat has been quiet this long.
-  LISTEN_QUIET_MS: number(120_000),
-  // At most this many listening deliveries an hour, to each Claude in each chat.
-  LISTEN_PER_HOUR: number(4),
+  // An interjecting Claude's delivery waits until the chat has been quiet this long.
+  INTERJECT_QUIET_MS: number(120_000),
+  // At most this many interjecting deliveries an hour, to each Claude in each chat.
+  INTERJECT_PER_HOUR: number(4),
   DRY_RUN: z
     .enum(["", "0", "1"])
     .default("")

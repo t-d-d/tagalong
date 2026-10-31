@@ -93,12 +93,12 @@ export async function check(
   session.lastText = lastText;
   for (const turn of ended) {
     const answers = answering(session, turn.uuids);
-    // Nobody waits on a listening delivery, so its failure is not told.
+    // Nobody waits on an interjecting delivery, so its failure is not told.
     if (
       answers !== null &&
       turn.failed &&
       answers.length > 0 &&
-      answers.every((delivery) => delivery.listening)
+      answers.every((delivery) => delivery.interjecting)
     ) {
       for (const delivery of answers) delivery.answered = true;
       continue;
@@ -136,8 +136,8 @@ async function waitOn(
   deps: RelayDeps,
 ): Promise<void> {
   const waiting = session.deliveries.filter((delivery) => !delivery.answered);
-  // Nobody waits on a listening delivery, so it gets no notices.
-  const asked = waiting.filter((delivery) => !delivery.listening);
+  // Nobody waits on an interjecting delivery, so it gets no notices.
+  const asked = waiting.filter((delivery) => !delivery.interjecting);
   const { status } = await deps.api.record(id);
   // An archived or failed session takes no more turns.
   const ended = status === "archived" || status === "failed";
@@ -186,7 +186,7 @@ async function waitOn(
   if (overdue.length === 0) return;
   for (const delivery of overdue) delivery.answered = true;
   log.info("session-gave-up", { session: id });
-  if (overdue.every((delivery) => delivery.listening)) return;
+  if (overdue.every((delivery) => delivery.interjecting)) return;
   await deps.bridge.send(
     session.chat,
     answerText(

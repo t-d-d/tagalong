@@ -35,7 +35,7 @@ export const VERBS = [
   "undefine",
   "allow",
   "revoke",
-  "listen",
+  "interject",
   "fresh",
   "update",
   "stop",
@@ -44,7 +44,7 @@ export type Verb = (typeof VERBS)[number];
 
 /** A message that is a command, whoever sent it: "@claude <verb> …" or a mention of the number. */
 export const COMMAND =
-  /^\s*@(claude|\d{6,})\b[\s,:]*(help|who|add|remove|define|undefine|allow|revoke|listen|fresh|update|stop)\b(.*)$/isu;
+  /^\s*@(claude|\d{6,})\b[\s,:]*(help|who|add|remove|define|undefine|allow|revoke|interject|fresh|update|stop)\b(.*)$/isu;
 export const FRESH_MS = 10 * 60_000;
 
 export interface Command {
@@ -135,8 +135,8 @@ const namesIn = (args: string, keywords: string[] = []): string[] => [
   ),
 ];
 
-/** The word that adds a Claude already listening: `@claude add brainstorm listening`. */
-const LISTENING = "listening";
+/** The word that adds a Claude already interjecting: `@claude add brainstorm interjecting`. */
+const INTERJECTING = "interjecting";
 
 /** One line about a Claude: its repo, access, environment, ref and model. */
 export function line(claude: Claude, api: ClaudeApi): string {
@@ -185,8 +185,8 @@ export function describe(
     return [
       line(claude, api),
       `  Asked by: ${askers.join(", ")}`,
-      ...(group.listening.includes(name)
-        ? ["  Listening: chips in without being asked"]
+      ...(group.interjecting.includes(name)
+        ? ["  Interjecting: chips in without being asked"]
         : []),
       ...(older
         ? [`  Talking here on an older version: \`@claude update ${name}\``]
@@ -285,7 +285,7 @@ const help = async (
     "@claude define critic owner/repo read-only",
     "@claude allow @",
     "@claude revoke @",
-    `@claude listen ${group?.claudes[0] ?? "podstow"} on`,
+    `@claude interject ${group?.claudes[0] ?? "podstow"} on`,
     `@claude update ${group?.claudes[0] ?? "podstow"}`,
     `@claude fresh ${group?.claudes[0] ?? "podstow"}`,
     "@claude who",
@@ -295,20 +295,24 @@ const help = async (
 };
 
 /**
- * Only what is said once a Claude is set to listen starts a delivery. Setting
+ * Only what is said once a Claude is set to interject starts a delivery. Setting
  * it again keeps the first time, so nothing waiting is skipped.
  */
-function listenFrom(deps: CommandDeps, chat: string, names: string[]): void {
+function interjectFrom(deps: CommandDeps, chat: string, names: string[]): void {
   for (const name of names)
-    deps.state.state.listening[threadKey(chat, name)] ??= deps.now();
+    deps.state.state.interjecting[threadKey(chat, name)] ??= deps.now();
   deps.state.save();
 }
 
-/** Forget when these Claudes started listening here. */
-function stopListening(deps: CommandDeps, chat: string, names: string[]): void {
+/** Forget when these Claudes started interjecting here. */
+function stopInterjecting(
+  deps: CommandDeps,
+  chat: string,
+  names: string[],
+): void {
   const gone = new Set(names.map((name) => threadKey(chat, name)));
-  deps.state.state.listening = Object.fromEntries(
-    Object.entries(deps.state.state.listening).filter(
+  deps.state.state.interjecting = Object.fromEntries(
+    Object.entries(deps.state.state.interjecting).filter(
       ([key]) => !gone.has(key),
     ),
   );
@@ -431,9 +435,9 @@ export async function runCommand(
         return;
       }
       case "add": {
-        const names = namesIn(command.args, [LISTENING]);
-        const listening = tokens(command.args).some(
-          (word) => word.toLowerCase() === LISTENING,
+        const names = namesIn(command.args, [INTERJECTING]);
+        const interjecting = tokens(command.args).some(
+          (word) => word.toLowerCase() === INTERJECTING,
         );
         const unknown = names.filter(
           (name) => !deps.groups.config.claudes.has(name),
@@ -442,10 +446,10 @@ export async function runCommand(
           throw new CommandError(
             `${names.length === 0 ? "Which Claude?" : `No Claude called ${unknown.join(", ")}.`} ${catalogue(deps.groups.config, deps.api)}`,
           );
-        // Listening is never turned on for several Claudes at once (who-can-use-it.md).
-        if (listening && names.length > 1)
+        // Interjecting is never turned on for several Claudes at once (who-can-use-it.md).
+        if (interjecting && names.length > 1)
           throw new CommandError(
-            `Set one Claude at a time to listen: \`@claude add ${names[0] ?? ""} listening\``,
+            `Set one Claude at a time to interject: \`@claude add ${names[0] ?? ""} interjecting\``,
           );
         // A one-to-one chat's name is a person's, so it is never a label (logging.md).
         const label = isGroupChat(chat)
@@ -457,7 +461,7 @@ export async function runCommand(
           const claudes = { ...entry?.claudes };
           for (const name of names) {
             const askers = claudes[name] ?? { members: [] };
-            claudes[name] = listening ? { ...askers, listening } : askers;
+            claudes[name] = interjecting ? { ...askers, interjecting } : askers;
           }
           return {
             ...file,
@@ -467,7 +471,7 @@ export async function runCommand(
         const updated = config.groups.get(chat);
         if (updated === undefined)
           throw new CommandError("the change did not stick");
-        if (listening) listenFrom(deps, chat, names);
+        if (interjecting) interjectFrom(deps, chat, names);
         await reply(
           `${describe(updated, config, deps.people, deps.api, deps.state.state)}\n\nOnly owners can ask ${names.map((name) => `@${name}`).join(" and ")} until you allow someone: \`@claude allow @Name ${names[0] ?? ""}\``,
         );
@@ -503,7 +507,7 @@ export async function runCommand(
                 },
               };
         });
-        stopListening(deps, chat, names);
+        stopInterjecting(deps, chat, names);
         const updated = config.groups.get(chat);
         await reply(
           updated === undefined
@@ -547,7 +551,7 @@ export async function runCommand(
         );
         return;
       }
-      case "listen": {
+      case "interject": {
         const names = namesIn(command.args, ["on", "off"]);
         const words = tokens(command.args).map((word) => word.toLowerCase());
         const on = words.includes("on");
@@ -555,14 +559,14 @@ export async function runCommand(
         const name = names[0];
         if (name === undefined)
           throw new CommandError(
-            "Which Claude? `@claude listen brainstorm on`",
+            "Which Claude? `@claude interject brainstorm on`",
           );
         if (!(group?.claudes.includes(name) ?? false))
           throw new CommandError(
-            `@${name} isn't here. Add it first: \`@claude add ${name} listening\``,
+            `@${name} isn't here. Add it first: \`@claude add ${name} interjecting\``,
           );
         if (on === off)
-          throw new CommandError(`On or off? \`@claude listen ${name} on\``);
+          throw new CommandError(`On or off? \`@claude interject ${name} on\``);
         deps.groups.update((file) => {
           const entry = entryOf(file, chat);
           const askers = entry?.claudes[name];
@@ -579,17 +583,17 @@ export async function runCommand(
                 ...entry,
                 claudes: {
                   ...entry.claudes,
-                  [name]: on ? { ...rest, listening: true } : rest,
+                  [name]: on ? { ...rest, interjecting: true } : rest,
                 },
               },
             },
           };
         });
-        if (on) listenFrom(deps, chat, [name]);
-        else stopListening(deps, chat, [name]);
+        if (on) interjectFrom(deps, chat, [name]);
+        else stopInterjecting(deps, chat, [name]);
         await reply(
           on
-            ? `@${name} is listening here now, and chips in when it has something to add.`
+            ? `@${name} interjects here now: it chips in when it has something to add.`
             : `@${name} answers only when asked here now.`,
         );
         return;
@@ -600,7 +604,7 @@ export async function runCommand(
           return;
         }
         deps.groups.update((file) => withoutGroup(file, chat));
-        stopListening(deps, chat, group?.claudes ?? []);
+        stopInterjecting(deps, chat, group?.claudes ?? []);
         await reply(
           "Stopped, and forgot who could ask here. I'll ignore this group until a Claude is added again.",
         );
@@ -666,7 +670,7 @@ export async function runCommand(
             next[name] = {
               members,
               ...(open ? { everyone: true } : {}),
-              ...(askers.listening === true ? { listening: true } : {}),
+              ...(askers.interjecting === true ? { interjecting: true } : {}),
             };
           }
           return {

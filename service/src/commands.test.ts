@@ -39,12 +39,12 @@ describe("commandIn", () => {
     });
   });
 
-  it("reads listen as a verb", () => {
-    expect(commandIn("@claude listen brainstorm on", self)).toEqual({
-      verb: "listen",
+  it("reads interject as a verb", () => {
+    expect(commandIn("@claude interject brainstorm on", self)).toEqual({
+      verb: "interject",
       args: "brainstorm on",
     });
-    expect(COMMAND.test("@claude listen brainstorm off")).toBe(true);
+    expect(COMMAND.test("@claude interject brainstorm off")).toBe(true);
   });
 
   it("ignores a verb addressed to someone else, or not at the start", () => {

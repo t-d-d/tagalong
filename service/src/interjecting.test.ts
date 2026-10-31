@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listenDue } from "./listening.ts";
+import { interjectDue } from "./interjecting.ts";
 import type { MessageRow } from "./store.ts";
 
 const T = Date.parse("2026-10-18T17:00:00Z");
@@ -28,14 +28,14 @@ const base = {
   mayAsk: (sender: string) => sender === "447700900002",
 };
 
-describe("listenDue", () => {
+describe("interjectDue", () => {
   it("is due once a person who may ask spoke and the chat has been quiet", () => {
-    expect(listenDue({ ...base, rows: [row("m1", T)] })).toBe("due");
+    expect(interjectDue({ ...base, rows: [row("m1", T)] })).toBe("due");
   });
 
   it("waits while the chat is still talking, whoever spoke last", () => {
     expect(
-      listenDue({
+      interjectDue({
         ...base,
         rows: [row("m1", T), row("a1", T + 150_000, { isFromMe: true })],
       }),
@@ -44,7 +44,7 @@ describe("listenDue", () => {
 
   it("is never started by a Claude's answer, a command, or someone who may not ask", () => {
     expect(
-      listenDue({
+      interjectDue({
         ...base,
         rows: [
           row("a1", T, { isFromMe: true, content: "*podstow:* hi" }),
@@ -57,7 +57,7 @@ describe("listenDue", () => {
 
   it("stops at the hourly limit", () => {
     expect(
-      listenDue({ ...base, rows: [row("m1", T)], hour: [1, 2, 3, 4] }),
+      interjectDue({ ...base, rows: [row("m1", T)], hour: [1, 2, 3, 4] }),
     ).toBe("capped");
   });
 });

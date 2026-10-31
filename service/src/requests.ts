@@ -202,10 +202,10 @@ export async function handleRequest(
 }
 
 /**
- * A listening Claude's turn: what the people who may ask it said up to `at`
+ * An interjecting Claude's turn: what the people who may ask it said up to `at`
  * (ms), with no request, so nobody waits on it (who-can-use-it.md).
  */
-export const listeningTurn = (
+export const interjectingTurn = (
   chat: string,
   claude: Claude,
   group: Group,
@@ -213,7 +213,7 @@ export const listeningTurn = (
   deps: RequestDeps,
 ): Promise<void> => turn(chat, claude, group, deps, undefined, at);
 
-/** One Claude's turn: into its running session, or a new one. With nothing asked, a listening one. */
+/** One Claude's turn: into its running session, or a new one. With nothing asked, an interjecting one. */
 async function turn(
   chat: string,
   claude: Claude,
@@ -223,7 +223,7 @@ async function turn(
   heardUpTo?: number,
 ): Promise<void> {
   const now = deps.now();
-  const listening = asked === undefined;
+  const interjecting = asked === undefined;
   const payload = asked?.payload;
   const reaction = asked?.request.reaction;
   const request: Quote | null =
@@ -252,7 +252,7 @@ async function turn(
       group: group.label,
       claude: claude.name,
     });
-    // Nobody asked a listening Claude, so nobody is told.
+    // Nobody asked an interjecting Claude, so nobody is told.
     if (request === null) return true;
     await deps.bridge.send(
       chat,
@@ -331,7 +331,7 @@ async function turn(
     labelAsk();
     const text = followUp(claude.name, said, ask);
     // Noted before it goes, so its user event is known however soon it is read.
-    const delivery = deliveryOf(text, request, folder, now, listening);
+    const delivery = deliveryOf(text, request, folder, now, interjecting);
     const drop = () => {
       existing.deliveries = existing.deliveries.filter(
         (each) => each !== delivery,
@@ -358,7 +358,7 @@ async function turn(
         group: group.label,
         claude: claude.name,
         files: ask?.files.length ?? 0,
-        listening,
+        interjecting,
       });
       return;
     }
@@ -392,7 +392,7 @@ async function turn(
   });
   const name =
     ask === undefined
-      ? `WhatsApp ${claude.name}: listening`
+      ? `WhatsApp ${claude.name}: interjecting`
       : `WhatsApp ${claude.name}: ${oneLine((ask.reaction ?? ask.text).replace(/@[a-z][a-z0-9-]*\b/giu, "")).slice(0, 50)}`;
   const id = await deps.cli.run(() => deps.cloud.start(claude, prompt, name));
   const session: SessionState = {
@@ -403,7 +403,7 @@ async function turn(
     since: now,
     nudged: false,
     lastText: "",
-    deliveries: [deliveryOf(prompt, request, folder, now, listening)],
+    deliveries: [deliveryOf(prompt, request, folder, now, interjecting)],
   };
   deps.state.state.sessions[id] = session;
   delivered(session, id, versionOf(claude));
@@ -414,7 +414,7 @@ async function turn(
     access: claude.access,
     carried: carried !== "",
     files: ask?.files.length ?? 0,
-    listening,
+    interjecting,
   });
   await verify(id, claude, deps.api);
 }
