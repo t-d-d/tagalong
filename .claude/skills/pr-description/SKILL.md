@@ -36,10 +36,12 @@ ask whose link is not https", not "Fix link validation".
 The body opens with one `Closes #N` line for each issue the pull request
 closes, one issue per line. GitHub needs a closing word before every
 number, so `Closes #40, #41` closes only #40. These lines are the only
-place a closing word sits next to an issue number. GitHub matches close,
-fix or resolve in any form, such as closes, fixed or resolves, plus `#N`
-anywhere in the body and reads no negation, so "does not fix #N" closes
-it. Write "#N is not addressed here".
+place a closing word sits next to an issue reference. GitHub matches close,
+fix or resolve in any form, such as closes, fixed or resolves, before an
+issue reference anywhere in the body, and reads no negation, so "does not
+fix #N" closes it. An issue reference is `#N`, `owner/repo#N` or a full
+link to the issue, and the rule covers all three. Write "#N is not
+addressed here".
 
 After the `Closes #N` lines, if there are any, the body has five sections,
 each a `##` heading, in this order: *Outcome*, *Adds / removes*, *Drift*,
@@ -64,7 +66,9 @@ as written" when there is none.
 **Verification.** A table with one row per acceptance criterion of each
 issue this closes. Every criterion gets a row, including ones nothing
 answers yet. The rows come from the issue, never from what the session
-chose to test.
+chose to test. Where a criterion puts a closing word before an issue
+reference, such as "Fixes #30's retry path too", the row rewords it
+("Covers #30's retry path too") and keeps its meaning.
 
 `Green at` is one of:
 
@@ -110,6 +114,8 @@ Run the `unslop` skill over the result.
    owner stop the merge?
 3. Does every acceptance criterion appear in the table, and does every
    row that is not green at merge say who checks it or which issue owns it?
+4. Does any closing word sit next to an issue reference outside the
+   `Closes #N` lines, in any section, the *Verification* rows included?
 
 ## Example
 
