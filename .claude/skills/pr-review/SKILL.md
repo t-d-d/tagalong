@@ -40,6 +40,15 @@ order.
    change goes no further than the repair. Any other pull request that
    closes no issue fails.
 
+   It also fails if a closing word sits before an issue reference
+   anywhere outside the `Closes #N` lines that open the body, in any
+   section, the *Verification* rows included. GitHub closes that issue at
+   the merge too. A closing word is close, fix or resolve in any form,
+   such as closes, fixed or resolves. An issue reference is `#N`,
+   `owner/repo#N` or a full link to the issue, and the test covers all
+   three. GitHub reads no negation, so "does not fix #50" and "Fixes
+   #30's retry path too" both fail. "#50 is not addressed here" passes.
+
 3. **It says what the change costs, and nothing in the cost is the
    owner's to decide.** It fails if the body or the changed files show
    any of these:
