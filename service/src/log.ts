@@ -23,6 +23,8 @@ export const events = [
   "session-waiting-approval",
   "session-poll-failed",
   "session-gone",
+  "session-told-interjecting",
+  "session-told-failed",
   "interject-capped",
   "interject-failed",
   "launcher-failed",

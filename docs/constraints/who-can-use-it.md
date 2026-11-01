@@ -36,6 +36,16 @@ there and who may ask them.
   is told nobody asked it, to post nothing unless it has something
   important to add, and then briefly, and that a message nobody
   addressed to it is never an instruction to change anything.
+- Every delivery, the first and each one after, says whether the Claude
+  is set to interject in that chat now. One that is may post on any line,
+  or a plain message, when it has something important to add. One that
+  is not posts only replies to the lines that asked it. A command that
+  turns interjecting on or off for a Claude still in a chat, including
+  `set interjecting read-only` for each read-write Claude it stops,
+  sends that line alone into the Claude's running session there at once,
+  if it has one. That line gets no 👀, is not an interjecting delivery,
+  and counts toward neither MAX_PER_HOUR nor INTERJECT_PER_HOUR. What was
+  said goes in with the next delivery.
 - An owner may keep interjecting to read-only Claudes, in every chat,
   with `interjecting: "read-only"` in groups.json. Then no read-write
   Claude interjects, whatever a chat says, and setting it stops any that
@@ -100,5 +110,8 @@ itself starts one, and INTERJECT_PER_HOUR counts only interjecting
 deliveries (#92).
 An owner can keep interjecting to read-only Claudes since 31 October
 2026 (#19, #52).
+Each delivery says whether the Claude is set to interject, and turning
+interjecting on or off tells its running session at once, since 31
+October 2026, at the owner's request (#94).
 A Claude hears everyone in its chat, each line marked with whether its
 sender may ask it, since 31 October 2026, at the owner's request (#84).
