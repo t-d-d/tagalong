@@ -368,8 +368,12 @@ async function deliver(
 ): Promise<void> {
   const now = deps.now();
   const interjecting = asked === undefined;
-  // Every delivery says whether the Claude is set to interject here now (#94).
-  const setTo = group.interjecting.includes(claude.name);
+  // Every delivery says whether the Claude is set to interject here now
+  // (#94), from the live config: a command may have changed it while this
+  // delivery waited its turn.
+  const setTo = (
+    deps.groups.config.groups.get(chat) ?? group
+  ).interjecting.includes(claude.name);
   const payload = asked?.payload;
   const reaction = asked?.request.reaction;
   const request: Quote | null =
@@ -634,7 +638,8 @@ async function deliver(
  * interjecting on or off for it, with only that line (who-can-use-it.md).
  * It is not a delivery: it gets no 👀, counts toward no hourly limit, and
  * moves nothing on, so what was said goes in with the next delivery.
- * Nothing is sent for a Claude with no running session there.
+ * Nothing is sent for a Claude with no running session there. Run in turn
+ * with deliveries, so it never goes in beside one.
  */
 export async function tellInterjecting(
   chat: string,
@@ -643,9 +648,9 @@ export async function tellInterjecting(
   deps: Pick<RequestDeps, "state" | "cloud" | "cli" | "sending">,
 ): Promise<void> {
   const id = deps.state.state.threads[threadKey(chat, claude)]?.session;
-  const session =
-    id === null || id === undefined ? undefined : deps.state.state.sessions[id];
-  if (id === null || id === undefined || session?.waiting !== true) return;
+  if (id === null || id === undefined) return;
+  const session = deps.state.state.sessions[id];
+  if (session?.waiting !== true) return;
   deps.sending.add(id);
   try {
     const sent = await deps.cli.run(() =>

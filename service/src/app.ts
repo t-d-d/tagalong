@@ -87,6 +87,8 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
   if (device === "present") people.refresh();
   // Work started by a message, for tests to wait on.
   let pending: Promise<unknown> = Promise.resolve();
+  // The latest line a command sent into a session, queued with deliveries.
+  let telling: Promise<unknown> = Promise.resolve();
 
   function onPayload(payload: Payload): void {
     if (payload.messageId !== "") {
@@ -117,8 +119,13 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
         api,
         bridge,
         now,
-        tell: (chat: string, claude: string, on: boolean) =>
-          tellInterjecting(chat, claude, on, requestDeps),
+        // Queued with deliveries, so the next command never waits behind a
+        // session launch, and a delivery never goes in beside it.
+        tell: (chat: string, claude: string, on: boolean) => {
+          telling = requests.run(() =>
+            tellInterjecting(chat, claude, on, requestDeps),
+          );
+        },
       };
       if (mayRun(incoming, deps)) {
         pending = commands
@@ -327,7 +334,10 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
     pollOnce,
     interjectOnce,
     keepFresh,
-    settled: () => pending,
+    settled: async () => {
+      await pending;
+      await telling;
+    },
     refreshPeople: () => people.refresh(),
     parts: { login, store, people, groups, state, api, cloud, bridge },
   };

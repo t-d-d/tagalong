@@ -88,8 +88,8 @@ export interface CommandDeps {
   api: ClaudeApi;
   bridge: Bridge;
   now: () => number;
-  /** Tell a Claude's running session in a chat that interjecting turned on or off for it (#94). */
-  tell: (chat: string, claude: string, on: boolean) => Promise<void>;
+  /** Queue the line telling a Claude's running session in a chat that interjecting turned on or off for it (#94). */
+  tell: (chat: string, claude: string, on: boolean) => void;
 }
 
 /** Whether a command may run: an owner's number, and typed in the last ten minutes. */
@@ -385,15 +385,19 @@ export async function runCommand(
   deps: CommandDeps,
 ): Promise<void> {
   const before = interjectingNow(deps.groups.config);
-  await runOne(message, command, deps);
-  const { config } = deps.groups;
-  const after = interjectingNow(config);
-  for (const group of config.groups.values())
-    for (const name of group.claudes) {
-      const key = threadKey(group.jid, name);
-      if (before.has(key) !== after.has(key))
-        await deps.tell(group.jid, name, after.has(key));
-    }
+  try {
+    await runOne(message, command, deps);
+  } finally {
+    // A change that stuck is told even when its reply could not be sent.
+    const { config } = deps.groups;
+    const after = interjectingNow(config);
+    for (const group of config.groups.values())
+      for (const name of group.claudes) {
+        const key = threadKey(group.jid, name);
+        if (before.has(key) !== after.has(key))
+          deps.tell(group.jid, name, after.has(key));
+      }
+  }
 }
 
 async function runOne(
