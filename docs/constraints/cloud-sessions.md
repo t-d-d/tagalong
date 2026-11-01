@@ -31,9 +31,11 @@ result, so nothing has to be scraped or posted back by the session.
   @claude update there. Update, and a session that is archived or gone,
   start a new session carrying the old one's dialogue (what it was sent
   and what it answered, not the code it read or the tools it ran, at
-  most CARRY_LIMIT characters, the latest kept) and everything said in
-  the chat since. Only @claude fresh starts a Claude over, with the
-  chat's last HISTORY messages.
+  most CARRY_LIMIT characters, the latest kept). A turn's answer is
+  every message it wrote with <whatsapp> tags in it, each where it was
+  written, or its result when none had tags. The new session gets that
+  and everything said in the chat since. Only @claude fresh starts a
+  Claude over, with the chat's last HISTORY messages.
 - Each answer is remembered by the id the bridge stored it under and by
   a hash of its text, so a reply to it reaches the Claude that wrote
   it. An older answer with a session link in it still works.
@@ -145,4 +147,6 @@ was given is posted at once since the same day, at the owner's request
 its turn, and there is no pass word, since the same day, at the owner's
 request (#92). Every session is read the same way, with no time limit,
 and the 👀 comes off when the turn that took a request ends, with no
-give-up notice, since the same day, at the owner's request (#93).
+give-up notice, since the same day, at the owner's request (#93). A
+carried turn shows what the Claude tagged for the chat, not only its
+result, since the same day (#95).

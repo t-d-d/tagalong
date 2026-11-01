@@ -5,6 +5,7 @@
 import { z } from "zod";
 import { fetchJson } from "./http.ts";
 import { CommandError } from "./log.ts";
+import { tagged } from "./mailbox.ts";
 
 const recordFields = z.looseObject({
   id: z.string().optional(),
@@ -90,6 +91,46 @@ export function textOf(payload: Payload): string {
     .join("\n");
 }
 
+/**
+ * A session's dialogue, to carry into the next one (cloud-sessions.md):
+ * each message it was sent and each turn's answer, oldest first, the code
+ * it read and the tools it ran left out. A turn's answer is every message
+ * it wrote with <whatsapp> tags in it, each where it was written, since
+ * that is what the chat saw; a turn with none is shown by its result. At
+ * most `limit` characters, the latest kept.
+ */
+export function carried(events: Payload[], limit: number): string {
+  const turns: string[] = [];
+  // Whether the turn under way has tagged a message yet.
+  let tagging = false;
+  for (const event of events) {
+    const text = textOf(event).trim();
+    if (event.type === "result") {
+      if (!tagging && text !== "") turns.push(`You answered:\n${text}`);
+      tagging = false;
+      continue;
+    }
+    if (text === "") continue;
+    if (event.type === "assistant" && tagged(text)) {
+      turns.push(`You answered:\n${text}`);
+      tagging = true;
+    }
+    if (event.type === "user")
+      turns.push(
+        `Sent to you:\n${text.length > 3000 ? `${text.slice(0, 3000)}…` : text}`,
+      );
+  }
+  const kept: string[] = [];
+  let size = 0;
+  for (const turn of turns.reverse()) {
+    if (size + turn.length > limit) break;
+    kept.unshift(turn);
+    size += turn.length + 2;
+  }
+  const left = turns.length - kept.length;
+  return `${left > 0 ? `(${String(left)} earlier messages left out)\n\n` : ""}${kept.join("\n\n")}`;
+}
+
 export class ClaudeApi {
   readonly #base: string;
   readonly #token: () => string;
@@ -164,33 +205,10 @@ export class ClaudeApi {
     return { events, cursor: next };
   }
 
-  /**
-   * A session's dialogue, to carry into the next one (cloud-sessions.md):
-   * each message it was sent and each turn's answer, oldest first, the
-   * code it read and the tools it ran left out. At most `limit`
-   * characters, the latest kept.
-   */
+  /** A session's dialogue, to carry into the next one: see carried(). */
   async dialogue(id: string, limit: number): Promise<string> {
     const { events } = await this.eventsAfter(id, null, 200);
-    const turns: string[] = [];
-    for (const event of events) {
-      const text = textOf(event).trim();
-      if (text === "") continue;
-      if (event.type === "user")
-        turns.push(
-          `Sent to you:\n${text.length > 3000 ? `${text.slice(0, 3000)}…` : text}`,
-        );
-      if (event.type === "result") turns.push(`You answered:\n${text}`);
-    }
-    const kept: string[] = [];
-    let size = 0;
-    for (const turn of turns.reverse()) {
-      if (size + turn.length > limit) break;
-      kept.unshift(turn);
-      size += turn.length + 2;
-    }
-    const left = turns.length - kept.length;
-    return `${left > 0 ? `(${String(left)} earlier messages left out)\n\n` : ""}${kept.join("\n\n")}`;
+    return carried(events, limit);
   }
 
   /** Your cloud environments, as `/remote-env` lists them. Cached for ten minutes. */
