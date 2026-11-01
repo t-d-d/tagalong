@@ -58,15 +58,28 @@ describe("carried", () => {
           sent("[m1] Ollie: is main green?"),
           said("Checking the runs."),
           said('<whatsapp reply="m1">Yes, green.</whatsapp>'),
-          said("Before: <whatsapp>One.</whatsapp> after."),
+          said("Before:\n<whatsapp>One.</whatsapp> after."),
           said("Notes: I read the last three runs."),
           result("Notes: I read the last three runs."),
         ],
         10_000,
       ),
     ).toBe(
-      'Sent to you:\n[m1] Ollie: is main green?\n\nYou answered:\n<whatsapp reply="m1">Yes, green.</whatsapp>\n\nYou answered:\nBefore: <whatsapp>One.</whatsapp> after.',
+      'Sent to you:\n[m1] Ollie: is main green?\n\nYou answered:\n<whatsapp reply="m1">Yes, green.</whatsapp>\n\nYou answered:\nBefore:\n<whatsapp>One.</whatsapp> after.',
     );
+  });
+
+  it("shows a turn whose messages only show tags by its result (#96)", () => {
+    expect(
+      carried(
+        [
+          sent("how do I tag?"),
+          said("Example: `<whatsapp>Done</whatsapp>`"),
+          result("Like that."),
+        ],
+        10_000,
+      ),
+    ).toBe("Sent to you:\nhow do I tag?\n\nYou answered:\nLike that.");
   });
 
   it("keeps each turn's tagged messages to that turn", () => {
