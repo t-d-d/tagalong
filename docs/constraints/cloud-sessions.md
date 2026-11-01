@@ -64,8 +64,10 @@ result, so nothing has to be scraped or posted back by the session.
   Empty tags post nothing.
 - An opening tag counts only when it is the first thing on its line,
   with nothing before it, not even a space, and outside a fenced code
-  block. A line that starts with three backticks or three tildes opens
-  a block, and the next line that starts with the same three closes it.
+  block. As in Markdown, a line that starts with three or more
+  backticks, with no backtick after them, or three or more tildes,
+  opens a block, and a line of the same character, at least as long,
+  with nothing after it, closes it.
   A tag in inline code, in quotes, after other words, in a list item, in
   a block quote or in indented code is text: it posts nothing and is not
   logged, and its closing tag is text too. A code block inside a counted

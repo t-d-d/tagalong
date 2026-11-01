@@ -97,7 +97,11 @@ export const busy = (session: SessionState): boolean =>
 // Sticky, so an opening tag is matched only where a line starts.
 const OPEN = /<whatsapp(?:\s+reply\s*=\s*"\[?(m\d+)\]?")?\s*>/uy;
 const CLOSE = "</whatsapp>";
-const FENCE = /^(?:`{3}|~{3})/u;
+// A fence opens a code block, as in Markdown: three or more backticks with
+// no backtick after them on the line, or three or more tildes. A bare fence
+// of the same character, at least as long, closes it.
+const FENCE = /`{3,}(?=[^`\n]*(?:\n|$))|~{3,}/uy;
+const BARE = /(`{3,}|~{3,})[ \t\r]*(?:\n|$)/uy;
 
 interface Pair {
   reply: string | undefined;
@@ -130,9 +134,19 @@ function* pairs(message: string): Generator<Pair> {
       at = after === -1 ? message.length : after + 1;
       continue;
     }
-    const marker = FENCE.exec(message.slice(at, next))?.[0];
-    if (marker !== undefined && (fence === undefined || fence === marker))
-      fence = fence === undefined ? marker : undefined;
+    if (fence === undefined) {
+      FENCE.lastIndex = at;
+      fence = FENCE.exec(message)?.[0];
+    } else {
+      BARE.lastIndex = at;
+      const bare = BARE.exec(message)?.[1];
+      if (
+        bare !== undefined &&
+        bare[0] === fence[0] &&
+        bare.length >= fence.length
+      )
+        fence = undefined;
+    }
     at = next;
   }
 }
@@ -140,6 +154,7 @@ function* pairs(message: string): Generator<Pair> {
 /** Whether a message from a Claude holds a <whatsapp> tag it means, closed or not. */
 export const tagged = (message: string): boolean =>
   pairs(message).next().done !== true;
+
 const EMOJI =
   /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}{2}|[#*0-9]️?⃣)/u;
 const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });

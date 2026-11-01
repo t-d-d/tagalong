@@ -182,6 +182,15 @@ describe("reading what a Claude tags for the chat", () => {
       unclosed: false,
     });
     expect(tagged("```\n<whatsapp>Done</whatsapp>\n```")).toBe(false);
+    // As in Markdown, a block closes only with a fence of its own character,
+    // at least as long, with nothing after it.
+    for (const inner of ["````md\n```\n", "```ts\n```ts\n", "~~~~\n~~~\n"])
+      expect(forChat(`${inner}<whatsapp>Leak</whatsapp>\n`).posts).toEqual([]);
+    // Three backticks with a backtick after them on the line are inline code.
+    expect(
+      forChat("```npm run gate``` is the command\n<whatsapp>Done</whatsapp>")
+        .posts,
+    ).toEqual([{ kind: "message", reply: undefined, text: "Done" }]);
   });
 
   it("posts a code block inside a pair as part of it, and counts on after it (#96)", () => {
