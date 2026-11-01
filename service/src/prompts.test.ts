@@ -77,6 +77,10 @@ describe("prompts", () => {
     expect(prompt).toContain('<whatsapp reply="m41">Friday works.</whatsapp>');
     expect(prompt).toContain("<whatsapp>Heads up, main is red.</whatsapp>");
     expect(prompt).toContain('<whatsapp reply="m41">👍</whatsapp>');
+    // So a Claude can quote or show a tag without posting it (#96).
+    expect(prompt).toContain(
+      "Each opening tag starts a line of its own, with nothing before it, outside any code block. A tag anywhere else, such as in quotes, after other words or in code, is not posted, so you can quote or show tags safely.",
+    );
     expect(prompt).toContain(
       "Each line from the chat starts with its label, such as [m41], which goes in reply.",
     );

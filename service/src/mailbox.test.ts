@@ -7,6 +7,7 @@ import {
   labelFor,
   forChat,
   messageFor,
+  tagged,
 } from "./mailbox.ts";
 import { type SessionState, emptyState } from "./state.ts";
 
@@ -111,7 +112,7 @@ describe("reading what a Claude tags for the chat", () => {
       unclosed: true,
     });
     expect(
-      forChat('<whatsapp>One.</whatsapp> and <whatsapp reply="m3">two'),
+      forChat('<whatsapp>One.</whatsapp> and\n<whatsapp reply="m3">two'),
     ).toEqual({
       posts: [{ kind: "message", reply: undefined, text: "One." }],
       unclosed: true,
@@ -130,5 +131,83 @@ describe("reading what a Claude tags for the chat", () => {
       expect(
         forChat(`<whatsapp reply="m4">${text}</whatsapp>`).posts[0]?.kind,
       ).toBe("message");
+  });
+
+  it("reads a pair only where its opening tag is the first thing on its line (#96)", () => {
+    const one = { kind: "message", reply: "m45", text: "Done" };
+    expect(
+      forChat('Shown first.\n<whatsapp reply="m45">Done</whatsapp>'),
+    ).toEqual({ posts: [one], unclosed: false });
+    for (const before of [" ", '"', "> ", "- ", "`", "Example: ", "    "])
+      expect(
+        forChat(`Shown first.\n${before}<whatsapp reply="m45">Done</whatsapp>`),
+      ).toEqual({ posts: [], unclosed: false });
+    // A second pair on the line the first closed on has something before it.
+    expect(
+      forChat('<whatsapp reply="m45">Done</whatsapp> <whatsapp>Two</whatsapp>'),
+    ).toEqual({ posts: [one], unclosed: false });
+    // A tag that does not count is plain text, closing tag and all, and is not left open.
+    expect(forChat("Quoted: <whatsapp>Half of it")).toEqual({
+      posts: [],
+      unclosed: false,
+    });
+    expect(
+      forChat(
+        'Quoted: <whatsapp>Hi</whatsapp>\n<whatsapp reply="m45">Done</whatsapp>',
+      ),
+    ).toEqual({ posts: [one], unclosed: false });
+    expect(tagged("Example: `<whatsapp>Done</whatsapp>`")).toBe(false);
+    expect(tagged("<whatsapp>Half of it")).toBe(true);
+  });
+
+  it("reads no pair inside a fenced code block (#96)", () => {
+    for (const fence of ["```", "~~~", "```ts", "````"])
+      expect(
+        forChat(
+          `Like this:\n${fence}\n<whatsapp reply="m45">Done</whatsapp>\n${fence}\n`,
+        ),
+      ).toEqual({ posts: [], unclosed: false });
+    // An unclosed block runs to the end of the message.
+    expect(forChat("```\n<whatsapp>Done</whatsapp>")).toEqual({
+      posts: [],
+      unclosed: false,
+    });
+    // A block closes only with a fence of its own kind.
+    expect(
+      forChat(
+        "```\n~~~\n<whatsapp>Done</whatsapp>\n```\n<whatsapp>After</whatsapp>",
+      ),
+    ).toEqual({
+      posts: [{ kind: "message", reply: undefined, text: "After" }],
+      unclosed: false,
+    });
+    expect(tagged("```\n<whatsapp>Done</whatsapp>\n```")).toBe(false);
+  });
+
+  it("posts a code block inside a pair as part of it, and counts on after it (#96)", () => {
+    expect(
+      forChat(
+        "<whatsapp>Run this:\n```\nnpm run gate\n```\n</whatsapp>\n<whatsapp>Then this.</whatsapp>",
+      ),
+    ).toEqual({
+      posts: [
+        {
+          kind: "message",
+          reply: undefined,
+          text: "Run this:\n```\nnpm run gate\n```",
+        },
+        { kind: "message", reply: undefined, text: "Then this." },
+      ],
+      unclosed: false,
+    });
+    // One fence inside a pair opens no block after it.
+    expect(
+      forChat("<whatsapp>A fence: ```</whatsapp>\n<whatsapp>Next.</whatsapp>")
+        .posts,
+    ).toHaveLength(2);
+    expect(
+      forChat("<whatsapp>Fence:\n```\n</whatsapp>\n<whatsapp>Next.</whatsapp>")
+        .posts,
+    ).toHaveLength(2);
   });
 });

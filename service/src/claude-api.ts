@@ -95,7 +95,7 @@ export function textOf(payload: Payload): string {
  * A session's dialogue, to carry into the next one (cloud-sessions.md):
  * each message it was sent and each turn's answer, oldest first, the code
  * it read and the tools it ran left out. A turn's answer is every message
- * it wrote with <whatsapp> tags in it, each where it was written, since
+ * it wrote with a <whatsapp> tag that counts, each where it was written, since
  * that is what the chat saw; a turn with none is shown by its result. At
  * most `limit` characters, the latest kept.
  */

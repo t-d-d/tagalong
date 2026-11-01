@@ -173,7 +173,7 @@ const interjecting = (files: Attachment[]): string =>
   `${INTERJECTING_NOTE}${filesSection(files, HEARD_FILES)}`;
 
 /** How a Claude's words reach the chat: only what it tags (cloud-sessions.md). */
-const TAGS = `only text inside <whatsapp> tags reaches the chat, from any message you write, in any turn, whatever started it: a message from the chat, background work that finished, or a message from elsewhere. Anything outside the tags is seen only by whoever reads this session. Each pair of tags is one WhatsApp message under your name, posted as soon as tagalong reads it, and one message of yours can hold several. Each line from the chat starts with its label, such as [m41], which goes in reply. A reply to a line:
+const TAGS = `only text inside <whatsapp> tags reaches the chat, from any message you write, in any turn, whatever started it: a message from the chat, background work that finished, or a message from elsewhere. Anything outside the tags is seen only by whoever reads this session. Each pair of tags is one WhatsApp message under your name, posted as soon as tagalong reads it, and one message of yours can hold several. Each opening tag starts a line of its own, with nothing before it, outside any code block. A tag anywhere else, such as in quotes, after other words or in code, is not posted, so you can quote or show tags safely. Each line from the chat starts with its label, such as [m41], which goes in reply. A reply to a line:
 <whatsapp reply="m41">Friday works.</whatsapp>
 A plain message:
 <whatsapp>Heads up, main is red.</whatsapp>

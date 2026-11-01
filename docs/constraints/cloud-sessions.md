@@ -32,8 +32,8 @@ result, so nothing has to be scraped or posted back by the session.
   start a new session carrying the old one's dialogue (what it was sent
   and what it answered, not the code it read or the tools it ran, at
   most CARRY_LIMIT characters, the latest kept). A turn's answer is
-  every message it wrote with <whatsapp> tags in it, each where it was
-  written, or its result when none had tags. The new session gets that
+  every message it wrote with a <whatsapp> tag that counts, each where
+  it was written, or its result when none had one. The new session gets that
   and everything said in the chat since. Only @claude fresh starts a
   Claude over, with the chat's last HISTORY messages.
 - Each answer is remembered by the id the bridge stored it under and by
@@ -62,6 +62,15 @@ result, so nothing has to be scraped or posted back by the session.
   Claude can hold several pairs. A pair opens and closes within one
   message. An unclosed tag posts nothing, and is logged with no text.
   Empty tags post nothing.
+- An opening tag counts only when it is the first thing on its line,
+  with nothing before it, not even a space, and outside a fenced code
+  block. A line that starts with three backticks or three tildes opens
+  a block, and the next line that starts with the same three closes it.
+  A tag in inline code, in quotes, after other words, in a list item, in
+  a block quote or in indented code is text: it posts nothing and is not
+  logged, and its closing tag is text too. A code block inside a counted
+  pair is part of that message, and changes nothing after the pair
+  closes. The brief says so, so a Claude can quote or show tags safely.
 - With reply="m45", the message replies to line m45 while the chat
   still knows that label, and is otherwise a plain message. Without
   reply, it is a plain message. With reply and text that is only one
@@ -149,4 +158,6 @@ request (#92). Every session is read the same way, with no time limit,
 and the 👀 comes off when the turn that took a request ends, with no
 give-up notice, since the same day, at the owner's request (#93). A
 carried turn shows what the Claude tagged for the chat, not only its
-result, since the same day (#95).
+result, since the same day (#95). A tag counts only at the start of a
+line and outside code, so a tag a Claude quotes or shows is not
+posted, since the same day, at the owner's request (#96).

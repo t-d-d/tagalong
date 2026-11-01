@@ -317,7 +317,7 @@ describe("asking a Claude", () => {
       .get(SESSION)
       ?.events.push(
         user("The change for issue 7 deployed.", "governor-1"),
-        assistant(`Telling the chat. ${tagged("Deployed. The fix is live.")}`),
+        assistant(`Telling the chat.\n${tagged("Deployed. The fix is live.")}`),
         result(tagged("Deployed. The fix is live.")),
         user("carry on from my laptop", "desktop-1"),
         assistant("Working on it."),
@@ -1286,7 +1286,7 @@ describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
     const t = (h = await harness());
     t.fake.launches.push(SESSION);
     started(t, SESSION, [
-      assistant(`${tagged("Lint fails.")} ${tagged("Main is red.", "")}`),
+      assistant(`${tagged("Lint fails.")}\n${tagged("Main is red.", "")}`),
       result(""),
     ]);
     await says(t, "r1", MEMBER, "@podstow why is the build red?");
@@ -1309,7 +1309,7 @@ describe("a Claude's session as a mailbox (cloud-sessions.md)", () => {
     t.fake.launches.push(SESSION);
     started(t, SESSION, [
       assistant(
-        `Two things for the chat. ${tagged("Lint fails.\nOn two files.")} and ${tagged("Main is red.", "")} and ${tagged("Old news.", "m999")}`,
+        `Two things for the chat.\n${tagged("Lint fails.\nOn two files.")} and\n${tagged("Main is red.", "")} and\n${tagged("Old news.", "m999")}`,
       ),
       result(""),
     ]);

@@ -94,13 +94,52 @@ export function answering(
 export const busy = (session: SessionState): boolean =>
   session.deliveries.some((delivery) => !delivery.answered);
 
-const OPEN = /<whatsapp(?:\s+reply\s*=\s*"\[?(m\d+)\]?")?\s*>/gu;
+// Sticky, so an opening tag is matched only where a line starts.
+const OPEN = /<whatsapp(?:\s+reply\s*=\s*"\[?(m\d+)\]?")?\s*>/uy;
 const CLOSE = "</whatsapp>";
-// OPEN without the g flag, so a test keeps no lastIndex between calls.
-const ANY_OPEN = new RegExp(OPEN.source, "u");
+const FENCE = /^(?:`{3}|~{3})/u;
 
-/** Whether a message from a Claude holds a <whatsapp> tag, closed or not. */
-export const tagged = (message: string): boolean => ANY_OPEN.test(message);
+interface Pair {
+  reply: string | undefined;
+  /** Where the pair's text starts and ends, the end -1 for a tag left open. */
+  start: number;
+  end: number;
+}
+
+/**
+ * Each <whatsapp> pair a Claude means: one whose opening tag is the first
+ * thing on its line, outside a fenced code block. A tag anywhere else is
+ * text, and so is a code block inside a pair (cloud-sessions.md).
+ */
+function* pairs(message: string): Generator<Pair> {
+  // The fence that opened the block the scan is in, if it is in one.
+  let fence: string | undefined;
+  let at = 0;
+  while (at < message.length) {
+    const eol = message.indexOf("\n", at);
+    const next = eol === -1 ? message.length : eol + 1;
+    OPEN.lastIndex = at;
+    const open = fence === undefined ? OPEN.exec(message) : null;
+    if (open !== null) {
+      const start = at + open[0].length;
+      const end = message.indexOf(CLOSE, start);
+      yield { reply: open[1], start, end };
+      if (end === -1) return;
+      // The rest of the line the pair closed on has the pair before it.
+      const after = message.indexOf("\n", end + CLOSE.length);
+      at = after === -1 ? message.length : after + 1;
+      continue;
+    }
+    const marker = FENCE.exec(message.slice(at, next))?.[0];
+    if (marker !== undefined && (fence === undefined || fence === marker))
+      fence = fence === undefined ? marker : undefined;
+    at = next;
+  }
+}
+
+/** Whether a message from a Claude holds a <whatsapp> tag it means, closed or not. */
+export const tagged = (message: string): boolean =>
+  pairs(message).next().done !== true;
 const EMOJI =
   /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}{2}|[#*0-9]️?⃣)/u;
 const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
@@ -115,24 +154,15 @@ export interface Post {
 
 /**
  * What one message from a Claude asks tagalong to post: the text of each
- * <whatsapp> pair, in order, and whether a tag was left open. Nothing
+ * <whatsapp> pair it means, in order, and whether a tag was left open. Nothing
  * outside the tags, and no empty pair (cloud-sessions.md).
  */
 export function forChat(message: string): { posts: Post[]; unclosed: boolean } {
   const posts: Post[] = [];
-  OPEN.lastIndex = 0;
-  for (
-    let open = OPEN.exec(message);
-    open !== null;
-    open = OPEN.exec(message)
-  ) {
-    const start = open.index + open[0].length;
-    const end = message.indexOf(CLOSE, start);
+  for (const { reply, start, end } of pairs(message)) {
     if (end === -1) return { posts, unclosed: true };
-    OPEN.lastIndex = end + CLOSE.length;
     const text = message.slice(start, end).trim();
     if (text === "") continue;
-    const reply = open[1];
     const one = [...graphemes.segment(text)].length === 1;
     posts.push({
       kind:
