@@ -309,7 +309,9 @@ export class Login {
   /**
    * Keep the access token usable while nothing else runs the CLI: the
    * sessions API needs it to read answers. `claude auth status` first; if
-   * that does not refresh it, a one-line prompt, which must.
+   * that does not refresh it, a one-line prompt. Neither refreshes a token
+   * before it expires, so only a login past expiry, or unreadable, that
+   * they leave alone is dead.
    */
   async keepFresh(): Promise<void> {
     if (this.#parameter === undefined) return;
@@ -326,15 +328,18 @@ export class Login {
         "json",
       ],
     ];
+    // The prompt's exit code: a CLI that cannot use the login fails it.
+    let code = 0;
     for (const args of attempts) {
       const dir = mkdtempSync(join(tmpdir(), "tagalong-refresh-"));
       try {
-        await this.#deps.run(this.#deps.env.CLAUDE_BIN, args, {
+        ({ code } = await this.#deps.run(this.#deps.env.CLAUDE_BIN, args, {
           cwd: dir,
           env: this.cliEnv(),
           timeoutMs: 120_000,
-        });
+        }));
       } catch (error) {
+        code = -1;
         log.warn("login-refreshed", { ok: false, ...errorFields(error) });
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -347,6 +352,17 @@ export class Login {
         await this.storeIfRefreshed();
         return;
       }
+    }
+    // The CLI does not refresh a token that has not expired, so near
+    // expiry it leaves this one alone every cycle (#103). That is not dead,
+    // as long as the prompt ran on it. Anything it changed goes back.
+    const left = this.#expiresAt();
+    if (code === 0 && left !== undefined && left > this.#deps.now()) {
+      await this.storeIfRefreshed();
+      log.info("login-unrefreshed", {
+        expiresInMinutes: Math.round((left - this.#deps.now()) / 60_000),
+      });
+      return;
     }
     log.error("login-dead", {
       why: "the CLI did not refresh the access token",

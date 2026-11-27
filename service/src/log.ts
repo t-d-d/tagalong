@@ -42,6 +42,7 @@ export const events = [
   "bridge-unreachable",
   "login-restored",
   "login-refreshed",
+  "login-unrefreshed",
   "login-stored",
   "login-dead",
   "login-missing",

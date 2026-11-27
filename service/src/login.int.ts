@@ -177,7 +177,60 @@ describe("keeping the login fresh", () => {
     const { aws, login } = setup();
     aws.secrets.set(
       PARAMETER,
-      writeRecord(credentials("stored", NOW + 60_000), account),
+      writeRecord(credentials("stored", NOW - 60_000), account),
+    );
+    await login.restore();
+    await login.keepFresh();
+    expect(lines.at(-1)).toMatchObject({ level: "error", event: "login-dead" });
+  });
+
+  it("says so at info when the CLI leaves an unexpired token alone", async () => {
+    const { lines } = logLines();
+    const calls: string[][] = [];
+    const { aws, login } = setup((_command, args) => {
+      calls.push(args);
+      return Promise.resolve({ code: 0, out: "" });
+    });
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 20 * 60_000), account),
+    );
+    await login.restore();
+    await login.keepFresh();
+    expect(calls.map((args) => args[0])).toEqual(["auth", "-p"]);
+    expect(lines.at(-1)).toMatchObject({
+      level: "info",
+      event: "login-unrefreshed",
+      expiresInMinutes: 20,
+    });
+    expect(lines.filter((line) => line.level === "error")).toEqual([]);
+  });
+
+  it("writes back a login the CLI changed but left near expiry", async () => {
+    const harness = { file: "" };
+    const { aws, login, file } = setup((_command, args) => {
+      if (args[0] === "-p")
+        writeFileSync(harness.file, credentials("rotated", NOW + 20 * 60_000));
+      return Promise.resolve({ code: 0, out: "" });
+    });
+    harness.file = file;
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 20 * 60_000), account),
+    );
+    await login.restore();
+    await login.keepFresh();
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "").credentials).toBe(
+      credentials("rotated", NOW + 20 * 60_000),
+    );
+  });
+
+  it("raises an alert when the CLI fails on an unexpired token", async () => {
+    const { lines } = logLines();
+    const { aws, login } = setup(() => Promise.resolve({ code: 1, out: "" }));
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 20 * 60_000), account),
     );
     await login.restore();
     await login.keepFresh();
