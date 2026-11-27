@@ -235,9 +235,40 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       });
   }
 
+  // The files that came with the device and have not yet been read. The
+  // device check reads each again until it succeeds.
+  let groupsPending = false;
+  let statePending = false;
+  /**
+   * Read the groups, the state and the people that came with the device.
+   * Each read runs even when the one before it throws: the empty state would
+   * otherwise be saved over the seeded state.json. The state is not saved
+   * until its file has been read. A read that succeeds is not run again, so
+   * it never undoes what has changed since.
+   */
+  function readSeeded(): void {
+    try {
+      if (groupsPending) {
+        groups.reload();
+        groupsPending = false;
+      }
+    } finally {
+      try {
+        if (statePending) {
+          state.reload();
+          statePending = false;
+          state.held = false;
+        }
+      } finally {
+        readPeople();
+      }
+    }
+  }
+
   async function checkDevice(): Promise<DeviceState> {
     if (device === "present" || device === "seeded") {
-      if (peopleFailed) readPeople();
+      if (groupsPending || statePending) readSeeded();
+      else if (peopleFailed) readPeople();
       return device;
     }
     device = await ensureDevice({
@@ -252,19 +283,10 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
     });
     if (device === "present") readPeople();
     if (device === "seeded") {
-      // Each reload runs even when the one before it throws: every later
-      // device check returns early, so nothing else would read the people
-      // for 10 minutes, and the empty state would be saved over the seeded
-      // state.json.
-      try {
-        groups.reload();
-      } finally {
-        try {
-          state.reload();
-        } finally {
-          readPeople();
-        }
-      }
+      groupsPending = true;
+      statePending = true;
+      state.held = true;
+      readSeeded();
     }
     return device;
   }
