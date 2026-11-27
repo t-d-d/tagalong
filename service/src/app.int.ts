@@ -2663,19 +2663,65 @@ describe("starting", () => {
         "answer-1": "session_01SessionAaaaaaaaaaaaaaa",
       });
     });
+  });
 
-    it("saves the state once the device is seeded, even when the seeded state.json does not parse", async () => {
-      const { t, arrive } = await waitingForSeed("not json");
-      const { state } = t.app.parts;
-      arrive();
-      await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
-
-      state.state.replies["answer-2"] = "session_01SessionBbbbbbbbbbbbbbb";
-      state.save();
-      expect(new StateStore(t.env.STATE_FILE).state.replies).toEqual({
-        "answer-2": "session_01SessionBbbbbbbbbbbbbbb",
-      });
+  it("reloads the groups and state again on later device checks when they fail as the device is seeded", async () => {
+    const seed = join(
+      mkdtempSync(join(tmpdir(), "tagalong-seed-")),
+      "device.tgz",
+    );
+    const t = (h = await harness({
+      env: { ATTACHMENTS_BUCKET: "files" },
+      db: (db) => {
+        execFileSync("tar", ["-czf", seed, "-C", db.dir, "store"]);
+        renameSync(
+          join(db.store, "messages.db"),
+          join(db.store, "messages.db.away"),
+        );
+      },
+    }));
+    const { groups, state } = t.app.parts;
+    expect(groups.config.groups.size).toBe(1);
+    expect(await t.app.checkDevice()).toBe("waiting");
+    // The task keeps the groups.json and state.json it has, and both are
+    // half written as the seed arrives.
+    writeFileSync(t.env.GROUPS_FILE, "{");
+    writeFileSync(t.env.STATE_FILE, "{");
+    t.aws.objects.set("files/seed/device.tgz", {
+      body: readFileSync(seed),
+      contentType: "application/gzip",
     });
+
+    await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
+
+    // Nothing is saved over the state.json until it has been read.
+    await t.app.pollOnce();
+    expect(readFileSync(t.env.STATE_FILE, "utf8")).toBe("{");
+
+    // Still half written: tried again, and failing again.
+    await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
+
+    // The groups are whole: they load, and the state is still tried.
+    writeFileSync(
+      t.env.GROUPS_FILE,
+      JSON.stringify({ ...standardGroups, groups: {} }),
+    );
+    await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
+    expect(groups.config.groups.size).toBe(0);
+
+    // The state is whole too: it loads, and the check is quiet again.
+    const seeded = { replies: { "answer-1": "session_fake1" } };
+    writeFileSync(t.env.STATE_FILE, JSON.stringify(seeded));
+    expect(await t.app.checkDevice()).toBe("seeded");
+    expect(state.state.replies).toEqual(seeded.replies);
+    await t.app.pollOnce();
+    expect(t.stateFile()).toMatchObject(seeded);
+
+    // A reload that succeeded is not run again: what is in memory stays.
+    state.state.replies = {};
+    writeFileSync(t.env.GROUPS_FILE, "{");
+    expect(await t.app.checkDevice()).toBe("seeded");
+    expect(state.state.replies).toEqual({});
   });
 
   it("listens on loopback", async () => {

@@ -141,15 +141,13 @@ export const emptyState = (): State => stateSchema.parse({});
 
 export class StateStore {
   readonly #path: string;
-  // A task with no device yet saves nothing (#139): an empty state.json
-  // written before the seed arrives would be kept over the seed's own, and
-  // one written while the seed is unpacked would overwrite it.
-  #held: boolean;
   state: State;
+  // Whether saves are held: the file came with the device and has not been
+  // read yet, so what is in memory must not be written over it.
+  held = false;
 
-  constructor(path: string, { held = false }: { held?: boolean } = {}) {
+  constructor(path: string) {
     this.#path = path;
-    this.#held = held;
     this.state = this.#load();
   }
 
@@ -159,24 +157,13 @@ export class StateStore {
       : stateSchema.parse({});
   }
 
-  /** Read the file again, for one that arrived with the device, and save from now on. */
+  /** Read the file again, for one that arrived with the device. */
   reload(): void {
-    // Released even when the file does not parse: a task that never saved
-    // again would lose every answer from here on.
-    try {
-      this.state = this.#load();
-    } finally {
-      this.#held = false;
-    }
-  }
-
-  /** Save from now on, for a device that arrived without a seed. */
-  release(): void {
-    this.#held = false;
+    this.state = this.#load();
   }
 
   save(): void {
-    if (this.#held) return;
+    if (this.held) return;
     this.state.sentMedia = this.state.sentMedia.slice(-500);
     this.state.eyes = this.state.eyes.slice(-200);
     const replies = Object.entries(this.state.replies);

@@ -125,6 +125,8 @@ export class Login {
   #account: Account | undefined;
   /** A digest of the credentials the task last restored or wrote back. */
   #stored: string | undefined;
+  /** Whether a write-back was refused since the parameter last held this login (#141). */
+  #refused = false;
 
   constructor(deps: LoginDeps) {
     this.#deps = deps;
@@ -161,6 +163,8 @@ export class Login {
 
   #remember(credentials: string): void {
     this.#stored = digest(credentials);
+    // The parameter and the volume agree, so no refused write-back is owed.
+    this.#refused = false;
     mkdirSync(dirname(this.#storedFile), { recursive: true, mode: 0o700 });
     // One rename, so a restart never reads half a digest and takes the
     // parameter over a refresh not yet written back.
@@ -395,7 +399,12 @@ export class Login {
     const taken = await this.#takeMinted("login-stored");
     if (taken !== "kept") return;
     const account = this.#account ?? this.#lookedUp();
-    await aws.putSecret(name, writeRecord(text, account));
+    try {
+      await aws.putSecret(name, writeRecord(text, account));
+    } catch (error) {
+      this.#refused = true;
+      throw error;
+    }
     this.#account = account;
     this.#remember(text);
     log.info("login-stored", {
@@ -414,11 +423,15 @@ export class Login {
    */
   async keepFresh(): Promise<void> {
     if (this.#parameter === undefined) return;
+    // A write-back refused before this check, and refused again in it,
+    // is an error line (#141).
+    const refusedBefore = this.#refused;
+    const store = () => this.#storeAtCheck(refusedBefore);
     // A login minted while this one still works is taken now (#118), and
     // refreshed below if it is close to expiry. Otherwise a refresh held
     // back when the parameter could not be read goes back now.
     const taken = await this.#takeMinted("login-restored");
-    if (taken === "kept") await this.storeIfRefreshed();
+    if (taken === "kept") await store();
     const expires = this.#expiresAt();
     if (expires !== undefined && expires - this.#deps.now() > MARGIN_MS) return;
     const attempts: string[][] = [
@@ -453,7 +466,7 @@ export class Login {
         log.info("login-refreshed", {
           by: args[0] === "auth" ? "auth-status" : "prompt",
         });
-        await this.storeIfRefreshed();
+        await store();
         return;
       }
     }
@@ -462,7 +475,7 @@ export class Login {
     // as long as the prompt ran on it. Anything it changed goes back.
     const left = this.#expiresAt();
     if (code === 0 && left !== undefined && left > this.#deps.now()) {
-      await this.storeIfRefreshed();
+      await store();
       log.info("login-unrefreshed", {
         expiresInMinutes: Math.round((left - this.#deps.now()) / 60_000),
       });
@@ -473,6 +486,25 @@ export class Login {
     log.error("login-dead", {
       why: "the CLI did not refresh the access token",
     });
+  }
+
+  /**
+   * A write-back inside keepFresh(). A refused one does not stop the expiry
+   * check: the login is still refreshed, and the next check tries again. It
+   * is a warn the first time, and an error line when the write-back before
+   * this check was refused too, so the owner hears of it before the stored
+   * refresh token is the only copy left (#141). A write-back or a taken
+   * login earlier in this check clears that, so it is a warn again.
+   */
+  async #storeAtCheck(refusedBefore: boolean): Promise<void> {
+    const owed = refusedBefore && this.#refused;
+    try {
+      await this.storeIfRefreshed();
+    } catch (error) {
+      const fields = { ok: false, ...errorFields(error) };
+      if (owed) log.error("login-stored", fields);
+      else log.warn("login-stored", fields);
+    }
   }
 
   /**

@@ -45,7 +45,13 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
   const groups = new GroupsStore(env.GROUPS_FILE, parseOwners(env.OWNERS));
   // Read once, so the state is held exactly when the device starts as waiting.
   const devicePresent = store.present();
-  const state = new StateStore(env.STATE_FILE, { held: !devicePresent });
+  const state = new StateStore(env.STATE_FILE);
+  // A task with no device saves nothing (#139). The poll saves on every
+  // pass, and an empty state.json written before the seed arrives would be
+  // kept over the seed's own; one written while the seed unpacks would
+  // overwrite it. With no device, nothing reaches the service that changes
+  // the state, so holding loses nothing.
+  state.held = !devicePresent;
   const api = new ClaudeApi(
     env.CLAUDE_API_BASE,
     () => login.accessToken(),
@@ -237,6 +243,36 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       });
   }
 
+  // The files that came with the device and have not yet been read. The
+  // device check reads each again until it succeeds.
+  let groupsPending = false;
+  let statePending = false;
+  /**
+   * Read the groups, the state and the people that came with the device.
+   * Each read runs even when the one before it throws: the empty state would
+   * otherwise be saved over the seeded state.json. The state is not saved
+   * until its file has been read. A read that succeeds is not run again, so
+   * it never undoes what has changed since.
+   */
+  function readSeeded(): void {
+    try {
+      if (groupsPending) {
+        groups.reload();
+        groupsPending = false;
+      }
+    } finally {
+      try {
+        if (statePending) {
+          state.reload();
+          statePending = false;
+          state.held = false;
+        }
+      } finally {
+        readPeople();
+      }
+    }
+  }
+
   // The device loop fires every 30 seconds whether the last check is done or
   // not. A second check during a seed would find the store in place, call it
   // present and start saving before the seeded state.json is read (#139).
@@ -248,7 +284,8 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
 
   async function checkDeviceOnce(): Promise<DeviceState> {
     if (device === "present" || device === "seeded") {
-      if (peopleFailed) readPeople();
+      if (groupsPending || statePending) readSeeded();
+      else if (peopleFailed) readPeople();
       return device;
     }
     device = await ensureDevice({
@@ -262,22 +299,14 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       env: cliEnv(env),
     });
     if (device === "present") {
-      state.release();
+      state.held = false;
       readPeople();
     }
     if (device === "seeded") {
-      // Each reload runs even when the one before it throws: every later
-      // device check returns early, so nothing else would read the people
-      // for 10 minutes, and the state would stay held, saving nothing.
-      try {
-        groups.reload();
-      } finally {
-        try {
-          state.reload();
-        } finally {
-          readPeople();
-        }
-      }
+      groupsPending = true;
+      statePending = true;
+      state.held = true;
+      readSeeded();
     }
     return device;
   }
