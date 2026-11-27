@@ -285,6 +285,38 @@ describe("keeping the login fresh", () => {
     );
   });
 
+  it("still alerts when the CLI broke the file and Parameter Store holds the old login", async () => {
+    const { lines } = logLines();
+    const harness = { file: "" };
+    const { aws, login, file } = setup((_command, args) => {
+      // The server refused the refresh token, and the CLI wrote "".
+      if (args[0] === "-p")
+        writeFileSync(
+          harness.file,
+          JSON.stringify({
+            claudeAiOauth: {
+              accessToken: "stored",
+              refreshToken: "",
+              expiresAt: NOW - 60_000,
+              scopes: [SESSION_SCOPE],
+            },
+          }),
+        );
+      return Promise.resolve({ code: 1, out: "" });
+    });
+    harness.file = file;
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW - 60_000), account),
+    );
+    await login.restore();
+    await login.keepFresh();
+    expect(lines.at(-1)).toMatchObject({ level: "error", event: "login-dead" });
+    expect(eventsOf(lines).filter((e) => e === "login-restored")).toHaveLength(
+      1,
+    );
+  });
+
   it("still alerts when Parameter Store cannot be read", async () => {
     const { lines } = logLines();
     const { aws, login } = setup();

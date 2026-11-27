@@ -374,7 +374,9 @@ export class Login {
   /**
    * Take the stored login if it parses and expires later than the one on
    * disk, as restore() does. False when it is the same login, an older one,
-   * or cannot be read.
+   * or cannot be read. The login the task last restored or wrote back is
+   * the one the CLI just failed on, even when it broke the file, so it is
+   * never taken back.
    */
   async #pickUpMinted(): Promise<boolean> {
     const name = this.#parameter;
@@ -383,11 +385,13 @@ export class Login {
     let value: string | undefined;
     try {
       value = await aws.getSecret(name);
-    } catch {
+    } catch (error) {
+      log.warn("login-restored", { ok: false, ...errorFields(error) });
       return false;
     }
     if (value === undefined) return false;
     const record = readRecord(value);
+    if (record.credentials === this.#stored) return false;
     const stored = parseCredentials(record.credentials);
     if (!stored.ok || (stored.expiresAt ?? 0) <= (this.#expiresAt() ?? 0))
       return false;
