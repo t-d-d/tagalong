@@ -6,10 +6,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export default function setup(): () => void {
+  const before = process.env.TMPDIR;
   const root = mkdtempSync(join(tmpdir(), "tagalong-run-"));
   // os.tmpdir() reads TMPDIR, and the test workers inherit it.
   process.env.TMPDIR = root;
   return () => {
+    // Watch mode runs this setup again in the same process after a config
+    // change, so it must not start from the folder removed below.
+    if (before === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = before;
     const left = readdirSync(root).filter((name) =>
       name.startsWith("tagalong-"),
     );
