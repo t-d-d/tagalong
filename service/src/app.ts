@@ -83,15 +83,21 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
     sending,
     asking,
   };
-  let device: DeviceState = store.present() ? "present" : "waiting";
-  if (device === "present") {
-    // A failed read must not stop the start; the people loop tries again.
+  // Whether the last read of the people failed. The device check, every 30
+  // seconds, reads them again until one succeeds.
+  let peopleFailed = false;
+  /** Read the people. A failure is logged, never thrown, so nothing stops on it. */
+  function readPeople(): void {
     try {
       people.refresh();
+      peopleFailed = false;
     } catch (error) {
+      peopleFailed = true;
       log.warn("loop-failed", { loop: "people", ...errorFields(error) });
     }
   }
+  let device: DeviceState = store.present() ? "present" : "waiting";
+  if (device === "present") readPeople();
   // Work started by a message, for tests to wait on.
   let pending: Promise<unknown> = Promise.resolve();
   // The latest line a command sent into a session, queued with deliveries.
@@ -230,7 +236,10 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
   }
 
   async function checkDevice(): Promise<DeviceState> {
-    if (device === "present" || device === "seeded") return device;
+    if (device === "present" || device === "seeded") {
+      if (peopleFailed) readPeople();
+      return device;
+    }
     device = await ensureDevice({
       storeDir: env.BRIDGE_STORE,
       groupsFile: env.GROUPS_FILE,
@@ -245,7 +254,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       groups.reload();
       state.reload();
     }
-    if (device === "present" || device === "seeded") people.refresh();
+    if (device === "present" || device === "seeded") readPeople();
     return device;
   }
 
@@ -345,7 +354,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       await pending;
       await telling;
     },
-    refreshPeople: () => people.refresh(),
+    refreshPeople: readPeople,
     parts: { login, store, people, groups, state, api, cloud, bridge },
   };
 }
