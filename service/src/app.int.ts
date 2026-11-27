@@ -2488,6 +2488,50 @@ describe("starting", () => {
     expect(state.state.replies).toEqual(seeded.replies);
   });
 
+  it("names both failures when neither the seeded groups.json nor state.json can be read", async () => {
+    // groups.json does not parse, and state.json parses but is not a state.
+    const upload = mkdtempSync(join(tmpdir(), "tagalong-seed-"));
+    const seed = join(upload, "device.tgz");
+    const t = (h = await harness({
+      env: { ATTACHMENTS_BUCKET: "files" },
+      db: (db) => {
+        writeFileSync(join(db.dir, "state.json"), JSON.stringify([]));
+        writeFileSync(join(db.dir, "groups.json"), "not json");
+        execFileSync("tar", [
+          "-czf",
+          seed,
+          "-C",
+          db.dir,
+          "store",
+          "state.json",
+          "groups.json",
+        ]);
+        renameSync(
+          join(db.store, "messages.db"),
+          join(db.store, "messages.db.away"),
+        );
+      },
+    }));
+    const { people } = t.app.parts;
+    expect(await t.app.checkDevice()).toBe("waiting");
+    rmSync(t.env.GROUPS_FILE);
+    t.aws.objects.set("files/seed/device.tgz", {
+      body: readFileSync(seed),
+      contentType: "application/gzip",
+    });
+
+    await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "loop-failed",
+        loop: "device",
+        error: "ZodError",
+      }),
+    );
+    expect([...people.self].sort()).toEqual([CLAUDE, CLAUDE_LID].sort());
+  });
+
   it("listens on loopback", async () => {
     const free = await new Promise<number>((resolve) => {
       const probe = createServer();
