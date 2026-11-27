@@ -142,6 +142,9 @@ export const emptyState = (): State => stateSchema.parse({});
 export class StateStore {
   readonly #path: string;
   state: State;
+  // Whether saves are held: the file came with the device and has not been
+  // read yet, so what is in memory must not be written over it.
+  held = false;
 
   constructor(path: string) {
     this.#path = path;
@@ -160,6 +163,7 @@ export class StateStore {
   }
 
   save(): void {
+    if (this.held) return;
     this.state.sentMedia = this.state.sentMedia.slice(-500);
     this.state.eyes = this.state.eyes.slice(-200);
     const replies = Object.entries(this.state.replies);

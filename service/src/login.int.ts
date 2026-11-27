@@ -639,6 +639,118 @@ describe("a failed write-back of the login at start (#127)", () => {
   });
 });
 
+describe("a write-back Parameter Store keeps refusing at the login check (#141)", () => {
+  const denied = (): Promise<void> => {
+    const error = new Error("not authorized");
+    error.name = "AccessDeniedException";
+    return Promise.reject(error);
+  };
+  const refusals = (lines: { level: string; event: string }[]) =>
+    lines
+      .filter((line) => line.event === "login-stored" && line.level !== "info")
+      .map((line) => line.level);
+
+  /** A login close to expiry that a CLI run refreshed, and a stand-in CLI whose auth status refreshes it again. */
+  async function refusing() {
+    const harness = { file: "", runs: [] as string[] };
+    const { aws, login, file } = setup((_command, args) => {
+      harness.runs.push(args[0] ?? "");
+      if (args[0] === "auth")
+        writeFileSync(
+          harness.file,
+          credentials(
+            `fresh-${String(harness.runs.length)}`,
+            NOW + 8 * 3_600_000,
+          ),
+        );
+      return Promise.resolve({ code: 0, out: "" });
+    });
+    harness.file = file;
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await login.restore();
+    // A CLI run refreshed it, still close to expiry.
+    writeFileSync(file, credentials("old-2", NOW + 25 * 60_000));
+    const putSecret = aws.putSecret.bind(aws);
+    aws.putSecret = denied;
+    return { aws, login, file, harness, putSecret };
+  }
+
+  it("still checks the expiry and refreshes the login, and the first refusal is a warn", async () => {
+    const { lines } = logLines();
+    const { login, file, harness } = await refusing();
+    await login.keepFresh();
+    expect(harness.runs).toEqual(["auth"]);
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("fresh-1", NOW + 8 * 3_600_000),
+    );
+    expect(eventsOf(lines)).toContain("login-refreshed");
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "login-stored",
+        error: "AccessDeniedException",
+      }),
+    );
+    expect(lines.filter((line) => line.level === "error")).toEqual([]);
+  });
+
+  it("is an error line when the write-back is still refused at the next check", async () => {
+    const { lines } = logLines();
+    const { aws, login, file, putSecret } = await refusing();
+    await login.keepFresh();
+    const before = lines.length;
+    await login.keepFresh();
+    expect(refusals(lines.slice(before))).toEqual(["error"]);
+    expect(lines.slice(before)).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        event: "login-stored",
+        error: "AccessDeniedException",
+      }),
+    );
+    // Once a write-back goes through, the next refusal is a warn again.
+    aws.putSecret = putSecret;
+    await login.keepFresh();
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "").credentials).toBe(
+      readFileSync(file, "utf8"),
+    );
+    aws.putSecret = denied;
+    writeFileSync(file, credentials("later", NOW + 7 * 3_600_000));
+    const after = lines.length;
+    await login.keepFresh();
+    expect(refusals(lines.slice(after))).toEqual(["warn"]);
+  });
+
+  it("is a warn when a write-back went through earlier in the same check", async () => {
+    const { lines } = logLines();
+    const { aws, login, file, putSecret } = await refusing();
+    await login.keepFresh();
+    // Close to expiry again; the first write-back at this check goes
+    // through, and the one after the refresh is refused.
+    writeFileSync(file, credentials("old-4", NOW + 25 * 60_000));
+    let puts = 0;
+    aws.putSecret = (name, value) =>
+      puts++ === 0 ? putSecret(name, value) : denied();
+    const before = lines.length;
+    await login.keepFresh();
+    expect(puts).toBe(2);
+    expect(refusals(lines.slice(before))).toEqual(["warn"]);
+  });
+
+  it("is an error line at the check after a refused write-back from a CLI run", async () => {
+    const { lines } = logLines();
+    const { login, file } = await refusing();
+    // The write-back after the CLI run is refused; its caller warns (#135).
+    await expect(login.storeIfRefreshed()).rejects.toThrow();
+    writeFileSync(file, credentials("old-3", NOW + 7 * 3_600_000));
+    await login.keepFresh();
+    expect(refusals(lines)).toEqual(["error"]);
+  });
+});
+
 describe("ids the CLI looks up for a login stored without them (#120)", () => {
   const cliAccount = { accountUuid: "acc-3", organizationUuid: "org-3" };
 
