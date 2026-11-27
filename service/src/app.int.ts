@@ -2553,6 +2553,10 @@ describe("starting", () => {
 
     await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
 
+    // Nothing is saved over the state.json until it has been read.
+    await t.app.pollOnce();
+    expect(readFileSync(t.env.STATE_FILE, "utf8")).toBe("{");
+
     // Still half written: tried again, and failing again.
     await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
 
@@ -2569,6 +2573,8 @@ describe("starting", () => {
     writeFileSync(t.env.STATE_FILE, JSON.stringify(seeded));
     expect(await t.app.checkDevice()).toBe("seeded");
     expect(state.state.replies).toEqual(seeded.replies);
+    await t.app.pollOnce();
+    expect(t.stateFile()).toMatchObject(seeded);
 
     // A reload that succeeded is not run again: what is in memory stays.
     state.state.replies = {};

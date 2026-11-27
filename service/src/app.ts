@@ -242,8 +242,9 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
   /**
    * Read the groups, the state and the people that came with the device.
    * Each read runs even when the one before it throws: the empty state would
-   * otherwise be saved over the seeded state.json. A read that succeeds is
-   * not run again, so it never undoes what has changed since.
+   * otherwise be saved over the seeded state.json. The state is not saved
+   * until its file has been read. A read that succeeds is not run again, so
+   * it never undoes what has changed since.
    */
   function readSeeded(): void {
     try {
@@ -256,6 +257,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
         if (statePending) {
           state.reload();
           statePending = false;
+          state.held = false;
         }
       } finally {
         readPeople();
@@ -283,6 +285,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
     if (device === "seeded") {
       groupsPending = true;
       statePending = true;
+      state.held = true;
       readSeeded();
     }
     return device;
