@@ -123,8 +123,8 @@ export class CommandError extends Error {
 
 /** A read that failed, labelled by which read it was so two alike failures can be told apart. */
 export class ReadError extends Error {
-  readonly read: string;
-  constructor(read: string, cause: unknown) {
+  readonly read: "groups" | "state";
+  constructor(read: "groups" | "state", cause: unknown) {
     super(`${read} read failed`, { cause });
     this.name = "ReadError";
     this.read = read;

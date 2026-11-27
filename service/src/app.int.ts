@@ -2575,7 +2575,7 @@ describe("starting", () => {
     expect([...people.self].sort()).toEqual([CLAUDE, CLAUDE_LID].sort());
   });
 
-  it("names the file in each line when both seeded reloads fail with the same error class", async () => {
+  it("names the read in each line when both seeded reloads fail with the same error class", async () => {
     const seed = join(
       mkdtempSync(join(tmpdir(), "tagalong-seed-")),
       "device.tgz",
