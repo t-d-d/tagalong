@@ -9,7 +9,7 @@ import { Cloud } from "./cloud.ts";
 import { commandIn, mayRun, runCommand } from "./commands.ts";
 import { type Env, cliEnv } from "./env.ts";
 import { GroupsStore, claudesOf, parseOwners } from "./groups.ts";
-import { errorFields, log } from "./log.ts";
+import { ReadError, errorFields, log } from "./log.ts";
 import { interject } from "./interjecting.ts";
 import { Login } from "./login.ts";
 import { People, userPart } from "./people.ts";
@@ -253,7 +253,8 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
    * otherwise be saved over the seeded state.json. The state is not saved
    * until its file has been read. A read that succeeds is not run again, so
    * it never undoes what has changed since. When both reads fail, the first
-   * error is thrown and the second is logged, so neither is hidden.
+   * error is thrown and the second is logged, so neither is hidden. Each is
+   * labelled with the read that failed, so the two lines can be told apart.
    */
   function readSeeded(): void {
     const errors: unknown[] = [];
@@ -263,7 +264,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
         groupsPending = false;
       }
     } catch (error) {
-      errors.push(error);
+      errors.push(new ReadError("groups", error));
     }
     try {
       if (statePending) {
@@ -272,7 +273,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
         state.held = false;
       }
     } catch (error) {
-      errors.push(error);
+      errors.push(new ReadError("state", error));
     }
     readPeople();
     const [first, ...rest] = errors;
