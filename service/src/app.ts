@@ -255,27 +255,16 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       // Each reload runs even when the one before it throws: every later
       // device check returns early, so nothing else would read the people
       // for 10 minutes, and the empty state would be saved over the seeded
-      // state.json. The first failure is thrown and a second is logged, so
-      // neither hides the other.
-      const failures: unknown[] = [];
-      for (const reload of [
-        () => {
-          groups.reload();
-        },
-        () => {
-          state.reload();
-        },
-      ]) {
+      // state.json.
+      try {
+        groups.reload();
+      } finally {
         try {
-          reload();
-        } catch (error) {
-          failures.push(error);
+          state.reload();
+        } finally {
+          readPeople();
         }
       }
-      readPeople();
-      for (const error of failures.slice(1))
-        log.warn("loop-failed", { loop: "device", ...errorFields(error) });
-      if (failures.length > 0) throw failures[0];
     }
     return device;
   }
