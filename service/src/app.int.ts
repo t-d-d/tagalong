@@ -2569,10 +2569,7 @@ describe("starting", () => {
   });
 
   it("names the read in each line when both seeded reloads fail with the same error class", async () => {
-    const seed = join(
-      mkdtempSync(join(tmpdir(), "tagalong-seed-")),
-      "device.tgz",
-    );
+    const seed = join(tempDir("tagalong-seed-"), "device.tgz");
     const t = (h = await harness({
       env: { ATTACHMENTS_BUCKET: "files", PORT: "18773" },
       db: (db) => {
