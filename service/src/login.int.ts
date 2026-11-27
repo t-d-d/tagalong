@@ -1064,6 +1064,80 @@ describe("a config the CLI left half written after the restore (#145)", () => {
   });
 });
 
+describe("a config that parses but is of the wrong shape (#152)", () => {
+  it("is replaced at restore, so onboarding and the account are written, and says the shape was wrong", async () => {
+    const { lines } = logLines();
+    const { aws, login, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 3_600_000), account),
+    );
+    writeFileSync(join(home, ".claude.json"), '{"projects":{"/x":null}}');
+    await login.restore();
+    expect(
+      JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")),
+    ).toEqual({ hasCompletedOnboarding: true, oauthAccount: account });
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "login-config-replaced",
+        error: "ZodError",
+      }),
+    );
+    expect(lines).toContainEqual(
+      expect.objectContaining({ level: "info", event: "login-restored" }),
+    );
+    expect(lines.filter((line) => line.level === "error")).toEqual([]);
+  });
+
+  it("is replaced when a workspace is trusted, so the request goes on", async () => {
+    const { aws, login, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 3_600_000), account),
+    );
+    await login.restore();
+    const config = join(home, ".claude.json");
+    writeFileSync(config, '{"numStartups":3,"projects":"/x"}');
+    expect(login.orgUuid()).toBe("org-1");
+    login.trust("/data/workspaces/o__r");
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({
+      hasCompletedOnboarding: true,
+      oauthAccount: account,
+      projects: { "/data/workspaces/o__r": { hasTrustDialogAccepted: true } },
+    });
+  });
+
+  it("names no org, rather than throwing, when no account is stored", async () => {
+    const { aws, login, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 3_600_000), undefined),
+    );
+    await login.restore();
+    writeFileSync(join(home, ".claude.json"), '{"oauthAccount":"org-1"}');
+    expect(login.orgUuid()).toBeUndefined();
+    writeFileSync(join(home, ".claude.json"), "null");
+    expect(login.orgUuid()).toBeUndefined();
+  });
+
+  it("is replaced when only the account is of the wrong shape, so orgUuid() and the next edit agree", async () => {
+    const { aws, login, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 3_600_000), undefined),
+    );
+    await login.restore();
+    const config = join(home, ".claude.json");
+    writeFileSync(config, '{"oauthAccount":"org-1","projects":{}}');
+    login.trust("/data/workspaces/o__r");
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({
+      hasCompletedOnboarding: true,
+      projects: { "/data/workspaces/o__r": { hasTrustDialogAccepted: true } },
+    });
+  });
+});
+
 describe("keeping the login fresh", () => {
   it("does nothing while the token has time left", async () => {
     const calls: string[][] = [];
