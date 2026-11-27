@@ -2352,9 +2352,7 @@ describe("starting", () => {
           error: "SyntaxError",
         }),
       );
-      expect(t.lines.map((line) => line.event)).not.toContain(
-        "login-missing",
-      );
+      expect(t.lines.map((line) => line.event)).not.toContain("login-missing");
       expect(t.lines).toContainEqual(
         expect.objectContaining({ event: "started" }),
       );
