@@ -134,7 +134,8 @@ describe("fitness: governor's own check reads .github/governor.json on each pull
   it("passes the commit it is pinned to as the check's commit", () => {
     const job = checkJob();
     const pinned = governorCheck.exec(job?.uses ?? "")?.[1];
-    expect(job?.with).toEqual({ commit: pinned });
+    expect(pinned).toBeDefined();
+    expect(job?.with).toStrictEqual({ commit: pinned });
   });
 
   it("names the same commit in governor.json's $schema, so the editor and the check read one schema", () => {
@@ -146,16 +147,23 @@ describe("fitness: governor's own check reads .github/governor.json on each pull
     expect(schemaUrl.exec($schema)?.[1]).toBe(pinned);
   });
 
-  // The check reads the config, the prompt files it names, the issue
-  // templates and CLAUDE.md, so a change to any of them runs it.
+  // The check reads the config, the prompt files it names, the CI workflow
+  // it names, the issue templates in the folder and in the three places
+  // GitHub reads a single template, and CLAUDE.md, so a change to any of
+  // them runs it. A change to this workflow runs it too.
   it("runs on a pull request that changes any file the check reads", () => {
     const paths = workflow().on.pull_request.paths;
     const prompts = promptFiles(JSON.parse(readRepoFile(configPath)));
     expect(prompts).toContain(".claude/skills/pr-review/SKILL.md");
     for (const path of [
       configPath,
+      configCheckPath,
+      config().workflows.ci,
       "CLAUDE.md",
       ".github/ISSUE_TEMPLATE/**",
+      "ISSUE_TEMPLATE.md",
+      ".github/ISSUE_TEMPLATE.md",
+      "docs/ISSUE_TEMPLATE.md",
       ...prompts,
     ])
       expect(paths).toContain(path);
