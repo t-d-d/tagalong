@@ -41,10 +41,7 @@ const recordSchema = z.object({
 });
 const configSchema = z.looseObject({
   oauthAccount: z
-    .looseObject({
-      accountUuid: z.string().optional(),
-      organizationUuid: z.string().optional(),
-    })
+    .looseObject({ organizationUuid: z.string().optional() })
     .optional(),
 });
 const cliConfigSchema = z.looseObject({
@@ -290,8 +287,16 @@ export class Login {
    * before the CLI runs (#116), so what is there now is this login's (#120).
    */
   #lookedUp(): Account | undefined {
-    const parsed = accountSchema.safeParse(this.#configAccount());
-    return parsed.success ? parsed.data : undefined;
+    let config: unknown;
+    try {
+      config = JSON.parse(readFileSync(this.#configPath, "utf8"));
+    } catch {
+      // Missing or half written: nothing to store, and the refresh still
+      // goes back. The next refresh written back looks again.
+      return undefined;
+    }
+    const parsed = z.object({ oauthAccount: accountSchema }).safeParse(config);
+    return parsed.success ? parsed.data.oauthAccount : undefined;
   }
 
   /** The CLI's environment, with the org named so it skips its profile lookup. */

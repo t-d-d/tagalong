@@ -8,6 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { fakeAws } from "../../test/fake-aws.ts";
 import { eventsOf, logLines } from "../../test/log-lines.ts";
 import { readEnv } from "./env.ts";
@@ -409,11 +410,13 @@ describe("ids the CLI looks up for a login stored without them (#120)", () => {
       if (written !== undefined) {
         const configFile = join(harness.home, ".claude.json");
         // Add the account, keeping the rest. restore() removed any earlier one.
-        const config = readFileSync(configFile, "utf8").replace(
-          /^\{/,
-          `{"oauthAccount":${JSON.stringify(written)},`,
+        const config = z
+          .looseObject({})
+          .parse(JSON.parse(readFileSync(configFile, "utf8")));
+        writeFileSync(
+          configFile,
+          JSON.stringify({ ...config, oauthAccount: written }),
         );
-        writeFileSync(configFile, config);
       }
       return Promise.resolve({ code: 0, out: "" });
     };
@@ -481,6 +484,39 @@ describe("ids the CLI looks up for a login stored without them (#120)", () => {
     expect(
       readRecord(aws.secrets.get(PARAMETER) ?? "").account,
     ).toBeUndefined();
+  });
+
+  it("still writes the refresh back when the CLI's config cannot be read", async () => {
+    const { aws, login, file, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 60_000), undefined),
+    );
+    await login.restore();
+    writeFileSync(file, credentials("refreshed", NOW + 8 * 3_600_000));
+    // Half written.
+    writeFileSync(join(home, ".claude.json"), '{"oauthAccount":{"acc');
+    await login.storeIfRefreshed();
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "")).toEqual({
+      credentials: credentials("refreshed", NOW + 8 * 3_600_000),
+      account: undefined,
+    });
+  });
+
+  it("names the org when the CLI wrote an account id of another shape", async () => {
+    const { aws, login, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 3_600_000), undefined),
+    );
+    await login.restore();
+    writeFileSync(
+      join(home, ".claude.json"),
+      JSON.stringify({
+        oauthAccount: { accountUuid: null, organizationUuid: "org-3" },
+      }),
+    );
+    expect(login.orgUuid()).toBe("org-3");
   });
 });
 
