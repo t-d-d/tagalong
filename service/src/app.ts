@@ -84,7 +84,14 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
     asking,
   };
   let device: DeviceState = store.present() ? "present" : "waiting";
-  if (device === "present") people.refresh();
+  if (device === "present") {
+    // A failed read must not stop the start; the people loop tries again.
+    try {
+      people.refresh();
+    } catch (error) {
+      log.warn("loop-failed", { loop: "people", ...errorFields(error) });
+    }
+  }
   // Work started by a message, for tests to wait on.
   let pending: Promise<unknown> = Promise.resolve();
   // The latest line a command sent into a session, queued with deliveries.

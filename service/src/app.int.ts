@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -2311,6 +2311,31 @@ describe("starting", () => {
       );
       expect(t.lines).toContainEqual(
         expect.objectContaining({ event: "started" }),
+      );
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it("starts even when the people cannot be read, and says so", async () => {
+    const t = (h = await harness({
+      env: { PORT: "18772" },
+      // A whatsapp.db that cannot be read, as when the bridge holds its lock too long.
+      db: (db) => {
+        writeFileSync(join(db.store, "whatsapp.db"), "not a database");
+      },
+    }));
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "loop-failed",
+        loop: "people",
+      }),
+    );
+    const server = await t.app.start();
+    try {
+      expect(t.lines).toContainEqual(
+        expect.objectContaining({ event: "started", device: "present" }),
       );
     } finally {
       await new Promise((resolve) => server.close(resolve));
