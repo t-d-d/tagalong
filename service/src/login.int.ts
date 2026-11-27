@@ -206,6 +206,37 @@ describe("keeping the login fresh", () => {
     expect(lines.filter((line) => line.level === "error")).toEqual([]);
   });
 
+  it("writes back a login the CLI changed but left near expiry", async () => {
+    const harness = { file: "" };
+    const { aws, login, file } = setup((_command, args) => {
+      if (args[0] === "-p")
+        writeFileSync(harness.file, credentials("rotated", NOW + 20 * 60_000));
+      return Promise.resolve({ code: 0, out: "" });
+    });
+    harness.file = file;
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 20 * 60_000), account),
+    );
+    await login.restore();
+    await login.keepFresh();
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "").credentials).toBe(
+      credentials("rotated", NOW + 20 * 60_000),
+    );
+  });
+
+  it("raises an alert when the CLI fails on an unexpired token", async () => {
+    const { lines } = logLines();
+    const { aws, login } = setup(() => Promise.resolve({ code: 1, out: "" }));
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 20 * 60_000), account),
+    );
+    await login.restore();
+    await login.keepFresh();
+    expect(lines.at(-1)).toMatchObject({ level: "error", event: "login-dead" });
+  });
+
   it("refuses to store a login the CLI has broken", async () => {
     const { lines } = logLines();
     const { aws, login, file } = setup();
