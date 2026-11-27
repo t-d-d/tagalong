@@ -469,6 +469,84 @@ describe("a stored value that is not a login, at a restart (#123)", () => {
   });
 });
 
+describe("a failed write-back of the login at start (#127)", () => {
+  const throttled = (): Promise<void> => {
+    const error = new Error("rate exceeded");
+    error.name = "ThrottlingException";
+    return Promise.reject(error);
+  };
+
+  it("is a warn under login-stored, and the next check writes the login back", async () => {
+    const first = setup();
+    first.aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await first.login.restore();
+    // The CLI refreshed it, and the task stopped before writing it back.
+    writeFileSync(first.file, credentials("old-2", NOW + 8 * 3_600_000));
+    const { lines } = logLines();
+    const { aws, login, file } = setup(undefined, first.home);
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    const putSecret = aws.putSecret.bind(aws);
+    aws.putSecret = throttled;
+    await login.restore();
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("old-2", NOW + 8 * 3_600_000),
+    );
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "login-stored",
+        error: "ThrottlingException",
+      }),
+    );
+    expect(eventsOf(lines)).not.toContain("login-missing");
+    expect(lines.filter((line) => line.level === "error")).toEqual([]);
+    aws.putSecret = putSecret;
+    await login.keepFresh();
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "")).toEqual({
+      credentials: credentials("old-2", NOW + 8 * 3_600_000),
+      account,
+    });
+  });
+
+  it("is a warn too when the parameter holds no usable login (#123)", async () => {
+    const first = setup();
+    first.aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 3_600_000), account),
+    );
+    await first.login.restore();
+    const { lines } = logLines();
+    const { aws, login, file } = setup(undefined, first.home);
+    aws.secrets.set(PARAMETER, "{not json");
+    const putSecret = aws.putSecret.bind(aws);
+    aws.putSecret = throttled;
+    await login.restore();
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("old", NOW + 3_600_000),
+    );
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "login-stored",
+        error: "ThrottlingException",
+      }),
+    );
+    expect(lines.filter((line) => line.level === "error")).toEqual([]);
+    aws.putSecret = putSecret;
+    await login.keepFresh();
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "")).toEqual({
+      credentials: credentials("old", NOW + 3_600_000),
+      account,
+    });
+  });
+});
+
 describe("ids the CLI looks up for a login stored without them (#120)", () => {
   const cliAccount = { accountUuid: "acc-3", organizationUuid: "org-3" };
 
