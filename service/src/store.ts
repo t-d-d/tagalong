@@ -54,6 +54,9 @@ const chatSchema = z.object({
   last_message_time: z.string().nullable(),
 });
 
+/** How long a read waits for the bridge's write lock before it fails, in ms. */
+const LOCK_TIMEOUT = 5000;
+
 const COLUMNS =
   "id, chat_jid, sender, content, timestamp, is_from_me, media_type, file_length";
 
@@ -86,11 +89,13 @@ export class WhatsAppStore {
     if (name === "messages") {
       this.#messages ??= new DatabaseSync(join(this.#dir, "messages.db"), {
         readOnly: true,
+        timeout: LOCK_TIMEOUT,
       });
       return this.#messages;
     }
     this.#device ??= new DatabaseSync(join(this.#dir, "whatsapp.db"), {
       readOnly: true,
+      timeout: LOCK_TIMEOUT,
     });
     return this.#device;
   }
