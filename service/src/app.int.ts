@@ -2483,7 +2483,10 @@ describe("starting", () => {
     });
     writeFileSync(t.env.GROUPS_FILE, "not json");
 
-    await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
+    await expect(t.app.checkDevice()).rejects.toMatchObject({
+      read: "groups",
+      cause: expect.any(SyntaxError),
+    });
     expect([...people.self].sort()).toEqual([CLAUDE, CLAUDE_LID].sort());
   });
 
@@ -2521,7 +2524,10 @@ describe("starting", () => {
       contentType: "application/gzip",
     });
 
-    await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
+    await expect(t.app.checkDevice()).rejects.toMatchObject({
+      read: "groups",
+      cause: expect.any(SyntaxError),
+    });
     expect(state.state.replies).toEqual(seeded.replies);
   });
 
@@ -2549,17 +2555,73 @@ describe("starting", () => {
       contentType: "application/gzip",
     });
 
-    await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
+    await expect(t.app.checkDevice()).rejects.toMatchObject({
+      read: "groups",
+      cause: expect.any(SyntaxError),
+    });
     const second = t.lines.filter(
       (line) => line.event === "loop-failed" && line.loop === "device",
     );
     expect(second).toEqual([
-      expect.objectContaining({ level: "warn", error: "ZodError" }),
+      expect.objectContaining({
+        level: "warn",
+        error: "ZodError",
+        read: "state",
+      }),
     ]);
     expect(Object.keys(second[0] ?? {}).sort()).toEqual(
-      ["error", "event", "level", "loop", "time"].sort(),
+      ["error", "event", "level", "loop", "read", "time"].sort(),
     );
     expect([...people.self].sort()).toEqual([CLAUDE, CLAUDE_LID].sort());
+  });
+
+  it("names the file in each line when both seeded reloads fail with the same error class", async () => {
+    const seed = join(
+      mkdtempSync(join(tmpdir(), "tagalong-seed-")),
+      "device.tgz",
+    );
+    const t = (h = await harness({
+      env: { ATTACHMENTS_BUCKET: "files" },
+      db: (db) => {
+        execFileSync("tar", ["-czf", seed, "-C", db.dir, "store"]);
+        renameSync(
+          join(db.store, "messages.db"),
+          join(db.store, "messages.db.away"),
+        );
+      },
+    }));
+    // Both files are half written as the seed arrives at start.
+    writeFileSync(t.env.GROUPS_FILE, "{");
+    writeFileSync(t.env.STATE_FILE, "{");
+    t.aws.objects.set("files/seed/device.tgz", {
+      body: readFileSync(seed),
+      contentType: "application/gzip",
+    });
+
+    // start() logs the thrown groups error; readSeeded logs the state error.
+    const server = await t.app.start();
+    try {
+      const failed = t.lines.filter(
+        (line) => line.event === "loop-failed" && line.loop === "device",
+      );
+      expect(failed).toHaveLength(2);
+      expect(failed).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            level: "warn",
+            error: "SyntaxError",
+            read: "state",
+          }),
+          expect.objectContaining({
+            level: "warn",
+            error: "SyntaxError",
+            read: "groups",
+          }),
+        ]),
+      );
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   describe("a state save while the device is waiting or being seeded (#139)", () => {
@@ -2729,21 +2791,30 @@ describe("starting", () => {
       contentType: "application/gzip",
     });
 
-    await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
+    await expect(t.app.checkDevice()).rejects.toMatchObject({
+      read: "groups",
+      cause: expect.any(SyntaxError),
+    });
 
     // Nothing is saved over the state.json until it has been read.
     await t.app.pollOnce();
     expect(readFileSync(t.env.STATE_FILE, "utf8")).toBe("{");
 
     // Still half written: tried again, and failing again.
-    await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
+    await expect(t.app.checkDevice()).rejects.toMatchObject({
+      read: "groups",
+      cause: expect.any(SyntaxError),
+    });
 
     // The groups are whole: they load, and the state is still tried.
     writeFileSync(
       t.env.GROUPS_FILE,
       JSON.stringify({ ...standardGroups, groups: {} }),
     );
-    await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
+    await expect(t.app.checkDevice()).rejects.toMatchObject({
+      read: "state",
+      cause: expect.any(SyntaxError),
+    });
     expect(groups.config.groups.size).toBe(0);
 
     // The state is whole too: it loads, and the check is quiet again.

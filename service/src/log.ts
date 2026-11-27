@@ -88,6 +88,8 @@ export const log = {
 
 /** A dependency's error, by class and status only, never its message (logging.md). */
 export function errorFields(error: unknown): Fields {
+  if (error instanceof ReadError)
+    return { ...errorFields(error.cause), read: error.read };
   if (error instanceof HttpError)
     return { error: "HttpError", status: error.status, where: error.where };
   if (error instanceof Error)
@@ -116,5 +118,15 @@ export class CommandError extends Error {
     super(why);
     this.name = "CommandError";
     this.why = why;
+  }
+}
+
+/** A read that failed, labelled by which read it was so two alike failures can be told apart. */
+export class ReadError extends Error {
+  readonly read: string;
+  constructor(read: string, cause: unknown) {
+    super(`${read} read failed`, { cause });
+    this.name = "ReadError";
+    this.read = read;
   }
 }

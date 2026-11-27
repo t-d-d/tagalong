@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { logLines } from "../../test/log-lines.ts";
-import { CommandError, HttpError, errorFields, log } from "./log.ts";
+import { CommandError, HttpError, ReadError, errorFields, log } from "./log.ts";
 
 describe("log", () => {
   it("writes one JSON line naming the event", () => {
@@ -29,5 +29,19 @@ describe("log", () => {
       why: "no repo",
     });
     expect(errorFields("text")).toEqual({ error: "string" });
+  });
+
+  it("names the read a failed read was, beside its cause's class", () => {
+    expect(
+      errorFields(new ReadError("groups", new SyntaxError("+447700900001"))),
+    ).toEqual({ error: "SyntaxError", read: "groups" });
+    expect(
+      errorFields(new ReadError("state", new HttpError("bridge send", 500))),
+    ).toEqual({
+      error: "HttpError",
+      status: 500,
+      where: "bridge send",
+      read: "state",
+    });
   });
 });
