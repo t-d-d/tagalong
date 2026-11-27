@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   renameSync,
@@ -2318,6 +2319,41 @@ describe("starting", () => {
       expect(t.lines).toContainEqual(
         expect.objectContaining({ level: "error", event: "login-missing" }),
       );
+      expect(t.lines).toContainEqual(
+        expect.objectContaining({ event: "started" }),
+      );
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it("names a local failure in the restore, not a missing login (#137)", async () => {
+    const t = (h = await harness({
+      env: { LOGIN_PARAMETER: "/tagalong/claude-login", PORT: "18779" },
+    }));
+    t.aws.secrets.set(
+      "/tagalong/claude-login",
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "stored",
+          refreshToken: "refresh-stored",
+          expiresAt: t.clock.now + 3_600_000,
+          scopes: ["user:sessions:claude_code"],
+        },
+      }),
+    );
+    mkdirSync(t.env.HOME, { recursive: true });
+    writeFileSync(join(t.env.HOME, ".claude.json"), '{"projects":');
+    const server = await t.app.start();
+    try {
+      expect(t.lines).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          event: "login-restored",
+          error: "SyntaxError",
+        }),
+      );
+      expect(t.lines.map((line) => line.event)).not.toContain("login-missing");
       expect(t.lines).toContainEqual(
         expect.objectContaining({ event: "started" }),
       );
