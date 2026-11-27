@@ -153,10 +153,20 @@ export class Login {
     return join(this.#deps.env.HOME, ".claude", ".tagalong-stored");
   }
 
+  #lastStored(): string | undefined {
+    return existsSync(this.#storedFile)
+      ? readFileSync(this.#storedFile, "utf8")
+      : undefined;
+  }
+
   #remember(credentials: string): void {
     this.#stored = digest(credentials);
     mkdirSync(dirname(this.#storedFile), { recursive: true, mode: 0o700 });
-    writeFileSync(this.#storedFile, this.#stored, { mode: 0o600 });
+    // One rename, so a restart never reads half a digest and takes the
+    // parameter over a refresh not yet written back.
+    const tmp = `${this.#storedFile}.tagalong`;
+    writeFileSync(tmp, this.#stored, { mode: 0o600 });
+    renameSync(tmp, this.#storedFile);
   }
 
   #write(text: string): void {
@@ -187,9 +197,7 @@ export class Login {
     const stored = parseCredentials(record.credentials);
     const local = this.#read();
     const onDisk = local === undefined ? undefined : parseCredentials(local);
-    const last = existsSync(this.#storedFile)
-      ? readFileSync(this.#storedFile, "utf8")
-      : undefined;
+    const last = this.#lastStored();
     const minted = last !== undefined && last !== digest(record.credentials);
     const keepDisk =
       !minted &&
@@ -332,12 +340,8 @@ export class Login {
       log.error("login-dead", { why: parsed.reason });
       return;
     }
-    const taken = await this.#takeMinted();
-    if (taken === "unread") {
-      log.warn("login-stored", { ok: false, why: "parameter unreadable" });
-      return;
-    }
-    if (taken === "taken") return;
+    const taken = await this.#takeMinted("login-stored");
+    if (taken !== "kept") return;
     await aws.putSecret(name, writeRecord(text, this.#account));
     this.#remember(text);
     log.info("login-stored", {
@@ -356,8 +360,11 @@ export class Login {
    */
   async keepFresh(): Promise<void> {
     if (this.#parameter === undefined) return;
-    // A login minted while this one still works is taken now (#118).
-    if ((await this.#takeMinted()) === "taken") return;
+    // A login minted while this one still works is taken now (#118), and
+    // refreshed below if it is close to expiry. Otherwise a refresh held
+    // back when the parameter could not be read goes back now.
+    const taken = await this.#takeMinted("login-restored");
+    if (taken === "kept") await this.storeIfRefreshed();
     const expires = this.#expiresAt();
     if (expires !== undefined && expires - this.#deps.now() > MARGIN_MS) return;
     const attempts: string[][] = [
@@ -418,24 +425,29 @@ export class Login {
    * Take the stored login if it parses and is not the one the task last
    * restored or wrote back, whatever its expiry: someone minted it since
    * (#118). "unread" when the parameter cannot be read, and the reason is
-   * logged.
+   * logged under `event`.
    */
-  async #takeMinted(): Promise<"taken" | "kept" | "unread"> {
-    const read = await this.#readParameter();
+  async #takeMinted(
+    event: "login-restored" | "login-stored",
+  ): Promise<"taken" | "kept" | "unread"> {
+    const read = await this.#readParameter(event);
     if (!read.ok) return "unread";
     const value = read.value;
-    if (value === undefined || this.#stored === undefined) return "kept";
+    // Before a restore succeeds, the digest a previous run kept says which
+    // login the task last stored.
+    const last = this.#stored ?? this.#lastStored();
+    if (value === undefined || last === undefined) return "kept";
     const record = readRecord(value);
-    if (digest(record.credentials) === this.#stored) return "kept";
+    if (digest(record.credentials) === last) return "kept";
     if (!parseCredentials(record.credentials).ok) return "kept";
     this.#take(record);
     return "taken";
   }
 
-  /** The parameter's value; not ok, and logged, when it cannot be read. */
-  async #readParameter(): Promise<
-    { ok: true; value: string | undefined } | { ok: false }
-  > {
+  /** The parameter's value; not ok, and logged under `event`, when it cannot be read. */
+  async #readParameter(
+    event: "login-restored" | "login-stored" = "login-restored",
+  ): Promise<{ ok: true; value: string | undefined } | { ok: false }> {
     const name = this.#parameter;
     const aws = this.#deps.aws;
     if (name === undefined || aws === undefined)
@@ -443,7 +455,7 @@ export class Login {
     try {
       return { ok: true, value: await aws.getSecret(name) };
     } catch (error) {
-      log.warn("login-restored", { ok: false, ...errorFields(error) });
+      log.warn(event, { ok: false, ...errorFields(error) });
       return { ok: false };
     }
   }
