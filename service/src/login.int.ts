@@ -715,6 +715,98 @@ describe("a write-back Parameter Store keeps refusing at the login check (#141)"
   });
 });
 
+describe("a write-back held back because Parameter Store refuses reads (#147)", () => {
+  const denied = (): Promise<string | undefined> => {
+    const error = new Error("not authorized");
+    error.name = "AccessDeniedException";
+    return Promise.reject(error);
+  };
+  const heldBack = (lines: { level: string; event: string }[]) =>
+    lines
+      .filter((line) => line.event === "login-stored" && line.level !== "info")
+      .map((line) => line.level);
+
+  /** A login a CLI run refreshed, far from expiry, that the task cannot read the parameter to write back. */
+  async function unreadable() {
+    const { aws, login, file } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await login.restore();
+    writeFileSync(file, credentials("old-2", NOW + 8 * 3_600_000));
+    const getSecret = aws.getSecret.bind(aws);
+    aws.getSecret = denied;
+    return { aws, login, file, getSecret };
+  }
+
+  it("is a warn under login-stored at the first check", async () => {
+    const { lines } = logLines();
+    const { login } = await unreadable();
+    await login.keepFresh();
+    expect(heldBack(lines)).toEqual(["warn"]);
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "login-stored",
+        error: "AccessDeniedException",
+      }),
+    );
+    expect(lines.filter((line) => line.level === "error")).toEqual([]);
+  });
+
+  it("is an error line under login-stored when still held back at the next check", async () => {
+    const { lines } = logLines();
+    const { aws, login, file, getSecret } = await unreadable();
+    await login.keepFresh();
+    const before = lines.length;
+    await login.keepFresh();
+    expect(heldBack(lines.slice(before))).toEqual(["error"]);
+    expect(lines.slice(before)).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        event: "login-stored",
+        error: "AccessDeniedException",
+      }),
+    );
+    // Once the parameter can be read, the write-back goes through, and the
+    // next held-back one is a warn again.
+    aws.getSecret = getSecret;
+    await login.keepFresh();
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "").credentials).toBe(
+      readFileSync(file, "utf8"),
+    );
+    aws.getSecret = denied;
+    writeFileSync(file, credentials("later", NOW + 7 * 3_600_000));
+    const after = lines.length;
+    await login.keepFresh();
+    expect(heldBack(lines.slice(after))).toEqual(["warn"]);
+  });
+
+  it("stays a warn when the next check can read the parameter", async () => {
+    const { lines } = logLines();
+    const { aws, login, file, getSecret } = await unreadable();
+    // The write-back after a CLI run is held back; it warns.
+    await login.storeIfRefreshed();
+    aws.getSecret = getSecret;
+    await login.keepFresh();
+    expect(heldBack(lines)).toEqual(["warn"]);
+    expect(lines.filter((line) => line.level === "error")).toEqual([]);
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "").credentials).toBe(
+      readFileSync(file, "utf8"),
+    );
+  });
+
+  it("is an error line at the check after a write-back from a CLI run was held back", async () => {
+    const { lines } = logLines();
+    const { login } = await unreadable();
+    await login.storeIfRefreshed();
+    const before = lines.length;
+    await login.keepFresh();
+    expect(heldBack(lines.slice(before))).toEqual(["error"]);
+  });
+});
+
 describe("ids the CLI looks up for a login stored without them (#120)", () => {
   const cliAccount = { accountUuid: "acc-3", organizationUuid: "org-3" };
 
