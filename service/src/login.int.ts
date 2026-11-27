@@ -797,6 +797,28 @@ describe("a write-back held back because Parameter Store refuses reads (#147)", 
     );
   });
 
+  it("raises nothing at a restart when the volume holds the login last stored", async () => {
+    const { lines } = logLines();
+    const home = mkdtempSync(join(tmpdir(), "tagalong-home-"));
+    const first = setup(undefined, home);
+    first.aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 8 * 3_600_000), account),
+    );
+    await first.login.restore();
+    // The restart cannot read the parameter, so its restore fails.
+    const { aws, login } = setup(undefined, home);
+    aws.getSecret = denied;
+    await expect(login.restore()).rejects.toThrow();
+    const before = lines.length;
+    await login.keepFresh();
+    await login.keepFresh();
+    expect(heldBack(lines.slice(before))).toEqual([]);
+    expect(
+      lines.slice(before).filter((line) => line.level === "error"),
+    ).toEqual([]);
+  });
+
   it("is an error line at the check after a write-back from a CLI run was held back", async () => {
     const { lines } = logLines();
     const { login } = await unreadable();

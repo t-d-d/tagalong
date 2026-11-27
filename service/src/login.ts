@@ -400,11 +400,14 @@ export class Login {
     const name = this.#parameter;
     const aws = this.#deps.aws;
     const text = this.#read();
+    // Before a restore succeeds, the digest a previous run kept says which
+    // login the parameter holds, so a restart that cannot read it does not
+    // count that login as held back (#147).
     if (
       name === undefined ||
       aws === undefined ||
       text === undefined ||
-      digest(text) === this.#stored
+      digest(text) === (this.#stored ?? this.#lastStored())
     )
       return undefined;
     const parsed = parseCredentials(text);
