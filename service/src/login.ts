@@ -44,7 +44,7 @@ const configSchema = z.looseObject({
     .looseObject({ organizationUuid: z.string().optional() })
     .optional(),
 });
-const cliConfigSchema = z.looseObject({
+const cliConfigSchema = configSchema.extend({
   projects: z.record(z.string(), z.looseObject({})).optional(),
 });
 type Config = z.infer<typeof cliConfigSchema>;
@@ -634,7 +634,6 @@ export class Login {
   }
 }
 
-/** The config's text as JSON, or undefined when it does not parse (#145). */
 /** ~/.claude.json as the CLI wrote it, or none when it must be replaced. */
 function readConfig(text: string): Config | undefined {
   let config: unknown;

@@ -1121,6 +1121,22 @@ describe("a config that parses but is of the wrong shape (#152)", () => {
     writeFileSync(join(home, ".claude.json"), "null");
     expect(login.orgUuid()).toBeUndefined();
   });
+
+  it("is replaced when only the account is of the wrong shape, so orgUuid() and the next edit agree", async () => {
+    const { aws, login, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 3_600_000), undefined),
+    );
+    await login.restore();
+    const config = join(home, ".claude.json");
+    writeFileSync(config, '{"oauthAccount":"org-1","projects":{}}');
+    login.trust("/data/workspaces/o__r");
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({
+      hasCompletedOnboarding: true,
+      projects: { "/data/workspaces/o__r": { hasTrustDialogAccepted: true } },
+    });
+  });
 });
 
 describe("keeping the login fresh", () => {
