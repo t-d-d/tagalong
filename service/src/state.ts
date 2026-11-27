@@ -161,8 +161,13 @@ export class StateStore {
 
   /** Read the file again, for one that arrived with the device, and save from now on. */
   reload(): void {
-    this.state = this.#load();
-    this.#held = false;
+    // Released even when the file does not parse: a task that never saved
+    // again would lose every answer from here on.
+    try {
+      this.state = this.#load();
+    } finally {
+      this.#held = false;
+    }
   }
 
   /** Save from now on, for a device that arrived without a seed. */

@@ -2526,16 +2526,18 @@ describe("starting", () => {
   });
 
   describe("a state save while the device is waiting or being seeded (#139)", () => {
-    const seeded = { replies: { "answer-1": "session_fake1" } };
+    const seeded = {
+      replies: { "answer-1": "session_01SessionAaaaaaaaaaaaaaa" },
+    };
 
     // A task with no device yet, and a seed in hand that carries a state.json.
-    async function waitingForSeed() {
+    async function waitingForSeed(stateJson = JSON.stringify(seeded)) {
       const upload = mkdtempSync(join(tmpdir(), "tagalong-seed-"));
       const seed = join(upload, "device.tgz");
       const t = (h = await harness({
         env: { ATTACHMENTS_BUCKET: "files" },
         db: (db) => {
-          writeFileSync(join(db.dir, "state.json"), JSON.stringify(seeded));
+          writeFileSync(join(db.dir, "state.json"), stateJson);
           execFileSync("tar", [
             "-czf",
             seed,
@@ -2578,11 +2580,12 @@ describe("starting", () => {
       );
     });
 
-    it("takes the seeded state.json when the empty state was saved before the seed arrived", async () => {
+    it("writes no state.json while waiting, and takes the seeded one when it arrives", async () => {
       const { t, arrive } = await waitingForSeed();
       const { state } = t.app.parts;
       // The poll saves the state every pass, device or not.
       await t.app.pollOnce();
+      expect(existsSync(t.env.STATE_FILE)).toBe(false);
       arrive();
 
       expect(await t.app.checkDevice()).toBe("seeded");
@@ -2595,11 +2598,82 @@ describe("starting", () => {
       arrive();
       expect(await t.app.checkDevice()).toBe("seeded");
 
-      state.state.replies["answer-2"] = "session_fake2";
+      state.state.replies["answer-2"] = "session_01SessionBbbbbbbbbbbbbbb";
       state.save();
       expect(new StateStore(t.env.STATE_FILE).state.replies).toEqual({
         ...seeded.replies,
-        "answer-2": "session_fake2",
+        "answer-2": "session_01SessionBbbbbbbbbbbbbbb",
+      });
+    });
+
+    it("keeps the seeded state.json when a second device check runs while the upload is deleted", async () => {
+      const { t, arrive } = await waitingForSeed();
+      const { state } = t.app.parts;
+      const deleteObject = t.aws.deleteObject.bind(t.aws);
+      let deleting = (): void => undefined;
+      let deleteCalled = (): void => undefined;
+      const called = new Promise<void>((resolve) => {
+        deleteCalled = resolve;
+      });
+      t.aws.deleteObject = async (bucket, key) => {
+        deleteCalled();
+        await new Promise<void>((resolve) => {
+          deleting = resolve;
+        });
+        return deleteObject(bucket, key);
+      };
+      arrive();
+
+      const first = t.app.checkDevice();
+      await called;
+      // The device loop fires every 30 seconds, whether the last check is done or not.
+      const second = t.app.checkDevice();
+      await new Promise((resolve) => setImmediate(resolve));
+      state.save();
+      deleting();
+
+      const checks = await Promise.all([first, second]);
+      expect(state.state.replies).toEqual(seeded.replies);
+      expect(new StateStore(t.env.STATE_FILE).state.replies).toEqual(
+        seeded.replies,
+      );
+      expect(checks).toEqual(["seeded", "seeded"]);
+    });
+
+    it("saves the state once the device arrives without a seed", async () => {
+      const t = (h = await harness({
+        db: (db) => {
+          renameSync(
+            join(db.store, "messages.db"),
+            join(db.store, "messages.db.away"),
+          );
+        },
+      }));
+      const { state } = t.app.parts;
+      expect(await t.app.checkDevice()).toBe("off");
+      renameSync(
+        join(t.db.store, "messages.db.away"),
+        join(t.db.store, "messages.db"),
+      );
+      expect(await t.app.checkDevice()).toBe("present");
+
+      state.state.replies["answer-1"] = "session_01SessionAaaaaaaaaaaaaaa";
+      state.save();
+      expect(new StateStore(t.env.STATE_FILE).state.replies).toEqual({
+        "answer-1": "session_01SessionAaaaaaaaaaaaaaa",
+      });
+    });
+
+    it("saves the state once the device is seeded, even when the seeded state.json does not parse", async () => {
+      const { t, arrive } = await waitingForSeed("not json");
+      const { state } = t.app.parts;
+      arrive();
+      await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
+
+      state.state.replies["answer-2"] = "session_01SessionBbbbbbbbbbbbbbb";
+      state.save();
+      expect(new StateStore(t.env.STATE_FILE).state.replies).toEqual({
+        "answer-2": "session_01SessionBbbbbbbbbbbbbbb",
       });
     });
   });
