@@ -24,6 +24,11 @@ const configPath = ".github/governor.json";
 const section = z.object({ enabled: z.boolean().optional() });
 const governorSchema = z.object({
   workflows: z.object({ ci: z.string() }),
+  pickup: section.extend({
+    ready: z.array(z.string()),
+    claim: z.string(),
+    claimRemoves: z.array(z.string()).optional(),
+  }),
   deployMessages: section.extend({
     tags: z.record(z.string(), z.string()).optional(),
     deployedLabels: z.boolean().optional(),
@@ -44,6 +49,19 @@ describe("fitness: governor serves this repo from .github/governor.json (repo-an
   it("keeps its settings in governor.json alone, since governor no longer reads dispatch.json", () => {
     expect(repoFiles()).toContain(configPath);
     expect(repoFiles()).not.toContain(".github/dispatch.json");
+  });
+
+  // docs/issue-workflow.md: governor starts a mode: afk ticket that is
+  // ready for development, and claims it with under development.
+  it("picks up and claims tickets by the labels the issue workflow names", () => {
+    const { pickup } = config();
+    expect(pickup.enabled).not.toBe(false);
+    expect(pickup.ready).toEqual([
+      "workflow: ready for development",
+      "mode: afk",
+    ]);
+    expect(pickup.claim).toBe("workflow: under development");
+    expect(pickup.claimRemoves).toEqual(["workflow: ready for development"]);
   });
 
   // The CI workflow runs only after a merge, so the review cannot wait for
