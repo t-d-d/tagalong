@@ -97,10 +97,15 @@ async function refusedWriteBack() {
     }),
   );
   await login.restore();
-  const put = aws.putSecret;
-  aws.putSecret = () => Promise.reject(new HttpError("ssm", 400));
+  let refusing = true;
+  const put = (name: string, value: string) => {
+    aws.secrets.set(name, value);
+    return Promise.resolve();
+  };
+  aws.putSecret = (name, value) =>
+    refusing ? Promise.reject(new HttpError("ssm", 400)) : put(name, value);
   const restorePut = () => {
-    aws.putSecret = put;
+    refusing = false;
   };
   return { cloud: new Cloud(env, login, runner), fake, aws, login, restorePut };
 }
