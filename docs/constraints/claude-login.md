@@ -14,7 +14,13 @@ at once, kills one of them.
   /tagalong/claude-login, holding the credentials file verbatim beside
   the account's uuids.
 - At start the task writes it to HOME/.claude/.credentials.json, unless
-  the volume already holds a newer one, which it writes back.
+  the volume already holds a newer refresh of the login the task last
+  stored, which it writes back. A stored login other than the one the
+  task last restored or wrote back was minted since, and is taken
+  whatever its expiry. The task keeps a digest of the login it last
+  stored on the volume, to tell the two apart.
+- A login minted while the old one still works is taken at the next
+  check, before any refresh of the old one can be written over it.
 - After every CLI run, a credentials file that changed is checked and
   written back. A login the CLI broke is never stored.
 - One CLI runs at a time, through one queue.
@@ -35,4 +41,5 @@ at once, kills one of them.
 
 History: Set when the repo was made, October 2026, following podstow's
 dispatcher. A newly minted login is picked up without a restart since
-27 November 2026 (#105).
+27 November 2026 (#105). A login minted while the old one still works
+is taken, whatever its expiry, since 27 November 2026 (#118).

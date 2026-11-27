@@ -3,6 +3,7 @@
 // file; every refresh the CLI makes is written back. On a laptop the CLI's
 // own login is read and nothing is written.
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -122,6 +123,7 @@ export interface LoginDeps {
 export class Login {
   readonly #deps: LoginDeps;
   #account: Account | undefined;
+  /** A digest of the credentials the task last restored or wrote back. */
   #stored: string | undefined;
 
   constructor(deps: LoginDeps) {
@@ -142,6 +144,21 @@ export class Login {
       : undefined;
   }
 
+  /**
+   * The digest of the login the task last restored or wrote back, kept on
+   * the volume beside the login, so a restart can tell a newly minted login
+   * from its own (#118).
+   */
+  get #storedFile(): string {
+    return join(this.#deps.env.HOME, ".claude", ".tagalong-stored");
+  }
+
+  #remember(credentials: string): void {
+    this.#stored = digest(credentials);
+    mkdirSync(dirname(this.#storedFile), { recursive: true, mode: 0o700 });
+    writeFileSync(this.#storedFile, this.#stored, { mode: 0o600 });
+  }
+
   #write(text: string): void {
     mkdirSync(dirname(this.#file), { recursive: true, mode: 0o700 });
     writeFileSync(this.#file, text, { mode: 0o600 });
@@ -150,8 +167,11 @@ export class Login {
 
   /**
    * In the task: put the stored login where the CLI reads it, unless the
-   * file already holds a newer one (a refresh not yet written back), and
-   * mark onboarding done (cloud-sessions.md).
+   * file already holds a newer refresh of the login the task last stored
+   * (not yet written back), and mark onboarding done (cloud-sessions.md).
+   * A stored login that is not the one the task last stored was minted
+   * since, so it is taken whatever its expiry (#118). Before the task has
+   * kept any record, the newer of the two is kept.
    */
   async restore(): Promise<void> {
     const name = this.#parameter;
@@ -167,12 +187,17 @@ export class Login {
     const stored = parseCredentials(record.credentials);
     const local = this.#read();
     const onDisk = local === undefined ? undefined : parseCredentials(local);
+    const last = existsSync(this.#storedFile)
+      ? readFileSync(this.#storedFile, "utf8")
+      : undefined;
+    const minted = last !== undefined && last !== digest(record.credentials);
     const keepDisk =
+      !minted &&
       onDisk?.ok === true &&
       stored.ok &&
       (onDisk.expiresAt ?? 0) > (stored.expiresAt ?? 0);
     if (!keepDisk) this.#write(record.credentials);
-    this.#stored = keepDisk ? undefined : record.credentials;
+    this.#remember(record.credentials);
     this.#configure();
     log.info("login-restored", {
       from: keepDisk ? "volume" : "parameter",
@@ -285,7 +310,12 @@ export class Login {
     return parsed?.ok === true ? parsed.expiresAt : undefined;
   }
 
-  /** After any CLI run: a login the CLI refreshed goes back to Parameter Store. */
+  /**
+   * After any CLI run: a login the CLI refreshed goes back to Parameter
+   * Store, unless a login was minted there since the task last stored one.
+   * Then that one is taken instead, and the refresh is dropped (#118). When
+   * the parameter cannot be read the refresh waits for the next write-back.
+   */
   async storeIfRefreshed(): Promise<void> {
     const name = this.#parameter;
     const aws = this.#deps.aws;
@@ -294,7 +324,7 @@ export class Login {
       name === undefined ||
       aws === undefined ||
       text === undefined ||
-      text === this.#stored
+      digest(text) === this.#stored
     )
       return;
     const parsed = parseCredentials(text);
@@ -302,8 +332,14 @@ export class Login {
       log.error("login-dead", { why: parsed.reason });
       return;
     }
+    const taken = await this.#takeMinted();
+    if (taken === "unread") {
+      log.warn("login-stored", { ok: false, why: "parameter unreadable" });
+      return;
+    }
+    if (taken === "taken") return;
     await aws.putSecret(name, writeRecord(text, this.#account));
-    this.#stored = text;
+    this.#remember(text);
     log.info("login-stored", {
       expiresInMinutes: Math.round(
         ((parsed.expiresAt ?? 0) - this.#deps.now()) / 60_000,
@@ -320,6 +356,8 @@ export class Login {
    */
   async keepFresh(): Promise<void> {
     if (this.#parameter === undefined) return;
+    // A login minted while this one still works is taken now (#118).
+    if ((await this.#takeMinted()) === "taken") return;
     const expires = this.#expiresAt();
     if (expires !== undefined && expires - this.#deps.now() > MARGIN_MS) return;
     const attempts: string[][] = [
@@ -377,6 +415,48 @@ export class Login {
   }
 
   /**
+   * Take the stored login if it parses and is not the one the task last
+   * restored or wrote back, whatever its expiry: someone minted it since
+   * (#118). "unread" when the parameter cannot be read, and the reason is
+   * logged.
+   */
+  async #takeMinted(): Promise<"taken" | "kept" | "unread"> {
+    const read = await this.#readParameter();
+    if (!read.ok) return "unread";
+    const value = read.value;
+    if (value === undefined || this.#stored === undefined) return "kept";
+    const record = readRecord(value);
+    if (digest(record.credentials) === this.#stored) return "kept";
+    if (!parseCredentials(record.credentials).ok) return "kept";
+    this.#take(record);
+    return "taken";
+  }
+
+  /** The parameter's value; not ok, and logged, when it cannot be read. */
+  async #readParameter(): Promise<
+    { ok: true; value: string | undefined } | { ok: false }
+  > {
+    const name = this.#parameter;
+    const aws = this.#deps.aws;
+    if (name === undefined || aws === undefined)
+      return { ok: true, value: undefined };
+    try {
+      return { ok: true, value: await aws.getSecret(name) };
+    } catch (error) {
+      log.warn("login-restored", { ok: false, ...errorFields(error) });
+      return { ok: false };
+    }
+  }
+
+  #take(record: { credentials: string; account: Account | undefined }): void {
+    this.#write(record.credentials);
+    this.#remember(record.credentials);
+    this.#account = record.account;
+    this.#configure();
+    log.info("login-restored", { from: "parameter", usable: true });
+  }
+
+  /**
    * Take the stored login if it parses and expires later than the one on
    * disk, as restore() does. False when it is the same login, an older one,
    * or cannot be read. The login the task last restored or wrote back is
@@ -384,27 +464,17 @@ export class Login {
    * never taken back.
    */
   async #pickUpMinted(): Promise<boolean> {
-    const name = this.#parameter;
-    const aws = this.#deps.aws;
-    if (name === undefined || aws === undefined) return false;
-    let value: string | undefined;
-    try {
-      value = await aws.getSecret(name);
-    } catch (error) {
-      log.warn("login-restored", { ok: false, ...errorFields(error) });
-      return false;
-    }
-    if (value === undefined) return false;
-    const record = readRecord(value);
-    if (record.credentials === this.#stored) return false;
+    const read = await this.#readParameter();
+    if (!read.ok || read.value === undefined) return false;
+    const record = readRecord(read.value);
+    if (digest(record.credentials) === this.#stored) return false;
     const stored = parseCredentials(record.credentials);
     if (!stored.ok || (stored.expiresAt ?? 0) <= (this.#expiresAt() ?? 0))
       return false;
-    this.#write(record.credentials);
-    this.#stored = record.credentials;
-    this.#account = record.account;
-    this.#configure();
-    log.info("login-restored", { from: "parameter", usable: true });
+    this.#take(record);
     return true;
   }
 }
+
+const digest = (text: string): string =>
+  createHash("sha256").update(text).digest("hex");
