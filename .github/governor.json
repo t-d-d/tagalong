@@ -1,34 +1,45 @@
 {
+  "$schema": "https://raw.githubusercontent.com/t-d-d/gh-governor/aa9ea3a97772dd74575ce44761a9312f0c60ed0a/schema/governor.schema.json",
   "environment": "askme",
-  "labels": {
+  "workflows": {
+    "ci": ".github/workflows/deploy.yml"
+  },
+  "pickup": {
     "ready": ["workflow: ready for development", "mode: afk"],
     "claim": "workflow: under development",
     "claimRemoves": ["workflow: ready for development"]
   },
-  "features": {
-    "pickup": true,
-    "summons": true,
-    "prMessages": true,
-    "subscribeMessages": true,
-    "prReview": true,
-    "conflicts": true,
-    "ciMessages": true,
-    "deployMessages": true,
+  "summons": {},
+  "prMessages": {},
+  "subscribeMessages": {},
+  "ciMessages": {
+    "prompts": {
+      "breaker": "Read the failed jobs' logs and find the cause. If the cause is in your change, push the fix on a new branch from the default branch with a new PR: PR #{pr} is merged and its branch is done. The repair closes no issue, and you open none for it. Its body links the run, names PR #{pr} as the change that broke it, and says the change goes no further than the repair (test 2 of the pr-review checklist). If the cause is not in your change, or only the owner can fix it, comment on PR #{pr} with what you found instead.",
+      "triage": "Read the failed jobs' logs and find the cause. If a merge caused it, push the fix on a new branch from the default branch with a new PR. The repair closes no issue, and you open none for it. Its body links the run, names the merged PR whose change broke it, and says the change goes no further than the repair (test 2 of the pr-review checklist). Then comment on that PR with what broke and a link to your fix. If no merge caused it, or only the owner can fix it, raise an issue saying what broke and what the owner must do."
+    }
+  },
+  "deployMessages": {
+    "tags": {
+      "live": "live-ok"
+    },
     "deployedLabels": true
   },
-  "workflows": {
-    "ci": ".github/workflows/deploy.yml",
-    "tags": { "live": "live-ok" }
-  },
-  "prompts": {
-    "ciBreaker": "Read the failed jobs' logs and find the cause. If the cause is in your change, push the fix on a new branch from the default branch with a new PR: PR #{pr} is merged and its branch is done. The repair closes no issue, and you open none for it. Its body links the run, names PR #{pr} as the change that broke it, and says the change goes no further than the repair (test 2 of the pr-review checklist). If the cause is not in your change, or only the owner can fix it, comment on PR #{pr} with what you found instead.",
-    "ciTriage": "Read the failed jobs' logs and find the cause. If a merge caused it, push the fix on a new branch from the default branch with a new PR. The repair closes no issue, and you open none for it. Its body links the run, names the merged PR whose change broke it, and says the change goes no further than the repair (test 2 of the pr-review checklist). Then comment on that PR with what broke and a link to your fix. If no merge caused it, or only the owner can fix it, raise an issue saying what broke and what the owner must do."
-  },
-  "review": {
-    "checklist": { "file": ".claude/skills/pr-review/SKILL.md" },
+  "conflicts": {},
+  "prReview": {
+    "prompt": {
+      "file": ".claude/skills/pr-review/SKILL.md"
+    },
     "tickets": {
-      "require": [{ "labels": ["mode: afk", "mode: hitl", "mode: human"] }],
-      "forbid": [{ "labels": ["type: prd"] }]
+      "require": [
+        {
+          "labels": ["mode: afk", "mode: hitl", "mode: human"]
+        }
+      ],
+      "forbid": [
+        {
+          "labels": ["type: prd"]
+        }
+      ]
     },
     "humanOnly": [
       {
@@ -136,6 +147,14 @@
         "reason": "the licence"
       }
     ],
+    "waitForCi": false,
+    "requireChecks": [
+      {
+        "name": "gate",
+        "app": "github-actions"
+      }
+    ],
     "merge": true
-  }
+  },
+  "signOff": {}
 }

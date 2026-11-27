@@ -7,7 +7,7 @@ argument-hint: "<pull-request-number>"
 # PR review
 
 Governor reads this file from main and adds it to its reviewer's prompt
-(`review.checklist` in `.github/dispatch.json`). A pass merges the pull
+(`prReview.prompt` in `.github/governor.json`). A pass merges the pull
 request. A fail posts a comment saying why. Governor asks the author
 session for an edit where one can meet the test. Otherwise the pull
 request waits for the owner.
@@ -87,7 +87,7 @@ order.
    or "later" with no issue fails.
 
 7. **No changed file is on the human-only list.** The list is
-   `review.humanOnly` in `.github/dispatch.json`, each entry a glob and the
+   `prReview.humanOnly` in `.github/governor.json`, each entry a glob and the
    reason its paths wait for the owner. A changed file matching any entry
    fails, and so does a rename away from one.
 
@@ -104,5 +104,5 @@ to the title or body can make the pull request pass.
 
 `/pr-review <number>` reads the pull request and the issues it closes, and
 reports the answer in the chat. It posts nothing. For tests 1, 7 and 8,
-read the issues' labels, `review.humanOnly` and the head's check runs
+read the issues' labels, `prReview.humanOnly` and the head's check runs
 yourself.

@@ -42,7 +42,7 @@ tagalong puts Claude in WhatsApp groups: a linked WhatsApp device and a service 
 - Run the `pre-push` skill before every push. It ends by raising the pull request.
 - The pull request body follows the `pr-description` skill.
 - Nothing deploys except a green merge to main. Never deploy by hand.
-- Governor's PR review merges a pull request that passes the `pr-review` checklist. One that fails waits for your edit or for the owner. One that changes a path on the human-only list in `.github/dispatch.json` waits for the owner. Do not merge your own pull request.
+- Governor's PR review merges a pull request that passes the `pr-review` checklist. One that fails waits for your edit or for the owner. One that changes a path on the human-only list in `.github/governor.json` waits for the owner. Do not merge your own pull request.
 
 ## Issues
 
