@@ -141,6 +141,33 @@ describe("restoring the login", () => {
     expect(login.orgUuid()).toBeUndefined();
   });
 
+  it("names a local failure after the read, not a missing login (#137)", async () => {
+    const { lines } = logLines();
+    const { aws, login, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 3_600_000), account),
+    );
+    // Half written: the CLI was stopped mid-write.
+    writeFileSync(join(home, ".claude.json"), '{"projects":');
+    await login.restore();
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        event: "login-restored",
+        ok: false,
+        error: "SyntaxError",
+      }),
+    );
+    expect(eventsOf(lines)).not.toContain("login-missing");
+  });
+
+  it("still fails as unread when the parameter cannot be read (#137)", async () => {
+    const { aws, login } = setup();
+    aws.getSecret = () => Promise.reject(new Error("AccessDeniedException"));
+    await expect(login.restore()).rejects.toThrow("AccessDeniedException");
+  });
+
   it("says loudly when there is no stored login", async () => {
     const { lines } = logLines();
     const { login, file } = setup();
