@@ -251,17 +251,30 @@ export class Login {
     return join(this.#deps.env.HOME, ".claude.json");
   }
 
-  /** Change ~/.claude.json, keeping what the CLI wrote, in one rename. */
+  /**
+   * Change ~/.claude.json, keeping what the CLI wrote, in one rename. A file
+   * that does not parse, as when the CLI was stopped mid-write, is replaced
+   * with a new one: onboarding done and the account, as #configure() writes
+   * them, and the CLI rebuilds the rest. Left as it was, every restore and
+   * every trust() would fail on it (#145).
+   */
   #editConfig(edit: (config: Config) => Config): void {
     const path = this.#configPath;
-    const current: unknown = existsSync(path)
-      ? JSON.parse(readFileSync(path, "utf8"))
+    const current = existsSync(path)
+      ? (readConfig(readFileSync(path, "utf8")) ?? this.#freshConfig())
       : {};
     const tmp = `${path}.tagalong`;
     writeFileSync(tmp, JSON.stringify(edit(cliConfigSchema.parse(current))), {
       mode: 0o600,
     });
     renameSync(tmp, path);
+  }
+
+  /** What tagalong itself keeps in ~/.claude.json, for one it replaces. */
+  #freshConfig(): Config {
+    return this.#account === undefined
+      ? { hasCompletedOnboarding: true }
+      : { hasCompletedOnboarding: true, oauthAccount: this.#account };
   }
 
   /**
@@ -306,12 +319,21 @@ export class Login {
     return this.#configAccount()?.organizationUuid;
   }
 
-  /** The account ~/.claude.json holds, as far as the CLI wrote it. */
+  /**
+   * The account ~/.claude.json holds, as far as the CLI wrote it. None when
+   * the file is half written: the next edit replaces it (#145).
+   */
   #configAccount(): z.infer<typeof configSchema>["oauthAccount"] {
     const path = this.#configPath;
     if (!existsSync(path)) return undefined;
-    return configSchema.parse(JSON.parse(readFileSync(path, "utf8")))
-      .oauthAccount;
+    let config: unknown;
+    try {
+      config = JSON.parse(readFileSync(path, "utf8"));
+    } catch (error) {
+      if (error instanceof SyntaxError) return undefined;
+      throw error;
+    }
+    return configSchema.parse(config).oauthAccount;
   }
 
   /**
@@ -571,6 +593,16 @@ export class Login {
       return false;
     this.#take(record);
     return true;
+  }
+}
+
+/** The config's text as JSON, or undefined when it does not parse (#145). */
+function readConfig(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    log.warn("login-config-replaced", errorFields(error));
+    return undefined;
   }
 }
 

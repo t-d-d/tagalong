@@ -2343,15 +2343,15 @@ describe("starting", () => {
         },
       }),
     );
-    mkdirSync(t.env.HOME, { recursive: true });
-    writeFileSync(join(t.env.HOME, ".claude.json"), '{"projects":');
+    // A config that cannot be read at all: a folder where the file goes.
+    mkdirSync(join(t.env.HOME, ".claude.json"), { recursive: true });
     const server = await t.app.start();
     try {
       expect(t.lines).toContainEqual(
         expect.objectContaining({
           level: "error",
           event: "login-restored",
-          error: "SyntaxError",
+          error: "Error",
         }),
       );
       expect(t.lines.map((line) => line.event)).not.toContain("login-missing");
