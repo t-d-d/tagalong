@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   type Harness,
@@ -2340,6 +2341,76 @@ describe("starting", () => {
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+
+  it("reads the people again on the next device check when the read fails as the device arrives", async () => {
+    const t = (h = await harness({
+      // No device yet, and a whatsapp.db the bridge has not filled in, so
+      // the first read of the people fails as a held lock would.
+      db: (db) => {
+        renameSync(
+          join(db.store, "messages.db"),
+          join(db.store, "messages.db.away"),
+        );
+        renameSync(
+          join(db.store, "whatsapp.db"),
+          join(db.store, "whatsapp.db.full"),
+        );
+        writeFileSync(join(db.store, "whatsapp.db"), "");
+      },
+    }));
+    const { people } = t.app.parts;
+    expect(await t.app.checkDevice()).not.toBe("present");
+
+    renameSync(
+      join(t.db.store, "messages.db.away"),
+      join(t.db.store, "messages.db"),
+    );
+    expect(await t.app.checkDevice()).toBe("present");
+    expect(people.self.size).toBe(0);
+    expect(t.lines).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "loop-failed",
+        loop: "people",
+      }),
+    );
+    expect(t.lines).not.toContainEqual(
+      expect.objectContaining({ event: "loop-failed", loop: "device" }),
+    );
+
+    // The bridge lets go: the same file now holds the device and contacts.
+    const device = new DatabaseSync(join(t.db.store, "whatsapp.db"));
+    device.exec(`ATTACH '${join(t.db.store, "whatsapp.db.full")}' AS full;
+      CREATE TABLE whatsmeow_device AS SELECT * FROM full.whatsmeow_device;
+      CREATE TABLE whatsmeow_contacts AS SELECT * FROM full.whatsmeow_contacts;
+      CREATE TABLE whatsmeow_lid_map AS SELECT * FROM full.whatsmeow_lid_map;`);
+    device.close();
+    expect(await t.app.checkDevice()).toBe("present");
+    expect([...people.self].sort()).toEqual([CLAUDE, CLAUDE_LID].sort());
+    expect(people.nameOf(OWNER)).toBe("Thomas");
+  });
+
+  it("reads the people again on the next device check when the read at start fails", async () => {
+    const t = (h = await harness({
+      db: (db) => {
+        renameSync(
+          join(db.store, "whatsapp.db"),
+          join(db.store, "whatsapp.db.full"),
+        );
+        writeFileSync(join(db.store, "whatsapp.db"), "");
+      },
+    }));
+    const { people } = t.app.parts;
+    expect(people.self.size).toBe(0);
+    const device = new DatabaseSync(join(t.db.store, "whatsapp.db"));
+    device.exec(`ATTACH '${join(t.db.store, "whatsapp.db.full")}' AS full;
+      CREATE TABLE whatsmeow_device AS SELECT * FROM full.whatsmeow_device;
+      CREATE TABLE whatsmeow_contacts AS SELECT * FROM full.whatsmeow_contacts;
+      CREATE TABLE whatsmeow_lid_map AS SELECT * FROM full.whatsmeow_lid_map;`);
+    device.close();
+    expect(await t.app.checkDevice()).toBe("present");
+    expect([...people.self].sort()).toEqual([CLAUDE, CLAUDE_LID].sort());
   });
 
   it("listens on loopback", async () => {
