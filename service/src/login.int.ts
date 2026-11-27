@@ -162,7 +162,36 @@ describe("restoring the login", () => {
     expect(eventsOf(lines)).not.toContain("login-missing");
   });
 
-  it("still fails as unread when the parameter cannot be read (#137)", async () => {
+  it("keeps the volume's newer login after a local failure, and writes it back at the next check (#137)", async () => {
+    const first = setup();
+    first.aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await first.login.restore();
+    // The CLI refreshed it, and the task stopped before writing it back.
+    writeFileSync(first.file, credentials("old-2", NOW + 8 * 3_600_000));
+    writeFileSync(join(first.home, ".claude.json"), '{"projects":');
+    const { lines } = logLines();
+    const { aws, login, file } = setup(undefined, first.home);
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await login.restore();
+    expect(lines).toContainEqual(
+      expect.objectContaining({ level: "error", event: "login-restored" }),
+    );
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("old-2", NOW + 8 * 3_600_000),
+    );
+    await login.storeIfRefreshed();
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "").credentials).toBe(
+      credentials("old-2", NOW + 8 * 3_600_000),
+    );
+  });
+
+  it("still rejects when the parameter cannot be read, for the start-up catch (#137)", async () => {
     const { aws, login } = setup();
     aws.getSecret = () => Promise.reject(new Error("AccessDeniedException"));
     await expect(login.restore()).rejects.toThrow("AccessDeniedException");
