@@ -72,17 +72,24 @@ Resources:
     Properties:
       AlarmName: tagalong-error-lines
       AlarmDescription: >-
-        tagalong wrote an error line. Open Logs Insights on /tagalong and
-        filter on level = "error".
+        In alarm, tagalong has written an error line in the last 15
+        minutes. OK means 15 minutes have passed with none. Open Logs
+        Insights on /tagalong and filter on level = "error".
       Namespace: tagalong
       MetricName: ErrorLines
       Statistic: Sum
+      # Any error line in the last 15 minutes holds the alarm, so a
+      # repeating fault emails once when it starts and once when it stops
+      # (alerting.md, #104).
       Period: 60
-      EvaluationPeriods: 1
+      EvaluationPeriods: 15
+      DatapointsToAlarm: 1
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
         - !Ref AlertTopic
 
   # A heartbeat whose bridge is connected, every five minutes (alerting.md).
