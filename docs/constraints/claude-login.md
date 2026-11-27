@@ -20,7 +20,10 @@ at once, kills one of them.
 - One CLI runs at a time, through one queue.
 - While nothing else runs the CLI, the login is kept fresh: within 30
   minutes of expiry, claude auth status, then a one-line prompt.
-- A login that cannot be used or refreshed is an error line.
+- A login that cannot be used or refreshed is an error line, unless
+  /tagalong/claude-login holds a usable login that expires later than
+  the one on disk. Then the task takes that one, as at start, so a
+  newly minted login is picked up within 10 minutes, with no restart.
 - The CLI's org is named in CLAUDE_CODE_ORGANIZATION_UUID.
 
 ## Do not
@@ -31,4 +34,5 @@ at once, kills one of them.
   owns the login's format.
 
 History: Set when the repo was made, October 2026, following podstow's
-dispatcher.
+dispatcher. A newly minted login is picked up without a restart since
+27 November 2026 (#105).

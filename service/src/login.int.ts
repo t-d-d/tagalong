@@ -237,6 +237,67 @@ describe("keeping the login fresh", () => {
     expect(lines.at(-1)).toMatchObject({ level: "error", event: "login-dead" });
   });
 
+  it("picks up a newer login from Parameter Store instead of alerting", async () => {
+    const { lines } = logLines();
+    const { aws, login, file, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW - 60_000), account),
+    );
+    await login.restore();
+    const minted = { accountUuid: "acc-2", organizationUuid: "org-2" };
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("minted", NOW + 8 * 3_600_000), minted),
+    );
+    await login.keepFresh();
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("minted", NOW + 8 * 3_600_000),
+    );
+    expect(login.orgUuid()).toBe("org-2");
+    expect(
+      JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")),
+    ).toMatchObject({ oauthAccount: minted });
+    expect(lines.at(-1)).toMatchObject({
+      level: "info",
+      event: "login-restored",
+      from: "parameter",
+    });
+    expect(lines.filter((line) => line.level === "error")).toEqual([]);
+    // The picked-up login is already stored, so nothing is written back.
+    aws.puts.length = 0;
+    await login.storeIfRefreshed();
+    expect(aws.puts).toEqual([]);
+  });
+
+  it("still alerts when Parameter Store holds the same dead login", async () => {
+    const { lines } = logLines();
+    const { aws, login } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW - 60_000), account),
+    );
+    await login.restore();
+    await login.keepFresh();
+    expect(lines.at(-1)).toMatchObject({ level: "error", event: "login-dead" });
+    expect(eventsOf(lines).filter((e) => e === "login-restored")).toHaveLength(
+      1,
+    );
+  });
+
+  it("still alerts when Parameter Store cannot be read", async () => {
+    const { lines } = logLines();
+    const { aws, login } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW - 60_000), account),
+    );
+    await login.restore();
+    aws.getSecret = () => Promise.reject(new Error("throttled"));
+    await login.keepFresh();
+    expect(lines.at(-1)).toMatchObject({ level: "error", event: "login-dead" });
+  });
+
   it("refuses to store a login the CLI has broken", async () => {
     const { lines } = logLines();
     const { aws, login, file } = setup();

@@ -152,7 +152,7 @@ function main(): number {
       return 1;
     }
     process.stdout.write(
-      `${PARAMETER} set${ids === undefined ? ", without the account's ids: the CLI will look the org up" : ", with the account's ids"}. Restart the task to use it.\n`,
+      `${PARAMETER} set${ids === undefined ? ", without the account's ids: the CLI will look the org up" : ", with the account's ids"}. The task picks it up within 10 minutes, with no restart.\n`,
     );
     return 0;
   } finally {
