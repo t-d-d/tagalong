@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -148,15 +149,15 @@ describe("restoring the login", () => {
       PARAMETER,
       writeRecord(credentials("stored", NOW + 3_600_000), account),
     );
-    // Half written: the CLI was stopped mid-write.
-    writeFileSync(join(home, ".claude.json"), '{"projects":');
+    // A config that cannot be read at all: a folder where the file goes.
+    mkdirSync(join(home, ".claude.json"));
     await login.restore();
     expect(lines).toContainEqual(
       expect.objectContaining({
         level: "error",
         event: "login-restored",
         ok: false,
-        error: "SyntaxError",
+        error: "Error",
       }),
     );
     expect(eventsOf(lines)).not.toContain("login-missing");
@@ -171,7 +172,8 @@ describe("restoring the login", () => {
     await first.login.restore();
     // The CLI refreshed it, and the task stopped before writing it back.
     writeFileSync(first.file, credentials("old-2", NOW + 8 * 3_600_000));
-    writeFileSync(join(first.home, ".claude.json"), '{"projects":');
+    rmSync(join(first.home, ".claude.json"));
+    mkdirSync(join(first.home, ".claude.json"));
     const { lines } = logLines();
     const { aws, login, file } = setup(undefined, first.home);
     aws.secrets.set(
@@ -189,6 +191,40 @@ describe("restoring the login", () => {
     expect(readRecord(aws.secrets.get(PARAMETER) ?? "").credentials).toBe(
       credentials("old-2", NOW + 8 * 3_600_000),
     );
+  });
+
+  it("replaces a half-written config, so onboarding and the account are written (#145)", async () => {
+    const { lines } = logLines();
+    const { aws, login, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 3_600_000), account),
+    );
+    // Half written: the CLI was stopped mid-write.
+    writeFileSync(join(home, ".claude.json"), '{"projects":');
+    await login.restore();
+    expect(
+      JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")),
+    ).toEqual({ hasCompletedOnboarding: true, oauthAccount: account });
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "login-config-replaced",
+        error: "SyntaxError",
+      }),
+    );
+    expect(lines).toContainEqual(
+      expect.objectContaining({ level: "info", event: "login-restored" }),
+    );
+    expect(lines.filter((line) => line.level === "error")).toEqual([]);
+    expect(login.orgUuid()).toBe("org-1");
+    login.trust("/data/workspaces/o__r");
+    expect(
+      JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")),
+    ).toMatchObject({
+      hasCompletedOnboarding: true,
+      projects: { "/data/workspaces/o__r": { hasTrustDialogAccepted: true } },
+    });
   });
 
   it("still rejects when the parameter cannot be read, for the start-up catch (#137)", async () => {
@@ -755,6 +791,33 @@ describe("trusting a workspace", () => {
         "/data/workspaces/o__other": { hasTrustDialogAccepted: true },
       },
     });
+  });
+});
+
+describe("a config the CLI left half written after the restore (#145)", () => {
+  it("is replaced when a workspace is trusted, so the request goes on", () => {
+    const { lines } = logLines();
+    const { login, home } = setup();
+    const config = join(home, ".claude.json");
+    writeFileSync(config, '{"numStartups":3,"proj');
+    login.trust("/data/workspaces/o__r");
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({
+      projects: { "/data/workspaces/o__r": { hasTrustDialogAccepted: true } },
+    });
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        event: "login-config-replaced",
+      }),
+    );
+  });
+
+  it("still fails when the config cannot be read at all", () => {
+    const { login, home } = setup();
+    mkdirSync(join(home, ".claude.json"));
+    expect(() => {
+      login.trust("/data/workspaces/o__r");
+    }).toThrow();
   });
 });
 

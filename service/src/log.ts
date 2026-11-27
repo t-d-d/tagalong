@@ -46,6 +46,7 @@ export const events = [
   "login-stored",
   "login-dead",
   "login-missing",
+  "login-config-replaced",
   "device-present",
   "device-waiting",
   "device-seeded",
