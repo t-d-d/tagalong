@@ -250,11 +250,17 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       run,
       env: cliEnv(env),
     });
+    if (device === "present") readPeople();
     if (device === "seeded") {
-      groups.reload();
-      state.reload();
+      // The people are read even when a reload throws: every later device
+      // check returns early, so nothing else would read them for 10 minutes.
+      try {
+        groups.reload();
+        state.reload();
+      } finally {
+        readPeople();
+      }
     }
-    if (device === "present" || device === "seeded") readPeople();
     return device;
   }
 

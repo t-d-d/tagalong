@@ -1,6 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
@@ -2411,6 +2418,34 @@ describe("starting", () => {
     expect(people.self.size).toBe(0);
     fillDevice(t.db.store);
     expect(await t.app.checkDevice()).toBe("present");
+    expect([...people.self].sort()).toEqual([CLAUDE, CLAUDE_LID].sort());
+  });
+
+  it("reads the people when the device is seeded, even if the groups cannot be reloaded", async () => {
+    // The device arrives from the bucket, as scripts/move-device.ts uploads it.
+    const seed = join(
+      mkdtempSync(join(tmpdir(), "tagalong-seed-")),
+      "device.tgz",
+    );
+    const t = (h = await harness({
+      env: { ATTACHMENTS_BUCKET: "files" },
+      db: (db) => {
+        execFileSync("tar", ["-czf", seed, "-C", db.dir, "store"]);
+        renameSync(
+          join(db.store, "messages.db"),
+          join(db.store, "messages.db.away"),
+        );
+      },
+    }));
+    const { people } = t.app.parts;
+    expect(await t.app.checkDevice()).toBe("waiting");
+    t.aws.objects.set("files/seed/device.tgz", {
+      body: readFileSync(seed),
+      contentType: "application/gzip",
+    });
+    writeFileSync(t.env.GROUPS_FILE, "not json");
+
+    await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
     expect([...people.self].sort()).toEqual([CLAUDE, CLAUDE_LID].sort());
   });
 
