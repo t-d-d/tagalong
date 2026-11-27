@@ -14,7 +14,8 @@ the last net for a runaway.
   the last 15 minutes, and returns to OK once 15 minutes pass with
   none. It emails when it fires and when it returns to OK, so a
   repeating fault sends two emails, not one per line. The window is
-  longer than the 10-minute login check, so a dead login holds it.
+  longer than the 10-minute login check, so a dead login normally holds
+  it.
 - A metric filter counts heartbeat lines whose bridge is connected. The
   no-heartbeat alarm fires when there is none in 15 minutes, and
   missing data counts as none. It covers a stopped task, a crash loop,

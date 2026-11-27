@@ -72,8 +72,9 @@ Resources:
     Properties:
       AlarmName: tagalong-error-lines
       AlarmDescription: >-
-        tagalong wrote an error line. Open Logs Insights on /tagalong and
-        filter on level = "error".
+        In alarm, tagalong has written an error line in the last 15
+        minutes. OK means 15 minutes have passed with none. Open Logs
+        Insights on /tagalong and filter on level = "error".
       Namespace: tagalong
       MetricName: ErrorLines
       Statistic: Sum
