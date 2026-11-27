@@ -215,7 +215,15 @@ export class Login {
       from: keepDisk ? "volume" : "parameter",
       usable: stored.ok,
     });
-    if (keepDisk) await this.storeIfRefreshed();
+    if (!keepDisk) return;
+    // The parameter was read, so a failed write is not a missing login. The
+    // volume's login stays in use, and its digest still differs from the
+    // one kept, so the next check writes it back (#127).
+    try {
+      await this.storeIfRefreshed();
+    } catch (error) {
+      log.warn("login-stored", { ok: false, ...errorFields(error) });
+    }
   }
 
   get #configPath(): string {
