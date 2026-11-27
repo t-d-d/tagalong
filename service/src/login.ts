@@ -198,13 +198,18 @@ export class Login {
     renameSync(tmp, path);
   }
 
-  /** ~/.claude.json: onboarding done, and the account. */
+  /**
+   * ~/.claude.json: onboarding done, and the account. A login stored
+   * without its ids drops the account left by an earlier one, so the CLI
+   * looks the org up instead of using the old org (#116).
+   */
   #configure(): void {
-    this.#editConfig((config) => ({
-      ...config,
-      hasCompletedOnboarding: true,
-      ...(this.#account === undefined ? {} : { oauthAccount: this.#account }),
-    }));
+    this.#editConfig((config) => {
+      const next: Config = { ...config, hasCompletedOnboarding: true };
+      if (this.#account === undefined) delete next.oauthAccount;
+      else next.oauthAccount = this.#account;
+      return next;
+    });
   }
 
   /**

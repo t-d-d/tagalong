@@ -28,8 +28,10 @@ const credentials = (accessToken: string, expiresAt: number) =>
     },
   });
 
-function setup(runner: Runner = () => Promise.resolve({ code: 0, out: "" })) {
-  const home = mkdtempSync(join(tmpdir(), "tagalong-home-"));
+function setup(
+  runner: Runner = () => Promise.resolve({ code: 0, out: "" }),
+  home = mkdtempSync(join(tmpdir(), "tagalong-home-")),
+) {
   const env = readEnv({
     HOME: home,
     LOGIN_PARAMETER: PARAMETER,
@@ -87,6 +89,55 @@ describe("restoring the login", () => {
       credentials: credentials("newer", NOW + 7_200_000),
       account,
     });
+  });
+
+  it("forgets the previous org when the restored login has no ids", async () => {
+    const first = setup();
+    first.aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 3_600_000), account),
+    );
+    await first.login.restore();
+    first.login.trust("/data/workspaces/o__r");
+    // A restart, with a login minted without the account's ids.
+    const { aws, login, home } = setup(undefined, first.home);
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("minted", NOW + 7_200_000), undefined),
+    );
+    await login.restore();
+    const config: unknown = JSON.parse(
+      readFileSync(join(home, ".claude.json"), "utf8"),
+    );
+    expect(config).not.toHaveProperty("oauthAccount");
+    expect(config).toMatchObject({
+      hasCompletedOnboarding: true,
+      projects: { "/data/workspaces/o__r": { hasTrustDialogAccepted: true } },
+    });
+    expect(login.orgUuid()).toBeUndefined();
+  });
+
+  it("forgets the previous org when it keeps a newer login from the volume", async () => {
+    const { aws, login, file, home } = setup();
+    writeFileSync(
+      join(home, ".claude.json"),
+      JSON.stringify({ oauthAccount: account, hasCompletedOnboarding: true }),
+    );
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 1000), undefined),
+    );
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, credentials("newer", NOW + 7_200_000));
+    await login.restore();
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("newer", NOW + 7_200_000),
+    );
+    const config: unknown = JSON.parse(
+      readFileSync(join(home, ".claude.json"), "utf8"),
+    );
+    expect(config).not.toHaveProperty("oauthAccount");
+    expect(login.orgUuid()).toBeUndefined();
   });
 
   it("says loudly when there is no stored login", async () => {
@@ -268,6 +319,26 @@ describe("keeping the login fresh", () => {
     aws.puts.length = 0;
     await login.storeIfRefreshed();
     expect(aws.puts).toEqual([]);
+  });
+
+  it("forgets the previous org when the picked-up login has no ids", async () => {
+    const { aws, login, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW - 60_000), account),
+    );
+    await login.restore();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("minted", NOW + 8 * 3_600_000), undefined),
+    );
+    await login.keepFresh();
+    const config: unknown = JSON.parse(
+      readFileSync(join(home, ".claude.json"), "utf8"),
+    );
+    expect(config).not.toHaveProperty("oauthAccount");
+    expect(config).toMatchObject({ hasCompletedOnboarding: true });
+    expect(login.orgUuid()).toBeUndefined();
   });
 
   it("still alerts when Parameter Store holds the same dead login", async () => {
