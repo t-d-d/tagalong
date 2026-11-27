@@ -477,14 +477,16 @@ export class Login {
    * check: the login is still refreshed, and the next check tries again. It
    * is a warn the first time, and an error line when the write-back before
    * this check was refused too, so the owner hears of it before the stored
-   * refresh token is the only copy left (#141).
+   * refresh token is the only copy left (#141). A write-back or a taken
+   * login earlier in this check clears that, so it is a warn again.
    */
   async #storeAtCheck(refusedBefore: boolean): Promise<void> {
+    const owed = refusedBefore && this.#refused;
     try {
       await this.storeIfRefreshed();
     } catch (error) {
       const fields = { ok: false, ...errorFields(error) };
-      if (refusedBefore) log.error("login-stored", fields);
+      if (owed) log.error("login-stored", fields);
       else log.warn("login-stored", fields);
     }
   }

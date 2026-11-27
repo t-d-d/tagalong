@@ -632,6 +632,22 @@ describe("a write-back Parameter Store keeps refusing at the login check (#141)"
     expect(refusals(lines.slice(after))).toEqual(["warn"]);
   });
 
+  it("is a warn when a write-back went through earlier in the same check", async () => {
+    const { lines } = logLines();
+    const { aws, login, file, putSecret } = await refusing();
+    await login.keepFresh();
+    // Close to expiry again; the first write-back at this check goes
+    // through, and the one after the refresh is refused.
+    writeFileSync(file, credentials("old-4", NOW + 25 * 60_000));
+    let puts = 0;
+    aws.putSecret = (name, value) =>
+      puts++ === 0 ? putSecret(name, value) : denied();
+    const before = lines.length;
+    await login.keepFresh();
+    expect(puts).toBe(2);
+    expect(refusals(lines.slice(before))).toEqual(["warn"]);
+  });
+
   it("is an error line at the check after a refused write-back from a CLI run", async () => {
     const { lines } = logLines();
     const { login, file } = await refusing();
