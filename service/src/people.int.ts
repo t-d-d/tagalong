@@ -37,8 +37,8 @@ async function holdLock(path: string): Promise<ChildProcess> {
     ].join("\n"),
     path,
   ]);
-  const [line] = (await once(holder.stdout, "data")) as [Buffer];
-  expect(line.toString().trim()).toBe("locked");
+  const said: unknown[] = await once(holder.stdout, "data");
+  expect(String(said[0]).trim()).toBe("locked");
   return holder;
 }
 
