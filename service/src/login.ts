@@ -125,7 +125,11 @@ export class Login {
   #account: Account | undefined;
   /** A digest of the credentials the task last restored or wrote back. */
   #stored: string | undefined;
-  /** Whether a write-back was refused since the parameter last held this login (#141). */
+  /**
+   * Whether a write-back was refused (#141), or held back because the
+   * parameter could not be read (#147), since the parameter last held this
+   * login.
+   */
   #refused = false;
 
   constructor(deps: LoginDeps) {
@@ -400,26 +404,45 @@ export class Login {
    * After any CLI run: a login the CLI refreshed goes back to Parameter
    * Store, unless a login was minted there since the task last stored one.
    * Then that one is taken instead, and the refresh is dropped (#118). When
-   * the parameter cannot be read the refresh waits for the next write-back.
+   * the parameter cannot be read the refresh waits for the next write-back,
+   * and that is a warn.
    */
   async storeIfRefreshed(): Promise<void> {
+    const held = await this.#writeBack();
+    if (held !== undefined)
+      log.warn("login-stored", { ok: false, ...errorFields(held.error) });
+  }
+
+  /**
+   * storeIfRefreshed() without the warn: the read's error when the
+   * parameter could not be read and the refresh is held back (#147). A
+   * refused write throws.
+   */
+  async #writeBack(): Promise<{ error: unknown } | undefined> {
     const name = this.#parameter;
     const aws = this.#deps.aws;
     const text = this.#read();
+    // Before a restore succeeds, the digest a previous run kept says which
+    // login the parameter holds, so a restart that cannot read it does not
+    // count that login as held back (#147).
     if (
       name === undefined ||
       aws === undefined ||
       text === undefined ||
-      digest(text) === this.#stored
+      digest(text) === (this.#stored ?? this.#lastStored())
     )
-      return;
+      return undefined;
     const parsed = parseCredentials(text);
     if (!parsed.ok) {
       log.error("login-dead", { why: parsed.reason });
-      return;
+      return undefined;
     }
-    const taken = await this.#takeMinted("login-stored");
-    if (taken !== "kept") return;
+    const taken = await this.#takeMinted();
+    if (taken.outcome === "unread") {
+      this.#refused = true;
+      return { error: taken.error };
+    }
+    if (taken.outcome === "taken") return undefined;
     const account = this.#account ?? this.#lookedUp();
     try {
       await aws.putSecret(name, writeRecord(text, account));
@@ -434,6 +457,7 @@ export class Login {
         ((parsed.expiresAt ?? 0) - this.#deps.now()) / 60_000,
       ),
     });
+    return undefined;
   }
 
   /**
@@ -445,15 +469,19 @@ export class Login {
    */
   async keepFresh(): Promise<void> {
     if (this.#parameter === undefined) return;
-    // A write-back refused before this check, and refused again in it,
-    // is an error line (#141).
+    // A write-back refused or held back before this check, and again in
+    // it, is an error line (#141, #147).
     const refusedBefore = this.#refused;
     const store = () => this.#storeAtCheck(refusedBefore);
     // A login minted while this one still works is taken now (#118), and
     // refreshed below if it is close to expiry. Otherwise a refresh held
-    // back when the parameter could not be read goes back now.
-    const taken = await this.#takeMinted("login-restored");
-    if (taken === "kept") await store();
+    // back when the parameter could not be read goes back now. When it
+    // still cannot be read, the write-back tries again, so a refresh held
+    // back across checks reaches login-stored (#147).
+    const taken = await this.#takeMinted();
+    if (taken.outcome === "unread")
+      log.warn("login-restored", { ok: false, ...errorFields(taken.error) });
+    if (taken.outcome !== "taken") await store();
     const expires = this.#expiresAt();
     if (expires !== undefined && expires - this.#deps.now() > MARGIN_MS) return;
     const attempts: string[][] = [
@@ -515,47 +543,53 @@ export class Login {
    * check: the login is still refreshed, and the next check tries again. It
    * is a warn the first time, and an error line when the write-back before
    * this check was refused too, so the owner hears of it before the stored
-   * refresh token is the only copy left (#141). A write-back or a taken
-   * login earlier in this check clears that, so it is a warn again.
+   * refresh token is the only copy left (#141). A write-back held back
+   * because the parameter cannot be read counts the same (#147). A
+   * write-back or a taken login earlier in this check clears that, so it is
+   * a warn again.
    */
   async #storeAtCheck(refusedBefore: boolean): Promise<void> {
     const owed = refusedBefore && this.#refused;
-    try {
-      await this.storeIfRefreshed();
-    } catch (error) {
+    const fail = (error: unknown): void => {
       const fields = { ok: false, ...errorFields(error) };
       if (owed) log.error("login-stored", fields);
       else log.warn("login-stored", fields);
+    };
+    try {
+      const held = await this.#writeBack();
+      if (held !== undefined) fail(held.error);
+    } catch (error) {
+      fail(error);
     }
   }
 
   /**
    * Take the stored login if it parses and is not the one the task last
    * restored or wrote back, whatever its expiry: someone minted it since
-   * (#118). "unread" when the parameter cannot be read, and the reason is
-   * logged under `event`.
+   * (#118). "unread", with the read's error for the caller to log, when
+   * the parameter cannot be read.
    */
-  async #takeMinted(
-    event: "login-restored" | "login-stored",
-  ): Promise<"taken" | "kept" | "unread"> {
-    const read = await this.#readParameter(event);
-    if (!read.ok) return "unread";
+  async #takeMinted(): Promise<
+    { outcome: "taken" | "kept" } | { outcome: "unread"; error: unknown }
+  > {
+    const read = await this.#readParameter();
+    if (!read.ok) return { outcome: "unread", error: read.error };
     const value = read.value;
     // Before a restore succeeds, the digest a previous run kept says which
     // login the task last stored.
     const last = this.#stored ?? this.#lastStored();
-    if (value === undefined || last === undefined) return "kept";
+    if (value === undefined || last === undefined) return { outcome: "kept" };
     const record = readRecord(value);
-    if (digest(record.credentials) === last) return "kept";
-    if (!parseCredentials(record.credentials).ok) return "kept";
+    if (digest(record.credentials) === last) return { outcome: "kept" };
+    if (!parseCredentials(record.credentials).ok) return { outcome: "kept" };
     this.#take(record);
-    return "taken";
+    return { outcome: "taken" };
   }
 
-  /** The parameter's value; not ok, and logged under `event`, when it cannot be read. */
-  async #readParameter(
-    event: "login-restored" | "login-stored" = "login-restored",
-  ): Promise<{ ok: true; value: string | undefined } | { ok: false }> {
+  /** The parameter's value, or the error when it cannot be read. */
+  async #readParameter(): Promise<
+    { ok: true; value: string | undefined } | { ok: false; error: unknown }
+  > {
     const name = this.#parameter;
     const aws = this.#deps.aws;
     if (name === undefined || aws === undefined)
@@ -563,8 +597,7 @@ export class Login {
     try {
       return { ok: true, value: await aws.getSecret(name) };
     } catch (error) {
-      log.warn(event, { ok: false, ...errorFields(error) });
-      return { ok: false };
+      return { ok: false, error };
     }
   }
 
@@ -585,7 +618,11 @@ export class Login {
    */
   async #pickUpMinted(): Promise<boolean> {
     const read = await this.#readParameter();
-    if (!read.ok || read.value === undefined) return false;
+    if (!read.ok) {
+      log.warn("login-restored", { ok: false, ...errorFields(read.error) });
+      return false;
+    }
+    if (read.value === undefined) return false;
     const record = readRecord(read.value);
     if (digest(record.credentials) === this.#stored) return false;
     const stored = parseCredentials(record.credentials);
