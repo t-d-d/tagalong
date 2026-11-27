@@ -151,6 +151,245 @@ describe("restoring the login", () => {
   });
 });
 
+describe("a login minted while the old one still works (#118)", () => {
+  const minted = { accountUuid: "acc-2", organizationUuid: "org-2" };
+
+  it("takes the new login before the old one's refresh can replace it", async () => {
+    const harness = { file: "" };
+    const { aws, login, file } = setup((_command, args) => {
+      if (args[0] === "-p")
+        writeFileSync(harness.file, credentials("old-2", NOW + 8 * 3_600_000));
+      return Promise.resolve({ code: 0, out: "" });
+    });
+    harness.file = file;
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await login.restore();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("minted", NOW + 2 * 3_600_000), minted),
+    );
+    await login.keepFresh();
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("minted", NOW + 2 * 3_600_000),
+    );
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "")).toEqual({
+      credentials: credentials("minted", NOW + 2 * 3_600_000),
+      account: minted,
+    });
+    expect(login.orgUuid()).toBe("org-2");
+  });
+
+  it("takes it within one check, though the old login has hours left", async () => {
+    const { lines } = logLines();
+    const { aws, login, file } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 8 * 3_600_000), account),
+    );
+    await login.restore();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("minted", NOW + 3_600_000), minted),
+    );
+    await login.keepFresh();
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("minted", NOW + 3_600_000),
+    );
+    expect(lines.at(-1)).toMatchObject({
+      level: "info",
+      event: "login-restored",
+      from: "parameter",
+    });
+  });
+
+  it("does not write the old login's refresh over it after a CLI run", async () => {
+    const { aws, login, file } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await login.restore();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("minted", NOW + 3_600_000), minted),
+    );
+    // A session's CLI run refreshed the old login.
+    writeFileSync(file, credentials("old-2", NOW + 8 * 3_600_000));
+    await login.storeIfRefreshed();
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("minted", NOW + 3_600_000),
+    );
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "").credentials).toBe(
+      credentials("minted", NOW + 3_600_000),
+    );
+    expect(login.orgUuid()).toBe("org-2");
+  });
+
+  it("holds the refresh back when Parameter Store cannot be read", async () => {
+    const { lines } = logLines();
+    const { aws, login, file } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await login.restore();
+    writeFileSync(file, credentials("old-2", NOW + 8 * 3_600_000));
+    aws.getSecret = () => Promise.reject(new Error("throttled"));
+    await login.storeIfRefreshed();
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "").credentials).toBe(
+      credentials("old", NOW + 20 * 60_000),
+    );
+    expect(lines.at(-1)).toMatchObject({
+      level: "warn",
+      event: "login-stored",
+    });
+    // The next write-back stores it.
+    aws.getSecret = (name) => Promise.resolve(aws.secrets.get(name));
+    await login.storeIfRefreshed();
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "").credentials).toBe(
+      credentials("old-2", NOW + 8 * 3_600_000),
+    );
+  });
+
+  it("writes a held refresh back at the next check", async () => {
+    const { aws, login, file } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await login.restore();
+    writeFileSync(file, credentials("old-2", NOW + 8 * 3_600_000));
+    aws.getSecret = () => Promise.reject(new Error("throttled"));
+    await login.storeIfRefreshed();
+    aws.getSecret = (name) => Promise.resolve(aws.secrets.get(name));
+    await login.keepFresh();
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "").credentials).toBe(
+      credentials("old-2", NOW + 8 * 3_600_000),
+    );
+  });
+
+  it("refreshes a new login that is close to expiry in the same check", async () => {
+    const harness = { file: "" };
+    const { aws, login, file } = setup((_command, args) => {
+      if (args[0] === "auth")
+        writeFileSync(
+          harness.file,
+          credentials("minted-2", NOW + 8 * 3_600_000),
+        );
+      return Promise.resolve({ code: 0, out: "" });
+    });
+    harness.file = file;
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 8 * 3_600_000), account),
+    );
+    await login.restore();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("minted", NOW + 10 * 60_000), minted),
+    );
+    await login.keepFresh();
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("minted-2", NOW + 8 * 3_600_000),
+    );
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "")).toEqual({
+      credentials: credentials("minted-2", NOW + 8 * 3_600_000),
+      account: minted,
+    });
+  });
+
+  it("names a failed parameter read at write-back as a write-back", async () => {
+    const { lines } = logLines();
+    const { aws, login, file } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await login.restore();
+    writeFileSync(file, credentials("old-2", NOW + 8 * 3_600_000));
+    const before = lines.length;
+    aws.getSecret = () => Promise.reject(new Error("throttled"));
+    await login.storeIfRefreshed();
+    expect(lines.slice(before).map((line) => line.event)).toEqual([
+      "login-stored",
+    ]);
+  });
+
+  it("takes the new login at a restart, though the volume's expires later", async () => {
+    const first = setup();
+    first.aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await first.login.restore();
+    // The CLI refreshed the old login, and it was written back.
+    writeFileSync(first.file, credentials("old-2", NOW + 8 * 3_600_000));
+    await first.login.storeIfRefreshed();
+    // A restart, after a new login was minted.
+    const { aws, login, file } = setup(undefined, first.home);
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("minted", NOW + 3_600_000), minted),
+    );
+    await login.restore();
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("minted", NOW + 3_600_000),
+    );
+    expect(aws.puts).toEqual([]);
+    expect(login.orgUuid()).toBe("org-2");
+  });
+
+  it("takes the new login at write-back when the restore at a restart failed", async () => {
+    const first = setup();
+    first.aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await first.login.restore();
+    const { aws, login, file } = setup(undefined, first.home);
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("minted", NOW + 3_600_000), minted),
+    );
+    aws.getSecret = () => Promise.reject(new Error("throttled"));
+    await expect(login.restore()).rejects.toThrow("throttled");
+    aws.getSecret = (name) => Promise.resolve(aws.secrets.get(name));
+    // A session's CLI run refreshed the old login on the volume.
+    writeFileSync(file, credentials("old-2", NOW + 8 * 3_600_000));
+    await login.storeIfRefreshed();
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("minted", NOW + 3_600_000),
+    );
+    expect(aws.puts).toEqual([]);
+  });
+
+  it("still keeps the volume's refresh of the login it last stored, at a restart", async () => {
+    const first = setup();
+    first.aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await first.login.restore();
+    // The CLI refreshed it, and the task stopped before writing it back.
+    writeFileSync(first.file, credentials("old-2", NOW + 8 * 3_600_000));
+    const { aws, login, file } = setup(undefined, first.home);
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await login.restore();
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("old-2", NOW + 8 * 3_600_000),
+    );
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "").credentials).toBe(
+      credentials("old-2", NOW + 8 * 3_600_000),
+    );
+  });
+});
+
 describe("trusting a workspace", () => {
   it("adds the one folder, keeping everything the CLI wrote", () => {
     const { login, home } = setup();
