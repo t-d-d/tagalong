@@ -795,13 +795,20 @@ describe("trusting a workspace", () => {
 });
 
 describe("a config the CLI left half written after the restore (#145)", () => {
-  it("is replaced when a workspace is trusted, so the request goes on", () => {
+  it("is replaced when a workspace is trusted, so the request goes on, keeping onboarding and the account", async () => {
+    const { aws, login, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 3_600_000), account),
+    );
+    await login.restore();
     const { lines } = logLines();
-    const { login, home } = setup();
     const config = join(home, ".claude.json");
     writeFileSync(config, '{"numStartups":3,"proj');
     login.trust("/data/workspaces/o__r");
     expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({
+      hasCompletedOnboarding: true,
+      oauthAccount: account,
       projects: { "/data/workspaces/o__r": { hasTrustDialogAccepted: true } },
     });
     expect(lines).toContainEqual(
@@ -810,6 +817,17 @@ describe("a config the CLI left half written after the restore (#145)", () => {
         event: "login-config-replaced",
       }),
     );
+  });
+
+  it("names no org, rather than throwing, when no account is stored", async () => {
+    const { aws, login, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 3_600_000), undefined),
+    );
+    await login.restore();
+    writeFileSync(join(home, ".claude.json"), '{"oauthAccount":{"org');
+    expect(login.orgUuid()).toBeUndefined();
   });
 
   it("still fails when the config cannot be read at all", () => {
