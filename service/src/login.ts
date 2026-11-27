@@ -181,7 +181,9 @@ export class Login {
    * (not yet written back), and mark onboarding done (cloud-sessions.md).
    * A stored login that is not the one the task last stored was minted
    * since, so it is taken whatever its expiry (#118). Before the task has
-   * kept any record, the newer of the two is kept.
+   * kept any record, the newer of the two is kept. A stored value that is
+   * not a login never replaces a usable one on the volume, which is written
+   * back over it (#123).
    */
   async restore(): Promise<void> {
     const name = this.#parameter;
@@ -193,17 +195,20 @@ export class Login {
       return;
     }
     const record = readRecord(value);
-    this.#account = record.account;
     const stored = parseCredentials(record.credentials);
     const local = this.#read();
     const onDisk = local === undefined ? undefined : parseCredentials(local);
     const last = this.#lastStored();
     const minted = last !== undefined && last !== digest(record.credentials);
+    // A stored value that is not a login never replaces one that is (#123).
     const keepDisk =
-      !minted &&
       onDisk?.ok === true &&
-      stored.ok &&
-      (onDisk.expiresAt ?? 0) > (stored.expiresAt ?? 0);
+      (!stored.ok ||
+        (!minted && (onDisk.expiresAt ?? 0) > (stored.expiresAt ?? 0)));
+    // The volume's login keeps the account it was configured with, when
+    // the parameter's value is not a login to take one from.
+    this.#account =
+      keepDisk && !stored.ok ? this.#configuredAccount() : record.account;
     if (!keepDisk) this.#write(record.credentials);
     this.#remember(record.credentials);
     this.#configure();
@@ -212,6 +217,15 @@ export class Login {
       usable: stored.ok,
     });
     if (keepDisk) await this.storeIfRefreshed();
+  }
+
+  /** The account ~/.claude.json names, when it names both ids. */
+  #configuredAccount(): Account | undefined {
+    const path = this.#configPath;
+    if (!existsSync(path)) return undefined;
+    const config = configSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+    const parsed = accountSchema.safeParse(config.oauthAccount);
+    return parsed.success ? parsed.data : undefined;
   }
 
   get #configPath(): string {

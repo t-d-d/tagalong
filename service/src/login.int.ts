@@ -390,6 +390,84 @@ describe("a login minted while the old one still works (#118)", () => {
   });
 });
 
+describe("a stored value that is not a login, at a restart (#123)", () => {
+  const setupToken = JSON.stringify({
+    claudeAiOauth: {
+      accessToken: "setup",
+      refreshToken: "refresh-setup",
+      expiresAt: NOW + 365 * 24 * 3_600_000,
+      scopes: ["user:inference"],
+    },
+  });
+
+  it("keeps the volume's login, writes it back, and says the parameter was not usable", async () => {
+    const first = setup();
+    first.aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 20 * 60_000), account),
+    );
+    await first.login.restore();
+    // The CLI refreshed it, and the task stopped before writing it back.
+    writeFileSync(first.file, credentials("old-2", NOW + 8 * 3_600_000));
+    const { lines } = logLines();
+    const { aws, login, file } = setup(undefined, first.home);
+    aws.secrets.set(PARAMETER, setupToken);
+    await login.restore();
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("old-2", NOW + 8 * 3_600_000),
+    );
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "")).toEqual({
+      credentials: credentials("old-2", NOW + 8 * 3_600_000),
+      account,
+    });
+    expect(login.orgUuid()).toBe("org-1");
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        event: "login-restored",
+        from: "volume",
+        usable: false,
+      }),
+    );
+  });
+
+  it("writes back the login it last stored when the parameter is broken", async () => {
+    const first = setup();
+    first.aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("old", NOW + 3_600_000), account),
+    );
+    await first.login.restore();
+    const { aws, login, file } = setup(undefined, first.home);
+    aws.secrets.set(PARAMETER, "{not json");
+    await login.restore();
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("old", NOW + 3_600_000),
+    );
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "")).toEqual({
+      credentials: credentials("old", NOW + 3_600_000),
+      account,
+    });
+  });
+
+  it("writes the value out as before when the volume has no usable login either", async () => {
+    const { lines } = logLines();
+    const { aws, login, file } = setup();
+    aws.secrets.set(PARAMETER, setupToken);
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, "{broken");
+    await login.restore();
+    expect(readFileSync(file, "utf8")).toBe(setupToken);
+    expect(aws.puts).toEqual([]);
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        event: "login-restored",
+        from: "parameter",
+        usable: false,
+      }),
+    );
+  });
+});
+
 describe("trusting a workspace", () => {
   it("adds the one folder, keeping everything the CLI wrote", () => {
     const { login, home } = setup();
