@@ -309,7 +309,9 @@ export class Login {
   /**
    * Keep the access token usable while nothing else runs the CLI: the
    * sessions API needs it to read answers. `claude auth status` first; if
-   * that does not refresh it, a one-line prompt, which must.
+   * that does not refresh it, a one-line prompt. Neither refreshes a token
+   * before it expires, so only a login past expiry, or unreadable, that
+   * they leave alone is dead.
    */
   async keepFresh(): Promise<void> {
     if (this.#parameter === undefined) return;
@@ -347,6 +349,15 @@ export class Login {
         await this.storeIfRefreshed();
         return;
       }
+    }
+    // The CLI does not refresh a token that has not expired, so near
+    // expiry it leaves this one alone every cycle (#103). That is not dead.
+    const left = this.#expiresAt();
+    if (left !== undefined && left > this.#deps.now()) {
+      log.info("login-unrefreshed", {
+        expiresInMinutes: Math.round((left - this.#deps.now()) / 60_000),
+      });
+      return;
     }
     log.error("login-dead", {
       why: "the CLI did not refresh the access token",
