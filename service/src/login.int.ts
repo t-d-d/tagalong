@@ -8,6 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { fakeAws } from "../../test/fake-aws.ts";
 import { eventsOf, logLines } from "../../test/log-lines.ts";
 import { readEnv } from "./env.ts";
@@ -387,6 +388,135 @@ describe("a login minted while the old one still works (#118)", () => {
     expect(readRecord(aws.secrets.get(PARAMETER) ?? "").credentials).toBe(
       credentials("old-2", NOW + 8 * 3_600_000),
     );
+  });
+});
+
+describe("ids the CLI looks up for a login stored without them (#120)", () => {
+  const cliAccount = { accountUuid: "acc-3", organizationUuid: "org-3" };
+
+  /** A stand-in CLI that refreshes the login and writes what it looked up. */
+  function lookingUp(written: Record<string, unknown> | undefined) {
+    const harness = { home: "" };
+    const runner: Runner = () => {
+      const credentialsFile = join(
+        harness.home,
+        ".claude",
+        ".credentials.json",
+      );
+      writeFileSync(
+        credentialsFile,
+        credentials("refreshed", NOW + 8 * 3_600_000),
+      );
+      if (written !== undefined) {
+        const configFile = join(harness.home, ".claude.json");
+        // Add the account, keeping the rest. restore() removed any earlier one.
+        const config = z
+          .looseObject({})
+          .parse(JSON.parse(readFileSync(configFile, "utf8")));
+        writeFileSync(
+          configFile,
+          JSON.stringify({ ...config, oauthAccount: written }),
+        );
+      }
+      return Promise.resolve({ code: 0, out: "" });
+    };
+    return { harness, runner };
+  }
+
+  it("stores the ids with the refresh, so a restart names the org from the start", async () => {
+    const { harness, runner } = lookingUp({
+      ...cliAccount,
+      emailAddress: "someone@example.com",
+    });
+    const { aws, login, home } = setup(runner);
+    harness.home = home;
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 60_000), undefined),
+    );
+    await login.restore();
+    expect(login.orgUuid()).toBeUndefined();
+    await login.keepFresh();
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "")).toEqual({
+      credentials: credentials("refreshed", NOW + 8 * 3_600_000),
+      account: cliAccount,
+    });
+    // A restart: a fresh Login on the same volume.
+    const next = setup(undefined, home);
+    next.aws.secrets.set(PARAMETER, aws.secrets.get(PARAMETER) ?? "");
+    await next.login.restore();
+    expect(next.login.orgUuid()).toBe("org-3");
+    expect(next.login.cliEnv()).toMatchObject({
+      CLAUDE_CODE_ORGANIZATION_UUID: "org-3",
+    });
+  });
+
+  it("never stores the account an earlier login left", async () => {
+    const { harness, runner } = lookingUp(undefined);
+    const { aws, login, home } = setup(runner);
+    harness.home = home;
+    writeFileSync(
+      join(home, ".claude.json"),
+      JSON.stringify({ oauthAccount: account, hasCompletedOnboarding: true }),
+    );
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 60_000), undefined),
+    );
+    await login.restore();
+    await login.keepFresh();
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "")).toEqual({
+      credentials: credentials("refreshed", NOW + 8 * 3_600_000),
+      account: undefined,
+    });
+  });
+
+  it("stores no account when the CLI wrote only the org", async () => {
+    const { harness, runner } = lookingUp({ organizationUuid: "org-3" });
+    const { aws, login, home } = setup(runner);
+    harness.home = home;
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 60_000), undefined),
+    );
+    await login.restore();
+    await login.keepFresh();
+    expect(
+      readRecord(aws.secrets.get(PARAMETER) ?? "").account,
+    ).toBeUndefined();
+  });
+
+  it("still writes the refresh back when the CLI's config cannot be read", async () => {
+    const { aws, login, file, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 60_000), undefined),
+    );
+    await login.restore();
+    writeFileSync(file, credentials("refreshed", NOW + 8 * 3_600_000));
+    // Half written.
+    writeFileSync(join(home, ".claude.json"), '{"oauthAccount":{"acc');
+    await login.storeIfRefreshed();
+    expect(readRecord(aws.secrets.get(PARAMETER) ?? "")).toEqual({
+      credentials: credentials("refreshed", NOW + 8 * 3_600_000),
+      account: undefined,
+    });
+  });
+
+  it("names the org when the CLI wrote an account id of another shape", async () => {
+    const { aws, login, home } = setup();
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 3_600_000), undefined),
+    );
+    await login.restore();
+    writeFileSync(
+      join(home, ".claude.json"),
+      JSON.stringify({
+        oauthAccount: { accountUuid: null, organizationUuid: "org-3" },
+      }),
+    );
+    expect(login.orgUuid()).toBe("org-3");
   });
 });
 
