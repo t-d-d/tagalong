@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
+import { StateStore } from "./state.ts";
 import {
   type Harness,
   NOW,
@@ -2522,6 +2523,146 @@ describe("starting", () => {
 
     await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
     expect(state.state.replies).toEqual(seeded.replies);
+  });
+
+  describe("a state save while the device is waiting or being seeded (#139)", () => {
+    const seeded = {
+      replies: { "answer-1": "session_01SessionAaaaaaaaaaaaaaa" },
+    };
+
+    // A task with no device yet, and a seed in hand that carries a state.json.
+    async function waitingForSeed(stateJson = JSON.stringify(seeded)) {
+      const upload = mkdtempSync(join(tmpdir(), "tagalong-seed-"));
+      const seed = join(upload, "device.tgz");
+      const t = (h = await harness({
+        env: { ATTACHMENTS_BUCKET: "files" },
+        db: (db) => {
+          writeFileSync(join(db.dir, "state.json"), stateJson);
+          execFileSync("tar", [
+            "-czf",
+            seed,
+            "-C",
+            db.dir,
+            "store",
+            "state.json",
+          ]);
+          renameSync(
+            join(db.store, "messages.db"),
+            join(db.store, "messages.db.away"),
+          );
+        },
+      }));
+      rmSync(t.env.STATE_FILE, { force: true });
+      expect(await t.app.checkDevice()).toBe("waiting");
+      const arrive = () => {
+        t.aws.objects.set("files/seed/device.tgz", {
+          body: readFileSync(seed),
+          contentType: "application/gzip",
+        });
+      };
+      return { t, arrive };
+    }
+
+    it("keeps the seeded state.json when the state is saved while the upload is deleted", async () => {
+      const { t, arrive } = await waitingForSeed();
+      const { state } = t.app.parts;
+      const deleteObject = t.aws.deleteObject.bind(t.aws);
+      t.aws.deleteObject = (bucket, key) => {
+        state.save();
+        return deleteObject(bucket, key);
+      };
+      arrive();
+
+      expect(await t.app.checkDevice()).toBe("seeded");
+      expect(state.state.replies).toEqual(seeded.replies);
+      expect(new StateStore(t.env.STATE_FILE).state.replies).toEqual(
+        seeded.replies,
+      );
+    });
+
+    it("writes no state.json while waiting, and takes the seeded one when it arrives", async () => {
+      const { t, arrive } = await waitingForSeed();
+      const { state } = t.app.parts;
+      // The poll saves the state every pass, device or not.
+      await t.app.pollOnce();
+      expect(existsSync(t.env.STATE_FILE)).toBe(false);
+      arrive();
+
+      expect(await t.app.checkDevice()).toBe("seeded");
+      expect(state.state.replies).toEqual(seeded.replies);
+    });
+
+    it("saves the state again once the seeded state.json is loaded", async () => {
+      const { t, arrive } = await waitingForSeed();
+      const { state } = t.app.parts;
+      arrive();
+      expect(await t.app.checkDevice()).toBe("seeded");
+
+      state.state.replies["answer-2"] = "session_01SessionBbbbbbbbbbbbbbb";
+      state.save();
+      expect(new StateStore(t.env.STATE_FILE).state.replies).toEqual({
+        ...seeded.replies,
+        "answer-2": "session_01SessionBbbbbbbbbbbbbbb",
+      });
+    });
+
+    it("keeps the seeded state.json when a second device check runs while the upload is deleted", async () => {
+      const { t, arrive } = await waitingForSeed();
+      const { state } = t.app.parts;
+      const deleteObject = t.aws.deleteObject.bind(t.aws);
+      let deleting = (): void => undefined;
+      let deleteCalled = (): void => undefined;
+      const called = new Promise<void>((resolve) => {
+        deleteCalled = resolve;
+      });
+      t.aws.deleteObject = async (bucket, key) => {
+        deleteCalled();
+        await new Promise<void>((resolve) => {
+          deleting = resolve;
+        });
+        return deleteObject(bucket, key);
+      };
+      arrive();
+
+      const first = t.app.checkDevice();
+      await called;
+      // The device loop fires every 30 seconds, whether the last check is done or not.
+      const second = t.app.checkDevice();
+      await new Promise((resolve) => setImmediate(resolve));
+      state.save();
+      deleting();
+
+      const checks = await Promise.all([first, second]);
+      expect(state.state.replies).toEqual(seeded.replies);
+      expect(new StateStore(t.env.STATE_FILE).state.replies).toEqual(
+        seeded.replies,
+      );
+      expect(checks).toEqual(["seeded", "seeded"]);
+    });
+
+    it("saves the state once the device arrives without a seed", async () => {
+      const t = (h = await harness({
+        db: (db) => {
+          renameSync(
+            join(db.store, "messages.db"),
+            join(db.store, "messages.db.away"),
+          );
+        },
+      }));
+      const { state } = t.app.parts;
+      expect(await t.app.checkDevice()).toBe("off");
+      renameSync(
+        join(t.db.store, "messages.db.away"),
+        join(t.db.store, "messages.db"),
+      );
+      expect(await t.app.checkDevice()).toBe("present");
+
+      state.state.replies["answer-1"] = "session_01SessionAaaaaaaaaaaaaaa";
+      state.save();
+      expect(new StateStore(t.env.STATE_FILE).state.replies).toEqual({
+        "answer-1": "session_01SessionAaaaaaaaaaaaaaa",
+      });
+    });
   });
 
   it("reloads the groups and state again on later device checks when they fail as the device is seeded", async () => {

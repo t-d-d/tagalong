@@ -43,7 +43,15 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
   const store = new WhatsAppStore(env.BRIDGE_STORE);
   const people = new People(store);
   const groups = new GroupsStore(env.GROUPS_FILE, parseOwners(env.OWNERS));
+  // Read once, so the state is held exactly when the device starts as waiting.
+  const devicePresent = store.present();
   const state = new StateStore(env.STATE_FILE);
+  // A task with no device saves nothing (#139). The poll saves on every
+  // pass, and an empty state.json written before the seed arrives would be
+  // kept over the seed's own; one written while the seed unpacks would
+  // overwrite it. With no device, nothing reaches the service that changes
+  // the state, so holding loses nothing.
+  state.held = !devicePresent;
   const api = new ClaudeApi(
     env.CLAUDE_API_BASE,
     () => login.accessToken(),
@@ -96,7 +104,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       log.warn("loop-failed", { loop: "people", ...errorFields(error) });
     }
   }
-  let device: DeviceState = store.present() ? "present" : "waiting";
+  let device: DeviceState = devicePresent ? "present" : "waiting";
   if (device === "present") readPeople();
   // Work started by a message, for tests to wait on.
   let pending: Promise<unknown> = Promise.resolve();
@@ -265,7 +273,16 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
     }
   }
 
-  async function checkDevice(): Promise<DeviceState> {
+  // The device loop fires every 30 seconds whether the last check is done or
+  // not. A second check during a seed would find the store in place, call it
+  // present and start saving before the seeded state.json is read (#139).
+  let checking: Promise<DeviceState> | undefined;
+  const checkDevice = (): Promise<DeviceState> =>
+    (checking ??= checkDeviceOnce().finally(() => {
+      checking = undefined;
+    }));
+
+  async function checkDeviceOnce(): Promise<DeviceState> {
     if (device === "present" || device === "seeded") {
       if (groupsPending || statePending) readSeeded();
       else if (peopleFailed) readPeople();
@@ -281,7 +298,10 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       run,
       env: cliEnv(env),
     });
-    if (device === "present") readPeople();
+    if (device === "present") {
+      state.held = false;
+      readPeople();
+    }
     if (device === "seeded") {
       groupsPending = true;
       statePending = true;

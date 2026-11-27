@@ -142,8 +142,9 @@ export const emptyState = (): State => stateSchema.parse({});
 export class StateStore {
   readonly #path: string;
   state: State;
-  // Whether saves are held: the file came with the device and has not been
-  // read yet, so what is in memory must not be written over it.
+  // Whether saves are held: the task has no device yet, or the file came
+  // with the device and has not been read yet, so what is in memory must not
+  // be written over it.
   held = false;
 
   constructor(path: string) {
