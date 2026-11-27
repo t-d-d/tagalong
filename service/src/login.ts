@@ -41,7 +41,10 @@ const recordSchema = z.object({
 });
 const configSchema = z.looseObject({
   oauthAccount: z
-    .looseObject({ organizationUuid: z.string().optional() })
+    .looseObject({
+      accountUuid: z.string().optional(),
+      organizationUuid: z.string().optional(),
+    })
     .optional(),
 });
 const cliConfigSchema = z.looseObject({
@@ -270,10 +273,25 @@ export class Login {
     if (env.CLAUDE_CODE_ORGANIZATION_UUID !== undefined)
       return env.CLAUDE_CODE_ORGANIZATION_UUID;
     if (this.#account !== undefined) return this.#account.organizationUuid;
-    const path = join(env.HOME, ".claude.json");
+    return this.#configAccount()?.organizationUuid;
+  }
+
+  /** The account ~/.claude.json holds, as far as the CLI wrote it. */
+  #configAccount(): z.infer<typeof configSchema>["oauthAccount"] {
+    const path = this.#configPath;
     if (!existsSync(path)) return undefined;
     return configSchema.parse(JSON.parse(readFileSync(path, "utf8")))
-      .oauthAccount?.organizationUuid;
+      .oauthAccount;
+  }
+
+  /**
+   * The ids the CLI looked up for a login stored without them, once it has
+   * written both. restore() and #take() drop an earlier login's account
+   * before the CLI runs (#116), so what is there now is this login's (#120).
+   */
+  #lookedUp(): Account | undefined {
+    const parsed = accountSchema.safeParse(this.#configAccount());
+    return parsed.success ? parsed.data : undefined;
   }
 
   /** The CLI's environment, with the org named so it skips its profile lookup. */
@@ -342,7 +360,9 @@ export class Login {
     }
     const taken = await this.#takeMinted("login-stored");
     if (taken !== "kept") return;
-    await aws.putSecret(name, writeRecord(text, this.#account));
+    const account = this.#account ?? this.#lookedUp();
+    await aws.putSecret(name, writeRecord(text, account));
+    this.#account = account;
     this.#remember(text);
     log.info("login-stored", {
       expiresInMinutes: Math.round(
