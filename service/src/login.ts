@@ -44,7 +44,7 @@ const configSchema = z.looseObject({
     .looseObject({ organizationUuid: z.string().optional() })
     .optional(),
 });
-const cliConfigSchema = z.looseObject({
+const cliConfigSchema = configSchema.extend({
   projects: z.record(z.string(), z.looseObject({})).optional(),
 });
 type Config = z.infer<typeof cliConfigSchema>;
@@ -257,10 +257,11 @@ export class Login {
 
   /**
    * Change ~/.claude.json, keeping what the CLI wrote, in one rename. A file
-   * that does not parse, as when the CLI was stopped mid-write, is replaced
+   * that does not parse, as when the CLI was stopped mid-write (#145), or
+   * that parses to the wrong shape, as after a hand edit (#152), is replaced
    * with a new one: onboarding done and the account, as #configure() writes
    * them, and the CLI rebuilds the rest. Left as it was, every restore and
-   * every trust() would fail on it (#145).
+   * every trust() would fail on it.
    */
   #editConfig(edit: (config: Config) => Config): void {
     const path = this.#configPath;
@@ -268,9 +269,7 @@ export class Login {
       ? (readConfig(readFileSync(path, "utf8")) ?? this.#freshConfig())
       : {};
     const tmp = `${path}.tagalong`;
-    writeFileSync(tmp, JSON.stringify(edit(cliConfigSchema.parse(current))), {
-      mode: 0o600,
-    });
+    writeFileSync(tmp, JSON.stringify(edit(current)), { mode: 0o600 });
     renameSync(tmp, path);
   }
 
@@ -325,7 +324,8 @@ export class Login {
 
   /**
    * The account ~/.claude.json holds, as far as the CLI wrote it. None when
-   * the file is half written: the next edit replaces it (#145).
+   * the file is half written (#145) or of the wrong shape (#152): the next
+   * edit replaces it.
    */
   #configAccount(): z.infer<typeof configSchema>["oauthAccount"] {
     const path = this.#configPath;
@@ -337,7 +337,8 @@ export class Login {
       if (error instanceof SyntaxError) return undefined;
       throw error;
     }
-    return configSchema.parse(config).oauthAccount;
+    const parsed = configSchema.safeParse(config);
+    return parsed.success ? parsed.data.oauthAccount : undefined;
   }
 
   /**
@@ -633,14 +634,19 @@ export class Login {
   }
 }
 
-/** The config's text as JSON, or undefined when it does not parse (#145). */
-function readConfig(text: string): unknown {
+/** ~/.claude.json as the CLI wrote it, or none when it must be replaced. */
+function readConfig(text: string): Config | undefined {
+  let config: unknown;
   try {
-    return JSON.parse(text);
+    config = JSON.parse(text);
   } catch (error) {
     log.warn("login-config-replaced", errorFields(error));
     return undefined;
   }
+  const parsed = cliConfigSchema.safeParse(config);
+  if (parsed.success) return parsed.data;
+  log.warn("login-config-replaced", errorFields(parsed.error));
+  return undefined;
 }
 
 const digest = (text: string): string =>
