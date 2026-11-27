@@ -1,0 +1,31 @@
+# Governor reads .github/governor.json from main only, and skips the repo
+# when the file fails its schema. This runs governor's own reader over the
+# file on each pull request that changes it, or a file it checks: the
+# prompt files governor.json names, the CI workflow it names, the issue
+# templates in the folder and in the three places GitHub reads a single
+# template, and CLAUDE.md. A change to this workflow runs it too.
+# To move to a newer check, change the commit after `@`, in `commit:` and in
+# governor.json's `$schema` together (fitness/governor.static.ts).
+name: config check
+
+on:
+  pull_request:
+    paths:
+      - .github/governor.json
+      - .github/workflows/config-check.yml
+      - .github/workflows/deploy.yml
+      - .github/ISSUE_TEMPLATE/**
+      - ISSUE_TEMPLATE.md
+      - .github/ISSUE_TEMPLATE.md
+      - docs/ISSUE_TEMPLATE.md
+      - CLAUDE.md
+      - .claude/skills/pr-review/SKILL.md
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    uses: t-d-d/gh-governor/.github/workflows/config-check.yml@aa9ea3a97772dd74575ce44761a9312f0c60ed0a
+    with:
+      commit: aa9ea3a97772dd74575ce44761a9312f0c60ed0a
