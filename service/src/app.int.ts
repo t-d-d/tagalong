@@ -2343,10 +2343,21 @@ describe("starting", () => {
     }
   });
 
+  /** Copy the device's tables from whatsapp.db.full into the empty whatsapp.db beside it. */
+  function fillDevice(store: string): void {
+    const device = new DatabaseSync(join(store, "whatsapp.db"));
+    const full = join(store, "whatsapp.db.full").replaceAll("'", "''");
+    device.exec(`ATTACH '${full}' AS full;
+      CREATE TABLE whatsmeow_device AS SELECT * FROM full.whatsmeow_device;
+      CREATE TABLE whatsmeow_contacts AS SELECT * FROM full.whatsmeow_contacts;
+      CREATE TABLE whatsmeow_lid_map AS SELECT * FROM full.whatsmeow_lid_map;`);
+    device.close();
+  }
+
   it("reads the people again on the next device check when the read fails as the device arrives", async () => {
     const t = (h = await harness({
       // No device yet, and a whatsapp.db the bridge has not filled in, so
-      // the first read of the people fails as a held lock would.
+      // the first read of the people fails, as a held lock would make it.
       db: (db) => {
         renameSync(
           join(db.store, "messages.db"),
@@ -2380,12 +2391,7 @@ describe("starting", () => {
     );
 
     // The bridge lets go: the same file now holds the device and contacts.
-    const device = new DatabaseSync(join(t.db.store, "whatsapp.db"));
-    device.exec(`ATTACH '${join(t.db.store, "whatsapp.db.full")}' AS full;
-      CREATE TABLE whatsmeow_device AS SELECT * FROM full.whatsmeow_device;
-      CREATE TABLE whatsmeow_contacts AS SELECT * FROM full.whatsmeow_contacts;
-      CREATE TABLE whatsmeow_lid_map AS SELECT * FROM full.whatsmeow_lid_map;`);
-    device.close();
+    fillDevice(t.db.store);
     expect(await t.app.checkDevice()).toBe("present");
     expect([...people.self].sort()).toEqual([CLAUDE, CLAUDE_LID].sort());
     expect(people.nameOf(OWNER)).toBe("Thomas");
@@ -2403,12 +2409,7 @@ describe("starting", () => {
     }));
     const { people } = t.app.parts;
     expect(people.self.size).toBe(0);
-    const device = new DatabaseSync(join(t.db.store, "whatsapp.db"));
-    device.exec(`ATTACH '${join(t.db.store, "whatsapp.db.full")}' AS full;
-      CREATE TABLE whatsmeow_device AS SELECT * FROM full.whatsmeow_device;
-      CREATE TABLE whatsmeow_contacts AS SELECT * FROM full.whatsmeow_contacts;
-      CREATE TABLE whatsmeow_lid_map AS SELECT * FROM full.whatsmeow_lid_map;`);
-    device.close();
+    fillDevice(t.db.store);
     expect(await t.app.checkDevice()).toBe("present");
     expect([...people.self].sort()).toEqual([CLAUDE, CLAUDE_LID].sort());
   });
