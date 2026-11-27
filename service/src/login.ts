@@ -183,7 +183,8 @@ export class Login {
    * since, so it is taken whatever its expiry (#118). Before the task has
    * kept any record, the newer of the two is kept. A stored value that is
    * not a login never replaces a usable one on the volume, which is written
-   * back over it (#123).
+   * back over it (#123). A write-back that fails here is a warn, and the
+   * next check tries again (#127).
    */
   async restore(): Promise<void> {
     const name = this.#parameter;
