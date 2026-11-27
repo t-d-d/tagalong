@@ -45,6 +45,42 @@ const governorSchema = z.object({
 
 const config = () => governorSchema.parse(JSON.parse(readRepoFile(configPath)));
 
+// The reusable workflow governor publishes to check a served repo's config
+// file with its own reader, and the commit of t-d-d/gh-governor a ref names.
+const configCheckPath = ".github/workflows/config-check.yml";
+const governorCheck =
+  /^t-d-d\/gh-governor\/\.github\/workflows\/config-check\.yml@([0-9a-f]{40})$/u;
+const schemaUrl =
+  /^https:\/\/raw\.githubusercontent\.com\/t-d-d\/gh-governor\/([0-9a-f]{40})\/schema\/governor\.schema\.json$/u;
+
+// Just enough of the config check workflow for the checks to read. The
+// shared workflow schema leaves out a job's `with`.
+const configCheckSchema = z.object({
+  on: z.object({
+    pull_request: z.object({ paths: z.array(z.string()) }),
+  }),
+  permissions: z.record(z.string(), z.string()),
+  jobs: z.record(
+    z.string(),
+    z.object({
+      uses: z.string().optional(),
+      with: z.record(z.string(), z.unknown()).optional(),
+      secrets: z.unknown().optional(),
+    }),
+  ),
+});
+
+// Every prompt file governor.json names, as { "file": "<path>" }.
+const promptFiles = (value: unknown): string[] => {
+  if (Array.isArray(value)) return value.flatMap(promptFiles);
+  if (typeof value !== "object" || value === null) return [];
+  const { file } = value as { file?: unknown };
+  return [
+    ...(typeof file === "string" ? [file] : []),
+    ...Object.values(value).flatMap(promptFiles),
+  ];
+};
+
 describe("fitness: governor serves this repo from .github/governor.json (repo-and-delivery.md)", () => {
   it("keeps its settings in governor.json alone, since governor no longer reads dispatch.json", () => {
     expect(repoFiles()).toContain(configPath);
@@ -79,6 +115,58 @@ describe("fitness: governor serves this repo from .github/governor.json (repo-an
     const gate = readWorkflow(gatePath);
     expect(triggers(gate)).toContain("pull_request");
     expect(gate.jobs.gate?.name).toBe("gate");
+  });
+});
+
+describe("fitness: governor's own check reads .github/governor.json on each pull request (repo-and-delivery.md)", () => {
+  const workflow = () => readYaml(configCheckPath, configCheckSchema);
+  const checkJob = () => Object.values(workflow().jobs)[0];
+
+  it("calls governor's config check, pinned by commit, with no secret", () => {
+    expect(Object.keys(workflow().jobs)).toHaveLength(1);
+    const job = checkJob();
+    expect(job?.uses).toMatch(governorCheck);
+    expect(job?.secrets).toBeUndefined();
+    expect(workflow().permissions).toEqual({ contents: "read" });
+  });
+
+  // A called workflow cannot learn its own commit, so it takes it again.
+  it("passes the commit it is pinned to as the check's commit", () => {
+    const job = checkJob();
+    const pinned = governorCheck.exec(job?.uses ?? "")?.[1];
+    expect(pinned).toBeDefined();
+    expect(job?.with).toStrictEqual({ commit: pinned });
+  });
+
+  it("names the same commit in governor.json's $schema, so the editor and the check read one schema", () => {
+    const { $schema } = z
+      .object({ $schema: z.string() })
+      .parse(JSON.parse(readRepoFile(configPath)));
+    const pinned = governorCheck.exec(checkJob()?.uses ?? "")?.[1];
+    expect(pinned).toBeDefined();
+    expect(schemaUrl.exec($schema)?.[1]).toBe(pinned);
+  });
+
+  // The check reads the config, the prompt files it names, the CI workflow
+  // it names, the issue templates in the folder and in the three places
+  // GitHub reads a single template, and CLAUDE.md, so a change to any of
+  // them runs it. A change to this workflow runs it too.
+  it("runs on a pull request that changes any file the check reads", () => {
+    const paths = workflow().on.pull_request.paths;
+    const prompts = promptFiles(JSON.parse(readRepoFile(configPath)));
+    expect(prompts).toContain(".claude/skills/pr-review/SKILL.md");
+    for (const path of [
+      configPath,
+      configCheckPath,
+      config().workflows.ci,
+      "CLAUDE.md",
+      ".github/ISSUE_TEMPLATE/**",
+      "ISSUE_TEMPLATE.md",
+      ".github/ISSUE_TEMPLATE.md",
+      "docs/ISSUE_TEMPLATE.md",
+      ...prompts,
+    ])
+      expect(paths).toContain(path);
   });
 });
 

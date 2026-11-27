@@ -37,9 +37,14 @@ describe("fitness: everything a build fetches is pinned (repo-and-delivery.md)",
     expect(text).toMatch(/DISABLE_AUTOUPDATER=1/u);
   });
 
-  it("names every action by commit", () => {
+  it("names every action and called workflow by commit", () => {
     for (const path of workflowPaths()) {
       for (const job of Object.values(readWorkflow(path).jobs)) {
+        // A called workflow is this repo's own, or another's at a commit.
+        if (job.uses !== undefined && !job.uses.startsWith("./"))
+          expect(job.uses, path).toMatch(
+            /^[\w.-]+\/[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/u,
+          );
         for (const step of job.steps ?? []) {
           if (step.uses !== undefined)
             expect(step.uses, path).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/u);
