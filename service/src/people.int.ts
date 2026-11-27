@@ -23,7 +23,7 @@ afterEach(() => {
   db = undefined;
 });
 
-/** A python3 process that holds an exclusive lock on `path` for a second, once it says so. */
+/** A python3 process that holds an exclusive lock on `path` for two seconds, once it says so. */
 async function holdLock(path: string): Promise<ChildProcess> {
   const holder = spawn("python3", [
     "-c",
@@ -32,12 +32,16 @@ async function holdLock(path: string): Promise<ChildProcess> {
       "db = sqlite3.connect(sys.argv[1], isolation_level=None)",
       "db.execute('BEGIN EXCLUSIVE')",
       "print('locked', flush=True)",
-      "time.sleep(1)",
+      "time.sleep(2)",
       "db.execute('COMMIT')",
     ].join("\n"),
     path,
   ]);
-  const said: unknown[] = await once(holder.stdout, "data");
+  // A python3 that fails before it takes the lock exits without a word.
+  const said: unknown[] = await Promise.race([
+    once(holder.stdout, "data"),
+    once(holder, "exit"),
+  ]);
   expect(String(said[0]).trim()).toBe("locked");
   return holder;
 }
