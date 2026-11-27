@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
@@ -2447,6 +2448,44 @@ describe("starting", () => {
 
     await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
     expect([...people.self].sort()).toEqual([CLAUDE, CLAUDE_LID].sort());
+  });
+
+  it("loads the seeded state.json when the seed's groups.json does not parse", async () => {
+    // The seed carries the device, a good state.json and a groups.json that
+    // does not parse; the task has neither file yet.
+    const upload = mkdtempSync(join(tmpdir(), "tagalong-seed-"));
+    const seed = join(upload, "device.tgz");
+    const seeded = { replies: { "answer-1": "session_fake1" } };
+    const t = (h = await harness({
+      env: { ATTACHMENTS_BUCKET: "files" },
+      db: (db) => {
+        writeFileSync(join(db.dir, "state.json"), JSON.stringify(seeded));
+        writeFileSync(join(db.dir, "groups.json"), "not json");
+        execFileSync("tar", [
+          "-czf",
+          seed,
+          "-C",
+          db.dir,
+          "store",
+          "state.json",
+          "groups.json",
+        ]);
+        renameSync(
+          join(db.store, "messages.db"),
+          join(db.store, "messages.db.away"),
+        );
+      },
+    }));
+    const { state } = t.app.parts;
+    expect(await t.app.checkDevice()).toBe("waiting");
+    rmSync(t.env.GROUPS_FILE);
+    t.aws.objects.set("files/seed/device.tgz", {
+      body: readFileSync(seed),
+      contentType: "application/gzip",
+    });
+
+    await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
+    expect(state.state.replies).toEqual(seeded.replies);
   });
 
   it("listens on loopback", async () => {
