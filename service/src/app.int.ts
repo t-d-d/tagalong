@@ -2485,7 +2485,7 @@ describe("starting", () => {
 
     await expect(t.app.checkDevice()).rejects.toMatchObject({
       read: "groups",
-      cause: expect.any(SyntaxError),
+      cause: { name: "SyntaxError" },
     });
     expect([...people.self].sort()).toEqual([CLAUDE, CLAUDE_LID].sort());
   });
@@ -2526,7 +2526,7 @@ describe("starting", () => {
 
     await expect(t.app.checkDevice()).rejects.toMatchObject({
       read: "groups",
-      cause: expect.any(SyntaxError),
+      cause: { name: "SyntaxError" },
     });
     expect(state.state.replies).toEqual(seeded.replies);
   });
@@ -2557,7 +2557,7 @@ describe("starting", () => {
 
     await expect(t.app.checkDevice()).rejects.toMatchObject({
       read: "groups",
-      cause: expect.any(SyntaxError),
+      cause: { name: "SyntaxError" },
     });
     const second = t.lines.filter(
       (line) => line.event === "loop-failed" && line.loop === "device",
@@ -2793,7 +2793,7 @@ describe("starting", () => {
 
     await expect(t.app.checkDevice()).rejects.toMatchObject({
       read: "groups",
-      cause: expect.any(SyntaxError),
+      cause: { name: "SyntaxError" },
     });
 
     // Nothing is saved over the state.json until it has been read.
@@ -2803,7 +2803,7 @@ describe("starting", () => {
     // Still half written: tried again, and failing again.
     await expect(t.app.checkDevice()).rejects.toMatchObject({
       read: "groups",
-      cause: expect.any(SyntaxError),
+      cause: { name: "SyntaxError" },
     });
 
     // The groups are whole: they load, and the state is still tried.
@@ -2813,7 +2813,7 @@ describe("starting", () => {
     );
     await expect(t.app.checkDevice()).rejects.toMatchObject({
       read: "state",
-      cause: expect.any(SyntaxError),
+      cause: { name: "SyntaxError" },
     });
     expect(groups.config.groups.size).toBe(0);
 
