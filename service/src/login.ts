@@ -188,7 +188,8 @@ export class Login {
    * kept any record, the newer of the two is kept. A stored value that is
    * not a login never replaces a usable one on the volume, which is written
    * back over it (#123). A write-back that fails here is a warn, and the
-   * next check tries again (#127).
+   * next check tries again (#127). A local failure after the read is an
+   * error under login-restored, not a missing login (#137).
    */
   async restore(): Promise<void> {
     const name = this.#parameter;
@@ -199,6 +200,33 @@ export class Login {
       log.error("login-missing", { parameter: name });
       return;
     }
+    // The parameter was read, so a failure past here is local: a file on
+    // the volume that cannot be read or written, not a missing login (#137).
+    let placed: { keepDisk: boolean; usable: boolean };
+    try {
+      placed = this.#place(value);
+    } catch (error) {
+      log.error("login-restored", { ok: false, ...errorFields(error) });
+      return;
+    }
+    const { keepDisk, usable } = placed;
+    log.info("login-restored", {
+      from: keepDisk ? "volume" : "parameter",
+      usable,
+    });
+    if (!keepDisk) return;
+    // The parameter was read, so a failed write is not a missing login. The
+    // volume's login stays in use, and its digest still differs from the
+    // one kept, so the next check writes it back (#127).
+    try {
+      await this.storeIfRefreshed();
+    } catch (error) {
+      log.warn("login-stored", { ok: false, ...errorFields(error) });
+    }
+  }
+
+  /** restore()'s local half: put the read value, or the volume's newer login, in place. */
+  #place(value: string): { keepDisk: boolean; usable: boolean } {
     const record = readRecord(value);
     const stored = parseCredentials(record.credentials);
     const local = this.#read();
@@ -216,19 +244,7 @@ export class Login {
     if (!keepDisk) this.#write(record.credentials);
     this.#remember(record.credentials);
     this.#configure();
-    log.info("login-restored", {
-      from: keepDisk ? "volume" : "parameter",
-      usable: stored.ok,
-    });
-    if (!keepDisk) return;
-    // The parameter was read, so a failed write is not a missing login. The
-    // volume's login stays in use, and its digest still differs from the
-    // one kept, so the next check writes it back (#127).
-    try {
-      await this.storeIfRefreshed();
-    } catch (error) {
-      log.warn("login-stored", { ok: false, ...errorFields(error) });
-    }
+    return { keepDisk, usable: stored.ok };
   }
 
   get #configPath(): string {
