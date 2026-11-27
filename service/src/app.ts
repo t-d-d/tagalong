@@ -244,25 +244,33 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
    * Each read runs even when the one before it throws: the empty state would
    * otherwise be saved over the seeded state.json. The state is not saved
    * until its file has been read. A read that succeeds is not run again, so
-   * it never undoes what has changed since.
+   * it never undoes what has changed since. When both reads fail, the first
+   * error is thrown and the second is logged, so neither is hidden.
    */
   function readSeeded(): void {
+    const errors: unknown[] = [];
     try {
       if (groupsPending) {
         groups.reload();
         groupsPending = false;
       }
-    } finally {
-      try {
-        if (statePending) {
-          state.reload();
-          statePending = false;
-          state.held = false;
-        }
-      } finally {
-        readPeople();
-      }
+    } catch (error) {
+      errors.push(error);
     }
+    try {
+      if (statePending) {
+        state.reload();
+        statePending = false;
+        state.held = false;
+      }
+    } catch (error) {
+      errors.push(error);
+    }
+    readPeople();
+    const [first, ...rest] = errors;
+    for (const error of rest)
+      log.warn("loop-failed", { loop: "device", ...errorFields(error) });
+    if (errors.length > 0) throw first;
   }
 
   async function checkDevice(): Promise<DeviceState> {
