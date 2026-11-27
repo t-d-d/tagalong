@@ -43,7 +43,7 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
   const store = new WhatsAppStore(env.BRIDGE_STORE);
   const people = new People(store);
   const groups = new GroupsStore(env.GROUPS_FILE, parseOwners(env.OWNERS));
-  const state = new StateStore(env.STATE_FILE);
+  const state = new StateStore(env.STATE_FILE, { held: !store.present() });
   const api = new ClaudeApi(
     env.CLAUDE_API_BASE,
     () => login.accessToken(),
@@ -250,12 +250,14 @@ export function createApp(env: Env, { aws, run, now, platform }: AppDeps) {
       run,
       env: cliEnv(env),
     });
-    if (device === "present") readPeople();
+    if (device === "present") {
+      state.release();
+      readPeople();
+    }
     if (device === "seeded") {
       // Each reload runs even when the one before it throws: every later
       // device check returns early, so nothing else would read the people
-      // for 10 minutes, and the empty state would be saved over the seeded
-      // state.json.
+      // for 10 minutes, and the state would stay held, saving nothing.
       try {
         groups.reload();
       } finally {
