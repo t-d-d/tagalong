@@ -2445,7 +2445,7 @@ describe("starting", () => {
     });
     writeFileSync(t.env.GROUPS_FILE, "not json");
 
-    await expect(t.app.checkDevice()).rejects.toThrow();
+    await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
     expect([...people.self].sort()).toEqual([CLAUDE, CLAUDE_LID].sort());
   });
 
