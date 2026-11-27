@@ -2525,6 +2525,43 @@ describe("starting", () => {
     expect(state.state.replies).toEqual(seeded.replies);
   });
 
+  it("throws the groups error and logs the state error when both seeded reloads fail", async () => {
+    const seed = join(
+      mkdtempSync(join(tmpdir(), "tagalong-seed-")),
+      "device.tgz",
+    );
+    const t = (h = await harness({
+      env: { ATTACHMENTS_BUCKET: "files" },
+      db: (db) => {
+        execFileSync("tar", ["-czf", seed, "-C", db.dir, "store"]);
+        renameSync(
+          join(db.store, "messages.db"),
+          join(db.store, "messages.db.away"),
+        );
+      },
+    }));
+    const { people } = t.app.parts;
+    expect(await t.app.checkDevice()).toBe("waiting");
+    writeFileSync(t.env.GROUPS_FILE, "not json");
+    writeFileSync(t.env.STATE_FILE, "[]");
+    t.aws.objects.set("files/seed/device.tgz", {
+      body: readFileSync(seed),
+      contentType: "application/gzip",
+    });
+
+    await expect(t.app.checkDevice()).rejects.toThrow(SyntaxError);
+    const second = t.lines.filter(
+      (line) => line.event === "loop-failed" && line.loop === "device",
+    );
+    expect(second).toEqual([
+      expect.objectContaining({ level: "warn", error: "ZodError" }),
+    ]);
+    expect(Object.keys(second[0] ?? {}).sort()).toEqual(
+      ["error", "event", "level", "loop", "time"].sort(),
+    );
+    expect([...people.self].sort()).toEqual([CLAUDE, CLAUDE_LID].sort());
+  });
+
   describe("a state save while the device is waiting or being seeded (#139)", () => {
     const seeded = {
       replies: { "answer-1": "session_01SessionAaaaaaaaaaaaaaa" },
