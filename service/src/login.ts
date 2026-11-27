@@ -364,8 +364,42 @@ export class Login {
       });
       return;
     }
+    // A dead login may already have a newer one minted beside it (#105).
+    if (await this.#pickUpMinted()) return;
     log.error("login-dead", {
       why: "the CLI did not refresh the access token",
     });
+  }
+
+  /**
+   * Take the stored login if it parses and expires later than the one on
+   * disk, as restore() does. False when it is the same login, an older one,
+   * or cannot be read. The login the task last restored or wrote back is
+   * the one the CLI just failed on, even when it broke the file, so it is
+   * never taken back.
+   */
+  async #pickUpMinted(): Promise<boolean> {
+    const name = this.#parameter;
+    const aws = this.#deps.aws;
+    if (name === undefined || aws === undefined) return false;
+    let value: string | undefined;
+    try {
+      value = await aws.getSecret(name);
+    } catch (error) {
+      log.warn("login-restored", { ok: false, ...errorFields(error) });
+      return false;
+    }
+    if (value === undefined) return false;
+    const record = readRecord(value);
+    if (record.credentials === this.#stored) return false;
+    const stored = parseCredentials(record.credentials);
+    if (!stored.ok || (stored.expiresAt ?? 0) <= (this.#expiresAt() ?? 0))
+      return false;
+    this.#write(record.credentials);
+    this.#stored = record.credentials;
+    this.#account = record.account;
+    this.#configure();
+    log.info("login-restored", { from: "parameter", usable: true });
+    return true;
   }
 }

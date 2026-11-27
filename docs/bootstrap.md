@@ -21,7 +21,7 @@ From a checkout, after `npm ci`, with AWS credentials for the account:
 node scripts/mint-claude-login.ts --profile <aws profile>
 ```
 
-It signs in under a throwaway folder, stores the login as the SecureString `/tagalong/claude-login`, and removes the folder. Run it again only if an alert says the login is dead.
+It signs in under a throwaway folder, stores the login as the SecureString `/tagalong/claude-login`, and removes the folder. Run it again only if an alert says the login is dead. The running task picks up a new login within 10 minutes, with no restart.
 
 ## 3. GitHub
 

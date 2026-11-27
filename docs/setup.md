@@ -47,7 +47,7 @@ fields @timestamp, level, event, group, session, why
 ## When an alert arrives
 
 - **tagalong-no-heartbeat**: read the last heartbeat's `bridge` field. `waiting-for-device` means no device has been moved yet. `disconnected` or `unreachable` means the bridge cannot reach WhatsApp: read the `bridge/` lines. If they say the device was logged out, pair a new one on a laptop (bootstrap.md, step 5), after removing the old store with ECS Exec: `rm -rf /data/bridge/store`, then restart the task. No lines at all means the task is not running: look at the service's events in the ECS console.
-- **tagalong-error-lines** with `login-dead` or `login-missing`: mint a new login (bootstrap.md, step 2), then restart the task.
+- **tagalong-error-lines** with `login-dead` or `login-missing`: mint a new login (bootstrap.md, step 2). The task picks it up within 10 minutes, with no restart.
 - **tagalong-error-lines** with `request-failed`: a session did not start. The line's `why` says what the launcher reported. Run `probe` on a session that did start to check the login and the environment.
 - **tagalong-spend**: open Cost Explorer. One task should cost about $8 a month.
 
