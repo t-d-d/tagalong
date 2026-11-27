@@ -1,12 +1,10 @@
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -15,6 +13,7 @@ import { eventsOf, logLines } from "../../test/log-lines.ts";
 import { readEnv } from "./env.ts";
 import { Login, SESSION_SCOPE, readRecord, writeRecord } from "./login.ts";
 import type { Runner } from "./run.ts";
+import { tempDir } from "../../test/temp.ts";
 
 const NOW = Date.parse("2026-10-18T17:00:00Z");
 const PARAMETER = "/tagalong/claude-login";
@@ -32,7 +31,7 @@ const credentials = (accessToken: string, expiresAt: number) =>
 
 function setup(
   runner: Runner = () => Promise.resolve({ code: 0, out: "" }),
-  home = mkdtempSync(join(tmpdir(), "tagalong-home-")),
+  home = tempDir("tagalong-home-"),
 ) {
   const env = readEnv({
     HOME: home,
@@ -835,7 +834,7 @@ describe("a write-back held back because Parameter Store refuses reads (#147)", 
 
   it("raises nothing at a restart when the volume holds the login last stored", async () => {
     const { lines } = logLines();
-    const home = mkdtempSync(join(tmpdir(), "tagalong-home-"));
+    const home = tempDir("tagalong-home-");
     const first = setup(undefined, home);
     first.aws.secrets.set(
       PARAMETER,
