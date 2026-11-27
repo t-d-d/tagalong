@@ -2581,7 +2581,7 @@ describe("starting", () => {
       "device.tgz",
     );
     const t = (h = await harness({
-      env: { ATTACHMENTS_BUCKET: "files" },
+      env: { ATTACHMENTS_BUCKET: "files", PORT: "18773" },
       db: (db) => {
         execFileSync("tar", ["-czf", seed, "-C", db.dir, "store"]);
         renameSync(
