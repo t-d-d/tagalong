@@ -155,9 +155,16 @@ describe("a refused login write-back after a CLI run (#135)", () => {
       error: "HttpError",
     });
     fake.followUps.set("01SessionBbbbbbbbbbbbbbb", "archived");
+    const before = lines.length;
     await expect(
       cloud.send("01SessionBbbbbbbbbbbbbbb", "a message"),
     ).resolves.toBe("gone");
+    expect(lines.length).toBeGreaterThan(before);
+    expect(lines.at(-1)).toMatchObject({
+      level: "warn",
+      event: "login-stored",
+      error: "HttpError",
+    });
   });
 
   it("still throws send's own error when the session cannot be reached", async () => {
