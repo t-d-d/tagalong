@@ -207,8 +207,7 @@ export class Login {
         (!minted && (onDisk.expiresAt ?? 0) > (stored.expiresAt ?? 0)));
     // The volume's login keeps the account it was configured with, when
     // the parameter's value is not a login to take one from.
-    this.#account =
-      keepDisk && !stored.ok ? this.#configuredAccount() : record.account;
+    this.#account = keepDisk && !stored.ok ? this.#lookedUp() : record.account;
     if (!keepDisk) this.#write(record.credentials);
     this.#remember(record.credentials);
     this.#configure();
@@ -217,15 +216,6 @@ export class Login {
       usable: stored.ok,
     });
     if (keepDisk) await this.storeIfRefreshed();
-  }
-
-  /** The account ~/.claude.json names, when it names both ids. */
-  #configuredAccount(): Account | undefined {
-    const path = this.#configPath;
-    if (!existsSync(path)) return undefined;
-    const config = configSchema.parse(JSON.parse(readFileSync(path, "utf8")));
-    const parsed = accountSchema.safeParse(config.oauthAccount);
-    return parsed.success ? parsed.data : undefined;
   }
 
   get #configPath(): string {
@@ -284,10 +274,33 @@ export class Login {
     if (env.CLAUDE_CODE_ORGANIZATION_UUID !== undefined)
       return env.CLAUDE_CODE_ORGANIZATION_UUID;
     if (this.#account !== undefined) return this.#account.organizationUuid;
-    const path = join(env.HOME, ".claude.json");
+    return this.#configAccount()?.organizationUuid;
+  }
+
+  /** The account ~/.claude.json holds, as far as the CLI wrote it. */
+  #configAccount(): z.infer<typeof configSchema>["oauthAccount"] {
+    const path = this.#configPath;
     if (!existsSync(path)) return undefined;
     return configSchema.parse(JSON.parse(readFileSync(path, "utf8")))
-      .oauthAccount?.organizationUuid;
+      .oauthAccount;
+  }
+
+  /**
+   * The ids the CLI looked up for a login stored without them, once it has
+   * written both. restore() and #take() drop an earlier login's account
+   * before the CLI runs (#116), so what is there now is this login's (#120).
+   */
+  #lookedUp(): Account | undefined {
+    let config: unknown;
+    try {
+      config = JSON.parse(readFileSync(this.#configPath, "utf8"));
+    } catch {
+      // Missing or half written: nothing to store, and the refresh still
+      // goes back. The next refresh written back looks again.
+      return undefined;
+    }
+    const parsed = z.object({ oauthAccount: accountSchema }).safeParse(config);
+    return parsed.success ? parsed.data.oauthAccount : undefined;
   }
 
   /** The CLI's environment, with the org named so it skips its profile lookup. */
@@ -356,7 +369,9 @@ export class Login {
     }
     const taken = await this.#takeMinted("login-stored");
     if (taken !== "kept") return;
-    await aws.putSecret(name, writeRecord(text, this.#account));
+    const account = this.#account ?? this.#lookedUp();
+    await aws.putSecret(name, writeRecord(text, account));
+    this.#account = account;
     this.#remember(text);
     log.info("login-stored", {
       expiresInMinutes: Math.round(
