@@ -1,36 +1,27 @@
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { fakeAws } from "../../test/fake-aws.ts";
 import { logLines } from "../../test/log-lines.ts";
 import { run } from "./run.ts";
 import { ensureDevice } from "./seed.ts";
+import { tempDir } from "../../test/temp.ts";
 
 /** An upload as scripts/move-device.ts makes one. */
 function archive(files: Record<string, string>): Buffer {
-  const dir = mkdtempSync(join(tmpdir(), "tagalong-seed-src-"));
+  const dir = tempDir("tagalong-seed-src-");
   for (const [name, text] of Object.entries(files)) {
     mkdirSync(join(dir, name, ".."), { recursive: true });
     writeFileSync(join(dir, name), text);
   }
-  const out = join(
-    mkdtempSync(join(tmpdir(), "tagalong-seed-out-")),
-    "device.tgz",
-  );
+  const out = join(tempDir("tagalong-seed-out-"), "device.tgz");
   execFileSync("tar", ["-czf", out, "-C", dir, "."]);
   return readFileSync(out);
 }
 
 function setup() {
-  const data = mkdtempSync(join(tmpdir(), "tagalong-volume-"));
+  const data = tempDir("tagalong-volume-");
   mkdirSync(join(data, "bridge"), { recursive: true });
   const aws = fakeAws();
   const deps = {

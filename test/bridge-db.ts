@@ -1,9 +1,9 @@
 // A bridge store in a temporary folder: messages.db and whatsapp.db with the
 // tables and columns the bridge writes (one-device.md), for the int tier.
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { tempDir } from "./temp.ts";
 
 // Fictional numbers only (no-values.static.ts): Ofcom keeps 07700 900xxx for drama.
 export const OWNER = "447700900001";
@@ -37,7 +37,7 @@ export class BridgeDb {
   readonly #messages: DatabaseSync;
   readonly #device: DatabaseSync;
 
-  constructor(dir = mkdtempSync(join(tmpdir(), "tagalong-store-"))) {
+  constructor(dir = tempDir("tagalong-store-")) {
     this.dir = dir;
     this.store = join(dir, "store");
     mkdirSync(this.store, { recursive: true });

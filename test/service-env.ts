@@ -1,15 +1,15 @@
 // An Env for the int tier: every folder in a temporary directory, every
 // service on loopback.
-import { mkdirSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { type Env, readEnv } from "../service/src/env.ts";
+import { tempDir } from "./temp.ts";
 
 export function serviceEnv(
   store: string,
   extra: Record<string, string> = {},
 ): Env {
-  const root = mkdtempSync(join(tmpdir(), "tagalong-data-"));
+  const root = tempDir("tagalong-data-");
   const home = join(root, "home");
   mkdirSync(home, { recursive: true });
   return readEnv({

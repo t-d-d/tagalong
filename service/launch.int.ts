@@ -1,16 +1,16 @@
 // service/launch.py for real, in a pseudo-terminal, with a stand-in `claude`
 // on PATH that prints what the real one prints (cloud-sessions.md).
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { run } from "./src/run.ts";
+import { tempDir } from "../test/temp.ts";
 
 const launcher = fileURLToPath(new URL("launch.py", import.meta.url));
 
 function stand(script: string) {
-  const bin = mkdtempSync(join(tmpdir(), "tagalong-bin-"));
+  const bin = tempDir("tagalong-bin-");
   const claude = join(bin, "claude");
   writeFileSync(claude, `#!/bin/sh\n${script}\n`);
   chmodSync(claude, 0o755);

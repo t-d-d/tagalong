@@ -1,12 +1,12 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { GROUP, MEMBER, OWNER } from "../../test/bridge-db.ts";
 import { GroupsStore } from "./groups.ts";
 import { StateStore } from "./state.ts";
+import { tempDir } from "../../test/temp.ts";
 
-const folder = () => mkdtempSync(join(tmpdir(), "tagalong-groups-"));
+const folder = () => tempDir("tagalong-groups-");
 
 describe("groups.json on disk", () => {
   it("starts empty, and writes what update returns", () => {

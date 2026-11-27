@@ -2,14 +2,12 @@ import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
@@ -39,6 +37,7 @@ import {
   user,
 } from "../../test/fake-claude-api.ts";
 import { eventsOf } from "../../test/log-lines.ts";
+import { tempDir } from "../../test/temp.ts";
 
 const SESSION = "01SessionAaaaaaaaaaaaaaa";
 const SECOND = "01SessionBbbbbbbbbbbbbbb";
@@ -2461,10 +2460,7 @@ describe("starting", () => {
 
   it("reads the people when the device is seeded, even if the groups cannot be reloaded", async () => {
     // The device arrives from the bucket, as scripts/move-device.ts uploads it.
-    const seed = join(
-      mkdtempSync(join(tmpdir(), "tagalong-seed-")),
-      "device.tgz",
-    );
+    const seed = join(tempDir("tagalong-seed-"), "device.tgz");
     const t = (h = await harness({
       env: { ATTACHMENTS_BUCKET: "files" },
       db: (db) => {
@@ -2493,7 +2489,7 @@ describe("starting", () => {
   it("loads the seeded state.json when the seed's groups.json does not parse", async () => {
     // The seed carries the device, a good state.json and a groups.json that
     // does not parse; the task has neither file yet.
-    const upload = mkdtempSync(join(tmpdir(), "tagalong-seed-"));
+    const upload = tempDir("tagalong-seed-");
     const seed = join(upload, "device.tgz");
     const seeded = { replies: { "answer-1": "session_fake1" } };
     const t = (h = await harness({
@@ -2532,10 +2528,7 @@ describe("starting", () => {
   });
 
   it("throws the groups error and logs the state error when both seeded reloads fail", async () => {
-    const seed = join(
-      mkdtempSync(join(tmpdir(), "tagalong-seed-")),
-      "device.tgz",
-    );
+    const seed = join(tempDir("tagalong-seed-"), "device.tgz");
     const t = (h = await harness({
       env: { ATTACHMENTS_BUCKET: "files" },
       db: (db) => {
@@ -2631,7 +2624,7 @@ describe("starting", () => {
 
     // A task with no device yet, and a seed in hand that carries a state.json.
     async function waitingForSeed(stateJson = JSON.stringify(seeded)) {
-      const upload = mkdtempSync(join(tmpdir(), "tagalong-seed-"));
+      const upload = tempDir("tagalong-seed-");
       const seed = join(upload, "device.tgz");
       const t = (h = await harness({
         env: { ATTACHMENTS_BUCKET: "files" },
@@ -2765,10 +2758,7 @@ describe("starting", () => {
   });
 
   it("reloads the groups and state again on later device checks when they fail as the device is seeded", async () => {
-    const seed = join(
-      mkdtempSync(join(tmpdir(), "tagalong-seed-")),
-      "device.tgz",
-    );
+    const seed = join(tempDir("tagalong-seed-"), "device.tgz");
     const t = (h = await harness({
       env: { ATTACHMENTS_BUCKET: "files" },
       db: (db) => {

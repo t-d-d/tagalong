@@ -3,6 +3,7 @@ import { tierPattern, tiers } from "./test/tiers.ts";
 
 export default defineConfig({
   test: {
+    globalSetup: ["test/temp-root.ts"],
     coverage: {
       provider: "v8",
       include: ["service/src/**/*.ts", "scripts/**/*.ts"],
@@ -15,7 +16,11 @@ export default defineConfig({
         name: tier.name,
         include: [tierPattern(tier)],
         exclude: [...configDefaults.exclude, "**/dist/**"],
-        setupFiles: ["test/offline.ts", "test/quiet-log.ts"],
+        setupFiles: [
+          "test/offline.ts",
+          "test/quiet-log.ts",
+          "test/temp-cleanup.ts",
+        ],
         testTimeout: tier.name === "int" ? 30_000 : 5_000,
       },
     })),
