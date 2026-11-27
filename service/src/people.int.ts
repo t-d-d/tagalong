@@ -1,3 +1,6 @@
+import { type ChildProcess, spawn } from "node:child_process";
+import { once } from "node:events";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   BridgeDb,
@@ -20,11 +23,56 @@ afterEach(() => {
   db = undefined;
 });
 
+/** A python3 process that holds an exclusive lock on `path` for a second, once it says so. */
+async function holdLock(path: string): Promise<ChildProcess> {
+  const holder = spawn("python3", [
+    "-c",
+    [
+      "import sqlite3, sys, time",
+      "db = sqlite3.connect(sys.argv[1], isolation_level=None)",
+      "db.execute('BEGIN EXCLUSIVE')",
+      "print('locked', flush=True)",
+      "time.sleep(1)",
+      "db.execute('COMMIT')",
+    ].join("\n"),
+    path,
+  ]);
+  const [line] = (await once(holder.stdout, "data")) as [Buffer];
+  expect(line.toString().trim()).toBe("locked");
+  return holder;
+}
+
 describe("the bridge's databases", () => {
   it("has no device until both databases are there", () => {
     expect(new WhatsAppStore("/nonexistent").present()).toBe(false);
     db = standardDb(NOW);
     expect(new WhatsAppStore(db.store).present()).toBe(true);
+  });
+
+  it("waits for the bridge's lock on either database instead of failing the read", async () => {
+    db = standardDb(NOW).message({
+      id: "m1",
+      sender: OWNER,
+      content: "first",
+      at: NOW - 1000,
+    });
+    const store = db.store;
+    const waits = async (file: string, read: () => unknown) => {
+      const holder = await holdLock(join(store, file));
+      const started = Date.now();
+      const rows = read();
+      expect(Date.now() - started).toBeGreaterThan(500);
+      await once(holder, "exit");
+      return rows;
+    };
+    const names = await waits("whatsapp.db", () =>
+      new WhatsAppStore(store).contacts().map((row) => row.name),
+    );
+    expect(names).toContain("Thomas Example");
+    const ids = await waits("messages.db", () =>
+      new WhatsAppStore(store).recent(GROUP, 10).map((row) => row.id),
+    );
+    expect(ids).toEqual(["m1"]);
   });
 
   it("reads chats and messages, oldest first, without reactions or deleted ones", () => {
