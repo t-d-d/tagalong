@@ -117,6 +117,29 @@ describe("restoring the login", () => {
     expect(login.orgUuid()).toBeUndefined();
   });
 
+  it("forgets the previous org when it keeps a newer login from the volume", async () => {
+    const { aws, login, file, home } = setup();
+    writeFileSync(
+      join(home, ".claude.json"),
+      JSON.stringify({ oauthAccount: account, hasCompletedOnboarding: true }),
+    );
+    aws.secrets.set(
+      PARAMETER,
+      writeRecord(credentials("stored", NOW + 1000), undefined),
+    );
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, credentials("newer", NOW + 7_200_000));
+    await login.restore();
+    expect(readFileSync(file, "utf8")).toBe(
+      credentials("newer", NOW + 7_200_000),
+    );
+    const config: unknown = JSON.parse(
+      readFileSync(join(home, ".claude.json"), "utf8"),
+    );
+    expect(config).not.toHaveProperty("oauthAccount");
+    expect(login.orgUuid()).toBeUndefined();
+  });
+
   it("says loudly when there is no stored login", async () => {
     const { lines } = logLines();
     const { login, file } = setup();
