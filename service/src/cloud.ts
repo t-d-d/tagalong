@@ -16,7 +16,7 @@ import { z } from "zod";
 import type { Env } from "./env.ts";
 import { lastSession, oneLine, stripAnsi } from "./format.ts";
 import { ACCESS, type Claude } from "./groups.ts";
-import { CommandError } from "./log.ts";
+import { CommandError, errorFields, log } from "./log.ts";
 import type { Login } from "./login.ts";
 import type { Runner } from "./run.ts";
 
@@ -120,7 +120,7 @@ export class Cloud {
       return id;
     } finally {
       rmSync(dir, { recursive: true, force: true });
-      await this.#login.storeIfRefreshed();
+      await this.#storeLogin();
     }
   }
 
@@ -147,7 +147,20 @@ export class Cloud {
         `could not reach the session (exit ${String(code)})`,
       );
     } finally {
+      await this.#storeLogin();
+    }
+  }
+
+  /**
+   * Write back a login the CLI refreshed. A refused write is a warn, and the
+   * next keepFresh() writes it back: thrown from a `finally`, it would hide
+   * the session the run started, or the run's own error (#135).
+   */
+  async #storeLogin(): Promise<void> {
+    try {
       await this.#login.storeIfRefreshed();
+    } catch (error) {
+      log.warn("login-stored", { ok: false, ...errorFields(error) });
     }
   }
 }
