@@ -53,6 +53,18 @@ describe("fitness: three alarms, all to the owner (alerting.md)", () => {
     });
   });
 
+  it("emails once when error lines start and once when they stop (#104)", () => {
+    expect(
+      alarms().find((alarm) => alarm.MetricName === "ErrorLines"),
+    ).toMatchObject({
+      Period: 60,
+      EvaluationPeriods: 15,
+      DatapointsToAlarm: 1,
+      TreatMissingData: "notBreaching",
+      OKActions: [{ Ref: "AlertTopic" }],
+    });
+  });
+
   it("counts only heartbeats with the bridge connected, and treats silence as an alarm", () => {
     const filter = filters().find(
       (found) =>

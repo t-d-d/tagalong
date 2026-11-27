@@ -77,12 +77,18 @@ Resources:
       Namespace: tagalong
       MetricName: ErrorLines
       Statistic: Sum
+      # Any error line in the last 15 minutes holds the alarm, so a
+      # repeating fault emails once when it starts and once when it stops
+      # (alerting.md, #104).
       Period: 60
-      EvaluationPeriods: 1
+      EvaluationPeriods: 15
+      DatapointsToAlarm: 1
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
         - !Ref AlertTopic
 
   # A heartbeat whose bridge is connected, every five minutes (alerting.md).
